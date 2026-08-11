@@ -1,0 +1,117 @@
+THIRD-PARTY OPEN SOURCE NOTICES
+
+BanchoXterm includes the following open-source components. We are grateful
+to the developers of these projects for making their work available.
+
+
+---
+1. Qt 6
+---
+
+Website: https://www.qt.io
+Copyright (C) 2025 The Qt Company Ltd. and other contributors.
+License: GNU Lesser General Public License v3.0 (LGPLv3)
+
+Modules used: QtCore, QtGui, QtWidgets, QtNetwork
+
+The Qt toolkit is used under the terms of the GNU Lesser General Public
+License version 3. The full license text is available at:
+https://www.gnu.org/licenses/lgpl-3.0.html
+
+Source code for the Qt libraries can be obtained from:
+https://code.qt.io/cgit/qt/qtbase.git/
+
+Pursuant to LGPLv3 section 4, BanchoXterm dynamically links against the
+Qt shared libraries. You may replace these libraries with your own
+modified versions. Instructions for doing so are available at:
+https://wiki.qt.io/Building_Qt_6_from_Git
+
+
+---
+2. QTermWidget 6
+---
+
+Website: https://github.com/lxqt/qtermwidget
+Copyright (C) 2002-2007 Oswald Buddenhagen <ossi@kde.org>
+Copyright (C) 2006-2008 Robert Knight <robertknight@gmail.com>
+Copyright (C) 2010 KDE e.V. <kde-ev-board@kde.org>
+Copyright (C) 2022 Francesc Martinez <info@francescmm.com>
+and other contributors.
+
+License: GNU Lesser General Public License v2 or later (LGPL-2+)
+
+The core QTermWidget library files are licensed under LGPL-2+. The full
+license text is available at:
+https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+Source code can be obtained from:
+https://github.com/lxqt/qtermwidget
+
+Pursuant to LGPL-2+ section 6, BanchoXterm dynamically links against the
+QTermWidget shared library. You may replace this library with your own
+modified version.
+
+
+---
+3. libssh2
+---
+
+Website: https://www.libssh2.org
+Copyright (C) 2004-2007 Sara Golemon <sarag@libssh2.org>
+Copyright (C) 2005-2006 Mikhail Gusarov <dottedmag@dottedmag.net>
+Copyright (C) 2006-2007 The Written Word, Inc.
+Copyright (C) 2007 Eli Fant <elifantu@mail.ru>
+Copyright (C) 2009-2023 Daniel Stenberg
+Copyright (C) 2008-2009 Simon Josefsson
+Copyright (C) 2000 Markus Friedl
+Copyright (C) 2015 Microsoft Corp.
+All rights reserved.
+
+License: BSD 3-Clause
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+
+---
+4. Lucide Icons (used in icons/)
+---
+
+Website: https://lucide.dev
+Copyright (c) Lucide Contributors
+License: ISC License
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
