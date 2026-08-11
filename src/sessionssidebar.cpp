@@ -50,21 +50,34 @@ void SessionsSidebar::loadSessions() {
         item->setText(session.name);
         item->setData(Qt::UserRole, session.id);
 
-        if (session.type == SessionType::SSH) {
+        switch (session.type) {
+        case SessionType::SSH:
             item->setIcon(QIcon(":/icons/server.svg"));
             item->setToolTip(QString("%1@%2:%3").arg(session.user, session.host).arg(session.port));
-        } else if (session.type == SessionType::Telnet) {
+            break;
+        case SessionType::Telnet:
             item->setIcon(QIcon(":/icons/telnet.svg"));
             item->setToolTip(QString("telnet://%1:%2").arg(session.host).arg(session.port));
-        } else if (session.type == SessionType::Serial) {
+            break;
+        case SessionType::RDP:
+            item->setIcon(QIcon(":/icons/rdp.svg"));
+            item->setToolTip(QString("rdp://%1:%2").arg(session.host).arg(session.port));
+            break;
+        case SessionType::VNC:
+            item->setIcon(QIcon(":/icons/vnc.svg"));
+            item->setToolTip(QString("vnc://%1:%2").arg(session.host).arg(session.port));
+            break;
+        case SessionType::Serial:
             item->setIcon(QIcon(":/icons/serial.svg"));
             item->setToolTip(QString("serial://%1 (%2 baud via %3)")
                                  .arg(session.serialPort)
                                  .arg(session.baudRate)
                                  .arg(session.serialCmd));
-        } else {
+            break;
+        default:
             item->setIcon(QIcon(":/icons/terminal.svg"));
             item->setToolTip(session.shellPath);
+            break;
         }
         m_listWidget->addItem(item);
     }

@@ -3,27 +3,27 @@
 #include <QJsonObject>
 #include <QList>
 
-enum class SessionType { SSH, Local, Telnet, Serial };
+enum class SessionType { SSH, Local, Telnet, Serial, RDP, VNC };
 
 struct Session {
     QString id;
     QString name;
     SessionType type;
 
-    // SSH / Telnet specific
+    // SSH / Telnet / RDP / VNC
     QString host;
     QString user;
-    int port = 22; // For SSH (22) or Telnet (23)
+    int port = 22;
     QString keyPath;
-    bool x11Forwarding = false; // SSH only
+    bool x11Forwarding = false;
 
-    // Local specific
+    // Local
     QString shellPath;
 
-    // Serial specific
+    // Serial
     QString serialPort;
     int baudRate = 115200;
-    QString serialCmd; // "picocom", "screen", "minicom"
+    QString serialCmd;
 
     QJsonObject toJson() const;
     static Session fromJson(const QJsonObject& json);

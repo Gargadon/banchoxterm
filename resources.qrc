@@ -16,6 +16,8 @@
     <file>icons/edit.svg</file>
     <file>icons/telnet.svg</file>
     <file>icons/serial.svg</file>
+    <file>icons/rdp.svg</file>
+    <file>icons/vnc.svg</file>
     <file>icons/gear.svg</file>
     <file>icons/chevron-right.svg</file>
     <file>icons/chevron-down.svg</file>

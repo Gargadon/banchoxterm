@@ -6,20 +6,42 @@
 #include <QJsonArray>
 #include <QUuid>
 
+static QString sessionTypeToString(SessionType type) {
+    switch (type) {
+    case SessionType::SSH:
+        return "ssh";
+    case SessionType::Telnet:
+        return "telnet";
+    case SessionType::Serial:
+        return "serial";
+    case SessionType::RDP:
+        return "rdp";
+    case SessionType::VNC:
+        return "vnc";
+    default:
+        return "local";
+    }
+}
+
+static SessionType sessionTypeFromString(const QString& s) {
+    if (s == "ssh")
+        return SessionType::SSH;
+    if (s == "telnet")
+        return SessionType::Telnet;
+    if (s == "serial")
+        return SessionType::Serial;
+    if (s == "rdp")
+        return SessionType::RDP;
+    if (s == "vnc")
+        return SessionType::VNC;
+    return SessionType::Local;
+}
+
 QJsonObject Session::toJson() const {
     QJsonObject json;
     json["id"] = id;
     json["name"] = name;
-
-    QString typeStr = "local";
-    if (type == SessionType::SSH)
-        typeStr = "ssh";
-    else if (type == SessionType::Telnet)
-        typeStr = "telnet";
-    else if (type == SessionType::Serial)
-        typeStr = "serial";
-
-    json["type"] = typeStr;
+    json["type"] = sessionTypeToString(type);
     json["host"] = host;
     json["user"] = user;
     json["port"] = port;
@@ -39,17 +61,7 @@ Session Session::fromJson(const QJsonObject& json) {
         s.id = QUuid::createUuid().toString();
     }
     s.name = json["name"].toString();
-
-    QString typeStr = json["type"].toString();
-    if (typeStr == "ssh")
-        s.type = SessionType::SSH;
-    else if (typeStr == "telnet")
-        s.type = SessionType::Telnet;
-    else if (typeStr == "serial")
-        s.type = SessionType::Serial;
-    else
-        s.type = SessionType::Local;
-
+    s.type = sessionTypeFromString(json["type"].toString());
     s.host = json["host"].toString();
     s.user = json["user"].toString();
     s.port = json["port"].toInt(22);
@@ -73,7 +85,6 @@ QList<Session> SessionManager::loadSessions() {
     QString path = getFilePath();
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        // Return default sessions (Local Shell) if file doesn't exist
         Session local;
         local.id = QUuid::createUuid().toString();
         local.name = "Local Terminal";

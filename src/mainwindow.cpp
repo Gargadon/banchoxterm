@@ -254,6 +254,10 @@ void MainWindow::onConnectSession(const Session& session) {
         switchSidebarTab(1); // Switch sidebar to SFTP files
     } else if (session.type == SessionType::Telnet) {
         m_tabWidget->setTabIcon(index, QIcon(":/icons/telnet.svg"));
+    } else if (session.type == SessionType::RDP) {
+        m_tabWidget->setTabIcon(index, QIcon(":/icons/rdp.svg"));
+    } else if (session.type == SessionType::VNC) {
+        m_tabWidget->setTabIcon(index, QIcon(":/icons/vnc.svg"));
     } else if (session.type == SessionType::Serial) {
         m_tabWidget->setTabIcon(index, QIcon(":/icons/serial.svg"));
     } else {

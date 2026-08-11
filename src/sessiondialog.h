@@ -25,7 +25,7 @@ private:
     QComboBox* m_typeCombo;
     QStackedWidget* m_stackedWidget;
 
-    // SSH Widgets
+    // SSH
     QLineEdit* m_hostEdit;
     QSpinBox* m_portSpin;
     QLineEdit* m_userEdit;
@@ -34,14 +34,23 @@ private:
     QCheckBox* m_x11ForwardCheck;
     QLineEdit* m_keyEdit;
 
-    // Local Widgets
+    // Local
     QLineEdit* m_shellEdit;
 
-    // Telnet Widgets
+    // Telnet
     QLineEdit* m_telnetHostEdit;
     QSpinBox* m_telnetPortSpin;
 
-    // Serial Widgets
+    // RDP
+    QLineEdit* m_rdpHostEdit;
+    QSpinBox* m_rdpPortSpin;
+    QLineEdit* m_rdpUserEdit;
+
+    // VNC
+    QLineEdit* m_vncHostEdit;
+    QSpinBox* m_vncPortSpin;
+
+    // Serial
     QLineEdit* m_serialPortEdit;
     QComboBox* m_serialBaudCombo;
     QComboBox* m_serialCmdCombo;

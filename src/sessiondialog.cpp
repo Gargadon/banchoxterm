@@ -33,19 +33,19 @@ void SessionDialog::setupUi() {
     mainLayout->setContentsMargins(20, 20, 20, 20);
     mainLayout->setSpacing(15);
 
-    // Session Type
     auto* typeLayout = new QHBoxLayout();
     auto* typeLabel = new QLabel(tr("Session Type:"), this);
     m_typeCombo = new QComboBox(this);
     m_typeCombo->addItem(tr("SSH Session"), static_cast<int>(SessionType::SSH));
     m_typeCombo->addItem(tr("Local Terminal"), static_cast<int>(SessionType::Local));
     m_typeCombo->addItem(tr("Telnet Session"), static_cast<int>(SessionType::Telnet));
+    m_typeCombo->addItem(tr("RDP Session"), static_cast<int>(SessionType::RDP));
+    m_typeCombo->addItem(tr("VNC Session"), static_cast<int>(SessionType::VNC));
     m_typeCombo->addItem(tr("Serial Connection"), static_cast<int>(SessionType::Serial));
     typeLayout->addWidget(typeLabel);
     typeLayout->addWidget(m_typeCombo);
     mainLayout->addLayout(typeLayout);
 
-    // Session Name
     auto* nameLayout = new QHBoxLayout();
     auto* nameLabel = new QLabel(tr("Session Name:"), this);
     m_nameEdit = new QLineEdit(this);
@@ -54,10 +54,9 @@ void SessionDialog::setupUi() {
     nameLayout->addWidget(m_nameEdit);
     mainLayout->addLayout(nameLayout);
 
-    // Stacked Widget for SSH vs Local settings
     m_stackedWidget = new QStackedWidget(this);
 
-    // SSH Widget
+    // ── SSH page ──
     auto* sshWidget = new QWidget(this);
     auto* sshForm = new QFormLayout(sshWidget);
     sshForm->setContentsMargins(0, 10, 0, 10);
@@ -87,7 +86,6 @@ void SessionDialog::setupUi() {
     m_x11ForwardCheck = new QCheckBox(tr("Enable X11 Forwarding (-Y)"), sshWidget);
     sshForm->addRow("", m_x11ForwardCheck);
 
-    // Key file SSH option
     auto* keyLayout = new QHBoxLayout();
     m_keyEdit = new QLineEdit(sshWidget);
     m_keyEdit->setPlaceholderText(tr("Optional (uses agent if empty)"));
@@ -96,9 +94,9 @@ void SessionDialog::setupUi() {
     keyLayout->addWidget(keyBrowseBtn);
     sshForm->addRow(tr("Private Key:"), keyLayout);
 
-    m_stackedWidget->addWidget(sshWidget);
+    m_stackedWidget->addWidget(sshWidget); // index 0
 
-    // Local Widget
+    // ── Local page ──
     auto* localWidget = new QWidget(this);
     auto* localForm = new QFormLayout(localWidget);
     localForm->setContentsMargins(0, 10, 0, 10);
@@ -112,9 +110,9 @@ void SessionDialog::setupUi() {
 #endif
     localForm->addRow(tr("Shell Path:"), m_shellEdit);
 
-    m_stackedWidget->addWidget(localWidget);
+    m_stackedWidget->addWidget(localWidget); // index 1
 
-    // Telnet Widget
+    // ── Telnet page ──
     auto* telnetWidget = new QWidget(this);
     auto* telnetForm = new QFormLayout(telnetWidget);
     telnetForm->setContentsMargins(0, 10, 0, 10);
@@ -129,9 +127,47 @@ void SessionDialog::setupUi() {
     m_telnetPortSpin->setValue(23);
     telnetForm->addRow(tr("Port:"), m_telnetPortSpin);
 
-    m_stackedWidget->addWidget(telnetWidget);
+    m_stackedWidget->addWidget(telnetWidget); // index 2
 
-    // Serial Widget
+    // ── RDP page ──
+    auto* rdpWidget = new QWidget(this);
+    auto* rdpForm = new QFormLayout(rdpWidget);
+    rdpForm->setContentsMargins(0, 10, 0, 10);
+    rdpForm->setSpacing(10);
+
+    m_rdpHostEdit = new QLineEdit(rdpWidget);
+    m_rdpHostEdit->setPlaceholderText("192.168.1.100 or example.com");
+    rdpForm->addRow(tr("Host / IP:"), m_rdpHostEdit);
+
+    m_rdpPortSpin = new QSpinBox(rdpWidget);
+    m_rdpPortSpin->setRange(1, 65535);
+    m_rdpPortSpin->setValue(3389);
+    rdpForm->addRow(tr("Port:"), m_rdpPortSpin);
+
+    m_rdpUserEdit = new QLineEdit(rdpWidget);
+    m_rdpUserEdit->setPlaceholderText("Administrator / username");
+    rdpForm->addRow(tr("Username:"), m_rdpUserEdit);
+
+    m_stackedWidget->addWidget(rdpWidget); // index 3
+
+    // ── VNC page ──
+    auto* vncWidget = new QWidget(this);
+    auto* vncForm = new QFormLayout(vncWidget);
+    vncForm->setContentsMargins(0, 10, 0, 10);
+    vncForm->setSpacing(10);
+
+    m_vncHostEdit = new QLineEdit(vncWidget);
+    m_vncHostEdit->setPlaceholderText("192.168.1.100 or example.com");
+    vncForm->addRow(tr("Host / IP:"), m_vncHostEdit);
+
+    m_vncPortSpin = new QSpinBox(vncWidget);
+    m_vncPortSpin->setRange(1, 65535);
+    m_vncPortSpin->setValue(5900);
+    vncForm->addRow(tr("Port:"), m_vncPortSpin);
+
+    m_stackedWidget->addWidget(vncWidget); // index 4
+
+    // ── Serial page ──
     auto* serialWidget = new QWidget(this);
     auto* serialForm = new QFormLayout(serialWidget);
     serialForm->setContentsMargins(0, 10, 0, 10);
@@ -150,15 +186,13 @@ void SessionDialog::setupUi() {
     m_serialCmdCombo->addItems({"picocom", "screen", "minicom"});
     serialForm->addRow(tr("Serial Tool:"), m_serialCmdCombo);
 
-    m_stackedWidget->addWidget(serialWidget);
+    m_stackedWidget->addWidget(serialWidget); // index 5
 
     mainLayout->addWidget(m_stackedWidget);
 
-    // Connect combobox switch
     connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this](int index) { m_stackedWidget->setCurrentIndex(index); });
 
-    // Connect browse button
     connect(keyBrowseBtn, &QPushButton::clicked, this, [this]() {
         QString path =
             QFileDialog::getOpenFileName(this, tr("Select Private Key"), QDir::homePath(), tr("All Files (*)"));
@@ -167,7 +201,6 @@ void SessionDialog::setupUi() {
         }
     });
 
-    // Action buttons
     auto* btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
     auto* cancelBtn = new QPushButton(tr("Cancel"), this);
@@ -184,7 +217,9 @@ void SessionDialog::setupUi() {
 
 void SessionDialog::loadSession(const Session& session) {
     m_nameEdit->setText(session.name);
-    if (session.type == SessionType::SSH) {
+
+    switch (session.type) {
+    case SessionType::SSH:
         m_typeCombo->setCurrentIndex(0);
         m_hostEdit->setText(session.host);
         m_portSpin->setValue(session.port);
@@ -192,23 +227,40 @@ void SessionDialog::loadSession(const Session& session) {
         m_keyEdit->setText(session.keyPath);
         m_x11ForwardCheck->setChecked(session.x11Forwarding);
 
-        QString password = Keyring::lookupPassword(session.id);
-        if (!password.isEmpty()) {
-            m_passwordEdit->setText(password);
-            m_savePasswordCheck->setChecked(true);
+        {
+            QString password = Keyring::lookupPassword(session.id);
+            if (!password.isEmpty()) {
+                m_passwordEdit->setText(password);
+                m_savePasswordCheck->setChecked(true);
+            }
         }
-    } else if (session.type == SessionType::Local) {
+        break;
+    case SessionType::Local:
         m_typeCombo->setCurrentIndex(1);
         m_shellEdit->setText(session.shellPath);
-    } else if (session.type == SessionType::Telnet) {
+        break;
+    case SessionType::Telnet:
         m_typeCombo->setCurrentIndex(2);
         m_telnetHostEdit->setText(session.host);
         m_telnetPortSpin->setValue(session.port);
-    } else if (session.type == SessionType::Serial) {
+        break;
+    case SessionType::RDP:
         m_typeCombo->setCurrentIndex(3);
+        m_rdpHostEdit->setText(session.host);
+        m_rdpPortSpin->setValue(session.port > 0 ? session.port : 3389);
+        m_rdpUserEdit->setText(session.user);
+        break;
+    case SessionType::VNC:
+        m_typeCombo->setCurrentIndex(4);
+        m_vncHostEdit->setText(session.host);
+        m_vncPortSpin->setValue(session.port > 0 ? session.port : 5900);
+        break;
+    case SessionType::Serial:
+        m_typeCombo->setCurrentIndex(5);
         m_serialPortEdit->setText(session.serialPort);
         m_serialBaudCombo->setCurrentText(QString::number(session.baudRate));
         m_serialCmdCombo->setCurrentText(session.serialCmd);
+        break;
     }
 }
 
@@ -219,35 +271,63 @@ Session SessionDialog::getSession() const {
 
     int index = m_typeCombo->currentIndex();
     if (s.name.isEmpty()) {
-        if (index == 0)
+        switch (index) {
+        case 0:
             s.name = QString("SSH: %1").arg(m_hostEdit->text());
-        else if (index == 1)
+            break;
+        case 1:
             s.name = tr("Local Shell");
-        else if (index == 2)
+            break;
+        case 2:
             s.name = QString("Telnet: %1").arg(m_telnetHostEdit->text());
-        else if (index == 3)
+            break;
+        case 3:
+            s.name = QString("RDP: %1").arg(m_rdpHostEdit->text());
+            break;
+        case 4:
+            s.name = QString("VNC: %1").arg(m_vncHostEdit->text());
+            break;
+        case 5:
             s.name = QString("Serial: %1").arg(m_serialPortEdit->text());
+            break;
+        }
     }
 
-    if (index == 0) {
+    switch (index) {
+    case 0:
         s.type = SessionType::SSH;
         s.host = m_hostEdit->text().trimmed();
         s.port = m_portSpin->value();
         s.user = m_userEdit->text().trimmed();
         s.keyPath = m_keyEdit->text().trimmed();
         s.x11Forwarding = m_x11ForwardCheck->isChecked();
-    } else if (index == 1) {
+        break;
+    case 1:
         s.type = SessionType::Local;
         s.shellPath = m_shellEdit->text().trimmed();
-    } else if (index == 2) {
+        break;
+    case 2:
         s.type = SessionType::Telnet;
         s.host = m_telnetHostEdit->text().trimmed();
         s.port = m_telnetPortSpin->value();
-    } else if (index == 3) {
+        break;
+    case 3:
+        s.type = SessionType::RDP;
+        s.host = m_rdpHostEdit->text().trimmed();
+        s.port = m_rdpPortSpin->value();
+        s.user = m_rdpUserEdit->text().trimmed();
+        break;
+    case 4:
+        s.type = SessionType::VNC;
+        s.host = m_vncHostEdit->text().trimmed();
+        s.port = m_vncPortSpin->value();
+        break;
+    case 5:
         s.type = SessionType::Serial;
         s.serialPort = m_serialPortEdit->text().trimmed();
         s.baudRate = m_serialBaudCombo->currentText().toInt();
         s.serialCmd = m_serialCmdCombo->currentText();
+        break;
     }
     return s;
 }
