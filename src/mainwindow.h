@@ -10,6 +10,7 @@ class QFrame;
 class QSplitter;
 class QComboBox;
 class QLabel;
+class QAction;
 class SessionsSidebar;
 class SftpSidebar;
 class TerminalTab;
@@ -35,9 +36,14 @@ private slots:
     void onSendMultiInput();
     void onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
 
+    void onCopy();
+    void onPaste();
+
 private:
     void setupUi();
+    void setupMenuBar();
     void applyTheme(bool dark);
+    TerminalTab* currentTerminalTab() const;
 
     QSplitter* m_mainSplitter;
     QFrame* m_sidebarContainer;
@@ -53,6 +59,9 @@ private:
     QWidget* m_multiInputBar;
     QComboBox* m_multiInputEdit;
     QLabel* m_remoteMonitorLabel;
+
+    QAction* m_copyAction;
+    QAction* m_pasteAction;
 
     bool m_isDarkTheme = true;
 };

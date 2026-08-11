@@ -20,6 +20,7 @@
 #include <QStyle>
 #include <QToolBar>
 #include <QMenuBar>
+#include <QAction>
 #include <QStatusBar>
 #include <QFontDialog>
 #include <QSettings>
@@ -104,6 +105,8 @@ void MainWindow::setupUi() {
     titleLabel->setStyleSheet("font-weight: 900; font-size: 15px; color: #7aa2f7; letter-spacing: 2px;");
     headerLayout->addWidget(titleLabel);
     headerLayout->addSpacing(20);
+
+    setupMenuBar();
 
     headerLayout->addStretch();
 
@@ -423,4 +426,63 @@ void MainWindow::onRemoteStatsUpdated(double cpu, double mem, double disk, doubl
 
     m_remoteMonitorLabel->setText(statsText);
     m_remoteMonitorLabel->setVisible(true);
+}
+
+void MainWindow::setupMenuBar() {
+    auto* fileMenu = menuBar()->addMenu(tr("&File"));
+
+    auto* newTabAction = fileMenu->addAction(tr("&New Remote Session..."));
+    connect(newTabAction, &QAction::triggered, this, [this]() {
+        SessionDialog dialog(this);
+        if (dialog.exec() == QDialog::Accepted) {
+            onConnectSession(dialog.getSession());
+        }
+    });
+
+    fileMenu->addSeparator();
+
+    auto* exitAction = fileMenu->addAction(tr("E&xit"));
+    exitAction->setShortcut(QKeySequence::Quit);
+    connect(exitAction, &QAction::triggered, this, &QWidget::close);
+
+    auto* editMenu = menuBar()->addMenu(tr("&Edit"));
+
+    m_copyAction = editMenu->addAction(tr("&Copy"));
+    m_copyAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+    connect(m_copyAction, &QAction::triggered, this, &MainWindow::onCopy);
+
+    m_pasteAction = editMenu->addAction(tr("&Paste"));
+    m_pasteAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+    connect(m_pasteAction, &QAction::triggered, this, &MainWindow::onPaste);
+
+    editMenu->addSeparator();
+
+    auto* clearAction = editMenu->addAction(tr("Clear Scrollback"));
+    connect(clearAction, &QAction::triggered, this, [this]() {
+        auto* tab = currentTerminalTab();
+        if (tab && tab->getTerminalWidget()) {
+            tab->getTerminalWidget()->clear();
+        }
+    });
+}
+
+TerminalTab* MainWindow::currentTerminalTab() const {
+    int idx = m_tabWidget->currentIndex();
+    if (idx < 0)
+        return nullptr;
+    return qobject_cast<TerminalTab*>(m_tabWidget->widget(idx));
+}
+
+void MainWindow::onCopy() {
+    auto* tab = currentTerminalTab();
+    if (tab && tab->getTerminalWidget()) {
+        tab->getTerminalWidget()->copyClipboard();
+    }
+}
+
+void MainWindow::onPaste() {
+    auto* tab = currentTerminalTab();
+    if (tab && tab->getTerminalWidget()) {
+        tab->getTerminalWidget()->pasteClipboard();
+    }
 }

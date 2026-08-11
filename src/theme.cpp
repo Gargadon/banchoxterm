@@ -236,6 +236,50 @@ QString getDarkTheme() {
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
             width: 0px;
         }
+
+        /* Menus */
+        QMenuBar {
+            background-color: #16161e;
+            border-bottom: 1px solid #24283b;
+            padding: 2px 0;
+        }
+        QMenuBar::item {
+            padding: 4px 10px;
+            border-radius: 4px;
+            margin: 2px 1px;
+        }
+        QMenuBar::item:selected {
+            background-color: rgba(122, 162, 247, 0.15);
+            color: #7aa2f7;
+        }
+        QMenu {
+            background-color: #1a1b26;
+            border: 1px solid #24283b;
+            border-radius: 8px;
+            padding: 4px;
+        }
+        QMenu::item {
+            padding: 6px 28px 6px 12px;
+            border-radius: 4px;
+            margin: 1px 2px;
+        }
+        QMenu::item:selected {
+            background-color: rgba(122, 162, 247, 0.2);
+            color: #7aa2f7;
+        }
+        QMenu::item:disabled {
+            color: #565f89;
+        }
+        QMenu::separator {
+            height: 1px;
+            background-color: #24283b;
+            margin: 4px 8px;
+        }
+        QMenu::indicator {
+            width: 14px;
+            height: 14px;
+            margin-left: 4px;
+        }
     )QSS";
 }
 
@@ -466,6 +510,50 @@ QString getLightTheme() {
         }
         QScrollBar::handle:horizontal:hover {
             background: #bbb;
+        }
+
+        /* Menus */
+        QMenuBar {
+            background-color: #eaedf3;
+            border-bottom: 1px solid #d0d7de;
+            padding: 2px 0;
+        }
+        QMenuBar::item {
+            padding: 4px 10px;
+            border-radius: 4px;
+            margin: 2px 1px;
+        }
+        QMenuBar::item:selected {
+            background-color: rgba(30, 144, 255, 0.12);
+            color: #1e90ff;
+        }
+        QMenu {
+            background-color: #ffffff;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 4px;
+        }
+        QMenu::item {
+            padding: 6px 28px 6px 12px;
+            border-radius: 4px;
+            margin: 1px 2px;
+        }
+        QMenu::item:selected {
+            background-color: rgba(30, 144, 255, 0.12);
+            color: #1e90ff;
+        }
+        QMenu::item:disabled {
+            color: #999999;
+        }
+        QMenu::separator {
+            height: 1px;
+            background-color: #e0e0e0;
+            margin: 4px 8px;
+        }
+        QMenu::indicator {
+            width: 14px;
+            height: 14px;
+            margin-left: 4px;
         }
     )QSS";
 }
