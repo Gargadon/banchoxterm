@@ -56,7 +56,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 #endif
 
             QStringList args;
-            args << "-p" << QString::number(m_session.port);
+            args << "-t" << "-p" << QString::number(m_session.port);
 
             if (m_session.x11Forwarding) {
                 args << "-Y";
@@ -69,14 +69,26 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             args << QString("%1@%2").arg(m_session.user, m_session.host);
             m_terminal->setArgs(args);
 
+            QStringList env = QProcess::systemEnvironment();
+            bool hasTerm = false;
+            for (const QString& e : env) {
+                if (e.startsWith("TERM=")) {
+                    hasTerm = true;
+                    break;
+                }
+            }
+            if (!hasTerm) {
+                env << "TERM=xterm-256color";
+            }
+
             QString password = Keyring::lookupPassword(m_session.id);
             if (!password.isEmpty()) {
-                QStringList env = QProcess::systemEnvironment();
                 env << QString("SSH_ASKPASS=%1").arg(QCoreApplication::applicationFilePath());
                 env << "SSH_ASKPASS_REQUIRE=force";
                 env << QString("BANCHOXTERM_ASKPASS_ID=%1").arg(m_session.id);
-                m_terminal->setEnvironment(env);
             }
+
+            m_terminal->setEnvironment(env);
         } else if (m_session.type == SessionType::Telnet) {
 #ifdef Q_OS_WIN
             m_terminal->setShellProgram("telnet");
