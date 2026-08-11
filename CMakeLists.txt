@@ -62,6 +62,10 @@ target_link_libraries(banchoxterm
         PkgConfig::LIBSSH2
 )
 
+if(WIN32)
+    target_link_libraries(banchoxterm PRIVATE advapi32)
+endif()
+
 # ── Tests ──────────────────────────────────────────────────────────
 
 enable_testing()

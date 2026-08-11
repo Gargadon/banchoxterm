@@ -34,13 +34,17 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 
     // Configure program and arguments
     if (m_session.type == SessionType::SSH) {
+#ifdef Q_OS_WIN
+        m_terminal->setShellProgram("ssh");
+#else
         m_terminal->setShellProgram("/usr/bin/ssh");
+#endif
 
         QStringList args;
         args << "-p" << QString::number(m_session.port);
 
         if (m_session.x11Forwarding) {
-            args << "-Y"; // Trusted X11 Forwarding
+            args << "-Y";
         }
 
         if (!m_session.keyPath.isEmpty()) {
@@ -50,7 +54,6 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         args << QString("%1@%2").arg(m_session.user, m_session.host);
         m_terminal->setArgs(args);
 
-        // Check for saved password in keyring to bypass password prompts
         QString password = Keyring::lookupPassword(m_session.id);
         if (!password.isEmpty()) {
             QStringList env = QProcess::systemEnvironment();
@@ -60,11 +63,21 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             m_terminal->setEnvironment(env);
         }
     } else if (m_session.type == SessionType::Telnet) {
+#ifdef Q_OS_WIN
+        m_terminal->setShellProgram("telnet");
+#else
         m_terminal->setShellProgram("/usr/bin/telnet");
+#endif
         QStringList args;
         args << m_session.host << QString::number(m_session.port);
         m_terminal->setArgs(args);
     } else if (m_session.type == SessionType::Serial) {
+#ifdef Q_OS_WIN
+        m_terminal->setShellProgram("cmd.exe");
+        QStringList args;
+        args << "/c" << "echo" << tr("Serial connections are not supported on Windows.");
+        m_terminal->setArgs(args);
+#else
         QString tool = m_session.serialCmd;
         if (tool.isEmpty())
             tool = "picocom";
@@ -80,13 +93,20 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             args << "-D" << m_session.serialPort << "-b" << QString::number(m_session.baudRate);
         }
         m_terminal->setArgs(args);
+#endif
     } else {
         QString shell = m_session.shellPath;
         if (shell.isEmpty()) {
+#ifdef Q_OS_WIN
+            shell = qEnvironmentVariable("COMSPEC");
+            if (shell.isEmpty())
+                shell = "cmd.exe";
+#else
             shell = qgetenv("SHELL");
             if (shell.isEmpty()) {
                 shell = "/bin/bash";
             }
+#endif
         }
         m_terminal->setShellProgram(shell);
     }

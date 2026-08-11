@@ -105,7 +105,11 @@ void SessionDialog::setupUi() {
     localForm->setSpacing(10);
 
     m_shellEdit = new QLineEdit(localWidget);
+#ifdef Q_OS_WIN
+    m_shellEdit->setText("cmd.exe");
+#else
     m_shellEdit->setText("/bin/bash");
+#endif
     localForm->addRow(tr("Shell Path:"), m_shellEdit);
 
     m_stackedWidget->addWidget(localWidget);

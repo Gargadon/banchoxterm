@@ -78,7 +78,11 @@ QList<Session> SessionManager::loadSessions() {
         local.id = QUuid::createUuid().toString();
         local.name = "Local Terminal";
         local.type = SessionType::Local;
+#ifdef Q_OS_WIN
+        local.shellPath = "cmd.exe";
+#else
         local.shellPath = "/bin/bash";
+#endif
         sessions.append(local);
         return sessions;
     }
