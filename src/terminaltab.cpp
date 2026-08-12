@@ -20,6 +20,7 @@
 #include <io.h>
 #else
 #include <unistd.h>
+#include <fcntl.h>
 #endif
 
 TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(parent), m_session(session) {
@@ -130,6 +131,11 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 
 TerminalTab::~TerminalTab() {
     closeExternalProcess();
+
+    if (m_flushTimer) {
+        m_flushTimer->stop();
+    }
+    m_writeBuffer.clear();
 
 #ifdef Q_OS_WIN
     if (m_conptyPollTimer) {
@@ -275,6 +281,19 @@ void TerminalTab::pollConPtyOutput() {
 void TerminalTab::setupSshTerminal() {
     m_terminal->startTerminalTeletype();
 
+    // Make the pty slave fd non-blocking so a burst of remote output (btop,
+    // git progress, etc.) never blocks the GUI thread. The emulator drains the
+    // same pty on this thread, so a blocking write would deadlock it.
+#ifndef Q_OS_WIN
+    int fd = m_terminal->getPtySlaveFd();
+    if (fd >= 0) {
+        int flags = fcntl(fd, F_GETFL, 0);
+        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    }
+#endif
+    m_flushTimer = new QTimer(this);
+    connect(m_flushTimer, &QTimer::timeout, this, &TerminalTab::flushWriteBuffer);
+
     connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
 
     m_connection = new SshConnection();
@@ -317,14 +336,32 @@ void TerminalTab::onSendData(const char* data, int size) {
 void TerminalTab::onShellDataReceived(const QByteArray& data) {
     if (!m_terminal)
         return;
-    int fd = m_terminal->getPtySlaveFd();
-    if (fd < 0)
+    m_writeBuffer.append(data);
+    flushWriteBuffer();
+    if (!m_writeBuffer.isEmpty() && m_flushTimer) {
+        m_flushTimer->start(5);
+    }
+}
+
+void TerminalTab::flushWriteBuffer() {
+    if (m_writeBuffer.isEmpty() || !m_terminal)
         return;
+    int fd = m_terminal->getPtySlaveFd();
+    if (fd < 0) {
+        m_writeBuffer.clear();
+        return;
+    }
 #ifdef Q_OS_WIN
-    _write(fd, data.constData(), static_cast<unsigned int>(data.size()));
+    int written = _write(fd, m_writeBuffer.constData(), static_cast<unsigned int>(m_writeBuffer.size()));
 #else
-    ::write(fd, data.constData(), static_cast<size_t>(data.size()));
+    ssize_t written = ::write(fd, m_writeBuffer.constData(), static_cast<size_t>(m_writeBuffer.size()));
 #endif
+    if (written > 0) {
+        m_writeBuffer.remove(0, static_cast<int>(written));
+    }
+    if (m_writeBuffer.isEmpty() && m_flushTimer) {
+        m_flushTimer->stop();
+    }
 }
 
 void TerminalTab::onShellClosed() {

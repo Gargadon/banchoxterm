@@ -57,6 +57,7 @@ private slots:
     void onShellDataReceived(const QByteArray& data);
     void onShellClosed();
     void onSendData(const char* data, int size);
+    void flushWriteBuffer();
 
 private:
     void launchExternalClient();
@@ -72,6 +73,8 @@ private:
     QProcess* m_externalProcess = nullptr;
     SshConnection* m_connection = nullptr;
     QThread* m_connectionThread = nullptr;
+    QByteArray m_writeBuffer;
+    QTimer* m_flushTimer = nullptr;
 #ifdef Q_OS_WIN
     ConPty* m_conpty = nullptr;
     QTimer* m_conptyPollTimer = nullptr;
