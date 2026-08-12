@@ -53,6 +53,7 @@ private:
 
     QToolButton* m_sessionsTabBtn;
     QToolButton* m_sftpTabBtn;
+    QToolButton* m_multiInputBtn = nullptr;
 
     QTabWidget* m_tabWidget;
 

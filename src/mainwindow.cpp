@@ -86,7 +86,6 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 
 void MainWindow::setupUi() {
-    // 1. Top custom bar (modern header)
     auto* centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
 
@@ -94,31 +93,9 @@ void MainWindow::setupUi() {
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    auto* headerWidget = new QWidget(centralWidget);
-    headerWidget->setObjectName("headerWidget");
-    headerWidget->setFixedHeight(50);
-
-    auto* headerLayout = new QHBoxLayout(headerWidget);
-    headerLayout->setContentsMargins(15, 0, 15, 0);
-
-    auto* titleLabel = new QLabel("BANCHOXTERM", headerWidget);
-    titleLabel->setStyleSheet("font-weight: 900; font-size: 15px; color: #7aa2f7; letter-spacing: 2px;");
-    headerLayout->addWidget(titleLabel);
-    headerLayout->addSpacing(20);
-
     setupMenuBar();
 
-    headerLayout->addStretch();
-
-    auto* settingsBtn = new QPushButton(QIcon(":/icons/gear.svg"), tr("  Settings"), headerWidget);
-    headerLayout->addWidget(settingsBtn);
-
-    auto* multiInputBtn = new QPushButton(QIcon(":/icons/multiinput.svg"), tr("  Multi-Input"), headerWidget);
-    headerLayout->addWidget(multiInputBtn);
-
-    mainLayout->addWidget(headerWidget);
-
-    // 2. Main splitter
+    // Main splitter
     m_mainSplitter = new QSplitter(Qt::Horizontal, centralWidget);
     mainLayout->addWidget(m_mainSplitter);
 
@@ -135,7 +112,7 @@ void MainWindow::setupUi() {
     verticalTabStrip->setObjectName("verticalTabStrip");
     verticalTabStrip->setFixedWidth(60);
     auto* stripLayout = new QVBoxLayout(verticalTabStrip);
-    stripLayout->setContentsMargins(0, 10, 0, 0);
+    stripLayout->setContentsMargins(0, 10, 0, 10);
     stripLayout->setSpacing(10);
     stripLayout->setAlignment(Qt::AlignTop);
 
@@ -156,6 +133,23 @@ void MainWindow::setupUi() {
     m_sftpTabBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
     m_sftpTabBtn->setFixedSize(60, 50);
     stripLayout->addWidget(m_sftpTabBtn);
+
+    stripLayout->addStretch();
+
+    auto* settingsBtn = new QToolButton(verticalTabStrip);
+    settingsBtn->setIcon(QIcon(":/icons/gear.svg"));
+    settingsBtn->setToolTip(tr("Settings"));
+    settingsBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    settingsBtn->setFixedSize(60, 50);
+    stripLayout->addWidget(settingsBtn);
+
+    m_multiInputBtn = new QToolButton(verticalTabStrip);
+    m_multiInputBtn->setIcon(QIcon(":/icons/multiinput.svg"));
+    m_multiInputBtn->setToolTip(tr("Multi-Input (send commands to all terminals)"));
+    m_multiInputBtn->setCheckable(true);
+    m_multiInputBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    m_multiInputBtn->setFixedSize(60, 50);
+    stripLayout->addWidget(m_multiInputBtn);
 
     sidebarLayout->addWidget(verticalTabStrip);
 
@@ -215,8 +209,8 @@ void MainWindow::setupUi() {
 
     // Connections
     connect(m_sessionsSidebar, &SessionsSidebar::newLocalSessionRequested, this, &MainWindow::onNewLocalTerminal);
-    connect(settingsBtn, &QPushButton::clicked, this, &MainWindow::onOpenSettings);
-    connect(multiInputBtn, &QPushButton::clicked, this, &MainWindow::toggleMultiInputBar);
+    connect(settingsBtn, &QToolButton::clicked, this, &MainWindow::onOpenSettings);
+    connect(m_multiInputBtn, &QToolButton::clicked, this, &MainWindow::toggleMultiInputBar);
 
     connect(m_multiInputEdit->lineEdit(), &QLineEdit::returnPressed, this, &MainWindow::onSendMultiInput);
     connect(sendMultiBtn, &QPushButton::clicked, this, &MainWindow::onSendMultiInput);
@@ -378,6 +372,9 @@ void MainWindow::onOpenSettings() {
 void MainWindow::toggleMultiInputBar() {
     bool visible = !m_multiInputBar->isVisible();
     m_multiInputBar->setVisible(visible);
+    if (m_multiInputBtn) {
+        m_multiInputBtn->setChecked(visible);
+    }
     if (visible) {
         m_multiInputEdit->setFocus();
     }

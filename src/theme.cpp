@@ -14,10 +14,6 @@ QString getDarkTheme() {
         QMainWindow, QDialog, QFrame#sidebarContainer, QTabWidget::pane {
             background-color: #1a1b26;
         }
-        #headerWidget {
-            background-color: #16161e;
-            border-bottom: 1px solid #24283b;
-        }
         #verticalTabStrip {
             background-color: #101014;
             border-right: 1px solid #24283b;
@@ -293,10 +289,6 @@ QString getLightTheme() {
         /* MainWindow and dialog containers */
         QMainWindow, QDialog, QFrame#sidebarContainer, QTabWidget::pane {
             background-color: #f5f6f9;
-        }
-        #headerWidget {
-            background-color: #eaedf3;
-            border-bottom: 1px solid #d0d7de;
         }
         #verticalTabStrip {
             background-color: #e4e7eb;
