@@ -38,6 +38,7 @@ private slots:
 
     void onCopy();
     void onPaste();
+    void showAbout();
 
 private:
     void setupUi();

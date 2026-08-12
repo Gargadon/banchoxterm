@@ -69,7 +69,7 @@ void SessionsSidebar::loadSessions() {
             break;
         case SessionType::Serial:
             item->setIcon(QIcon(":/icons/serial.svg"));
-            item->setToolTip(QString("serial://%1 (%2 baud via %3)")
+            item->setToolTip(tr("serial://%1 (%2 baud via %3)")
                                  .arg(session.serialPort)
                                  .arg(session.baudRate)
                                  .arg(session.serialCmd));

@@ -63,7 +63,7 @@ void SessionDialog::setupUi() {
     sshForm->setSpacing(10);
 
     m_hostEdit = new QLineEdit(sshWidget);
-    m_hostEdit->setPlaceholderText("192.168.1.100 or example.com");
+    m_hostEdit->setPlaceholderText(tr("192.168.1.100 or example.com"));
     sshForm->addRow(tr("Host / IP:"), m_hostEdit);
 
     m_portSpin = new QSpinBox(sshWidget);
@@ -72,7 +72,7 @@ void SessionDialog::setupUi() {
     sshForm->addRow(tr("Port:"), m_portSpin);
 
     m_userEdit = new QLineEdit(sshWidget);
-    m_userEdit->setPlaceholderText("root / username");
+    m_userEdit->setPlaceholderText(tr("root / username"));
     sshForm->addRow(tr("Username:"), m_userEdit);
 
     m_passwordEdit = new QLineEdit(sshWidget);
@@ -119,7 +119,7 @@ void SessionDialog::setupUi() {
     telnetForm->setSpacing(10);
 
     m_telnetHostEdit = new QLineEdit(telnetWidget);
-    m_telnetHostEdit->setPlaceholderText("192.168.1.100 or example.com");
+    m_telnetHostEdit->setPlaceholderText(tr("192.168.1.100 or example.com"));
     telnetForm->addRow(tr("Host / IP:"), m_telnetHostEdit);
 
     m_telnetPortSpin = new QSpinBox(telnetWidget);
@@ -136,7 +136,7 @@ void SessionDialog::setupUi() {
     rdpForm->setSpacing(10);
 
     m_rdpHostEdit = new QLineEdit(rdpWidget);
-    m_rdpHostEdit->setPlaceholderText("192.168.1.100 or example.com");
+    m_rdpHostEdit->setPlaceholderText(tr("192.168.1.100 or example.com"));
     rdpForm->addRow(tr("Host / IP:"), m_rdpHostEdit);
 
     m_rdpPortSpin = new QSpinBox(rdpWidget);
@@ -145,7 +145,7 @@ void SessionDialog::setupUi() {
     rdpForm->addRow(tr("Port:"), m_rdpPortSpin);
 
     m_rdpUserEdit = new QLineEdit(rdpWidget);
-    m_rdpUserEdit->setPlaceholderText("Administrator / username");
+    m_rdpUserEdit->setPlaceholderText(tr("Administrator / username"));
     rdpForm->addRow(tr("Username:"), m_rdpUserEdit);
 
     m_stackedWidget->addWidget(rdpWidget); // index 3
@@ -157,7 +157,7 @@ void SessionDialog::setupUi() {
     vncForm->setSpacing(10);
 
     m_vncHostEdit = new QLineEdit(vncWidget);
-    m_vncHostEdit->setPlaceholderText("192.168.1.100 or example.com");
+    m_vncHostEdit->setPlaceholderText(tr("192.168.1.100 or example.com"));
     vncForm->addRow(tr("Host / IP:"), m_vncHostEdit);
 
     m_vncPortSpin = new QSpinBox(vncWidget);

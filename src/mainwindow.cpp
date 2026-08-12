@@ -470,6 +470,19 @@ void MainWindow::setupMenuBar() {
             tab->getTerminalWidget()->clear();
         }
     });
+
+    auto* helpMenu = menuBar()->addMenu(tr("&Help"));
+    auto* aboutAction = helpMenu->addAction(tr("&About BanchoXterm"));
+    connect(aboutAction, &QAction::triggered, this, &MainWindow::showAbout);
+}
+
+void MainWindow::showAbout() {
+    QMessageBox::about(this, tr("About BanchoXterm"),
+                       tr("<h3>BanchoXterm</h3>"
+                          "<p>A multi-protocol terminal emulator and remote session manager.</p>"
+                          "<p>Version %1</p>"
+                          "<p>Supports SSH, SFTP, Telnet, RDP, VNC, Serial and local terminals.</p>")
+                           .arg(QStringLiteral("0.1.0")));
 }
 
 TerminalTab* MainWindow::currentTerminalTab() const {

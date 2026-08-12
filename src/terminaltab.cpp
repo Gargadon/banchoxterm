@@ -214,14 +214,14 @@ void TerminalTab::setupWindowsTerminal() {
         connect(m_connection, &SshConnection::shellClosed, this, [this]() {
             m_isActive = false;
             if (m_vtTerminal)
-                m_vtTerminal->writeData("\r\n[Connection closed]\r\n");
-            emit titleChanged("[Closed] " + m_session.name);
+                m_vtTerminal->writeData(tr("\r\n[Connection closed]\r\n").toUtf8());
+            emit titleChanged(tr("[Closed] %1").arg(m_session.name));
         });
         connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
             if (m_vtTerminal)
-                m_vtTerminal->writeData(("\r\n[Connection failed: " + error + "]\r\n").toUtf8());
+                m_vtTerminal->writeData(tr("\r\n[Connection failed: %1]\r\n").arg(error).toUtf8());
             m_isActive = false;
-            emit titleChanged("[Closed] " + m_session.name);
+            emit titleChanged(tr("[Closed] %1").arg(m_session.name));
         });
 
         if (m_session.x11Forwarding) {
@@ -232,7 +232,7 @@ void TerminalTab::setupWindowsTerminal() {
         m_conpty->start("telnet", {m_session.host, QString::number(m_session.port)}, 80, 24);
         startConPtyPolling();
     } else if (m_session.type == SessionType::Serial) {
-        m_vtTerminal->writeData("Serial connections are not supported on Windows.\r\n");
+        m_vtTerminal->writeData(tr("Serial connections are not supported on Windows.\r\n").toUtf8());
         m_isActive = false;
     } else {
         QString shell = m_session.shellPath;
@@ -273,7 +273,7 @@ void TerminalTab::pollConPtyOutput() {
     if (!m_conpty->isRunning()) {
         m_conptyPollTimer->stop();
         m_isActive = false;
-        emit titleChanged("[Closed] " + m_session.name);
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     }
 }
 #endif
@@ -316,7 +316,7 @@ void TerminalTab::setupSshTerminal() {
             }
         }
         m_isActive = false;
-        emit titleChanged("[Closed] " + m_session.name);
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     });
 
     // The connection itself is triggered by SftpSidebar::startSession(), which
@@ -377,12 +377,12 @@ void TerminalTab::onShellClosed() {
 #endif
         }
     }
-    emit titleChanged("[Closed] " + m_session.name);
+    emit titleChanged(tr("[Closed] %1").arg(m_session.name));
 }
 
 void TerminalTab::onTerminalFinished() {
     m_isActive = false;
-    emit titleChanged("[Closed] " + m_session.name);
+    emit titleChanged(tr("[Closed] %1").arg(m_session.name));
 }
 
 void TerminalTab::onTitleChanged() {
@@ -489,7 +489,7 @@ void TerminalTab::launchExternalClient() {
                 if (m_statusLabel) {
                     m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
                 }
-                emit titleChanged("[Closed] " + m_session.name);
+                emit titleChanged(tr("[Closed] %1").arg(m_session.name));
             });
 
     connect(m_externalProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
