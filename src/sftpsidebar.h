@@ -1,14 +1,10 @@
 #pragma once
 #include <QWidget>
-#include <QThread>
-#include <QTcpSocket>
-#include <QDateTime>
-#include <QTimer>
 #include <QFileSystemWatcher>
 #include <QMap>
-#include <libssh2.h>
-#include <libssh2_sftp.h>
+#include <QPointer>
 #include "session.h"
+#include "sshconnection.h"
 
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -16,55 +12,17 @@ class QLineEdit;
 class QPushButton;
 class QLabel;
 
-struct SftpFile {
-    QString name;
-    bool isDirectory;
-    qint64 size;
-    QDateTime mtime;
-};
-
-// SftpWorker handles all libssh2 calls in a separate thread
-class SftpWorker : public QObject {
-    Q_OBJECT
-public:
-    SftpWorker();
-    ~SftpWorker() override;
-
-signals:
-    void connectionSuccess();
-    void connectionFailed(const QString& error);
-    void directoryListed(const QString& path, const QList<SftpFile>& files);
-    void operationFinished(bool success, const QString& error);
-    void passwordRequired(const QString& prompt);
-    void remoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
-
-public slots:
-    void connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
-                       const QString& password = "");
-    void listDirectory(const QString& path);
-    void downloadFile(const QString& remotePath, const QString& localPath);
-    void uploadFile(const QString& localPath, const QString& remotePath);
-    void deleteFile(const QString& remotePath, bool isDir);
-    void disconnectFromHost();
-    void queryStats();
-
-private:
-    QTcpSocket* m_socket = nullptr;
-    LIBSSH2_SESSION* m_sshSession = nullptr;
-    LIBSSH2_SFTP* m_sftpSession = nullptr;
-    QString m_host;
-    int m_port = 22;
-    QString m_user;
-    QString m_keyPath;
-    QTimer* m_statsTimer = nullptr;
-};
-
-// SftpSidebar is the UI container
 class SftpSidebar : public QWidget {
     Q_OBJECT
 public:
     explicit SftpSidebar(QWidget* parent = nullptr);
     ~SftpSidebar() override;
+
+    void setConnection(SshConnection* connection);
+    void detachConnection();
+    SshConnection* connection() const {
+        return m_connection;
+    }
 
     void startSession(const Session& session);
     void stopSession();
@@ -109,8 +67,7 @@ private:
     QTreeWidget* m_treeWidget;
     QLabel* m_statusLabel;
 
-    QThread m_workerThread;
-    SftpWorker* m_worker;
+    QPointer<SshConnection> m_connection;
 
     Session m_currentSession;
     QString m_currentPath;

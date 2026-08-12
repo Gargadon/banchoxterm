@@ -251,7 +251,8 @@ void MainWindow::onConnectSession(const Session& session) {
 
     if (session.type == SessionType::SSH) {
         m_tabWidget->setTabIcon(index, QIcon(":/icons/server.svg"));
-        // Automatically connect SFTP
+        // Share the terminal's SSH connection with the SFTP browser.
+        m_sftpSidebar->setConnection(tab->connection());
         m_sftpSidebar->startSession(session);
         m_sftpTabBtn->setEnabled(true);
         switchSidebarTab(1); // Switch sidebar to SFTP files
@@ -296,6 +297,10 @@ void MainWindow::onTabCloseRequested(int index) {
                 return; // User canceled
             }
         }
+        if (tab->isSsh() && m_sftpSidebar->connection() == tab->connection()) {
+            m_sftpSidebar->detachConnection();
+            m_sftpSidebar->stopSession();
+        }
         m_tabWidget->removeTab(index);
         delete tab;
     }
@@ -316,6 +321,7 @@ void MainWindow::onCurrentTabChanged(int index) {
 
     auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(index));
     if (tab && tab->isSsh()) {
+        m_sftpSidebar->setConnection(tab->connection());
         m_sftpSidebar->startSession(tab->getSession());
         m_sftpTabBtn->setEnabled(true);
     } else {

@@ -1,4 +1,5 @@
 #include "terminaltab.h"
+#include "sshconnection.h"
 #include <qtermwidget.h>
 #include <QVBoxLayout>
 #include <QLabel>
@@ -11,15 +12,14 @@
 #include <QApplication>
 #include <QMenu>
 #include <QAction>
-#include "keyring.h"
+#include <QThread>
+#include <QResizeEvent>
 
-namespace {
-// Remote shell integration: reports the current working directory back to the
-// terminal via OSC 7 so the SFTP browser can follow terminal navigation.
-const char* kShellIntegration = "if command -v bash >/dev/null 2>&1; then "
-                                "PROMPT_COMMAND='printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"'; "
-                                "exec bash -l; else exec \"$SHELL\"; fi";
-} // namespace
+#ifdef Q_OS_WIN
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(parent), m_session(session) {
     auto* layout = new QVBoxLayout(this);
@@ -62,48 +62,13 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         connect(m_terminal, &QWidget::customContextMenuRequested, this, &TerminalTab::showTerminalContextMenu);
         connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
 
+        layout->addWidget(m_terminal);
+
+        connect(m_terminal, &QTermWidget::finished, this, &TerminalTab::onTerminalFinished);
+        connect(m_terminal, &QTermWidget::titleChanged, this, &TerminalTab::onTitleChanged);
+
         if (m_session.type == SessionType::SSH) {
-#ifdef Q_OS_WIN
-            m_terminal->setShellProgram("ssh");
-#else
-            m_terminal->setShellProgram("/usr/bin/ssh");
-#endif
-
-            QStringList args;
-            args << "-t" << "-p" << QString::number(m_session.port);
-
-            if (m_session.x11Forwarding) {
-                args << "-Y";
-            }
-
-            if (!m_session.keyPath.isEmpty()) {
-                args << "-i" << m_session.keyPath;
-            }
-
-            args << QString("%1@%2").arg(m_session.user, m_session.host);
-            args << QString::fromLatin1(kShellIntegration);
-            m_terminal->setArgs(args);
-
-            QStringList env = QProcess::systemEnvironment();
-            bool hasTerm = false;
-            for (const QString& e : env) {
-                if (e.startsWith("TERM=")) {
-                    hasTerm = true;
-                    break;
-                }
-            }
-            if (!hasTerm) {
-                env << "TERM=xterm-256color";
-            }
-
-            QString password = Keyring::lookupPassword(m_session.id);
-            if (!password.isEmpty()) {
-                env << QString("SSH_ASKPASS=%1").arg(QCoreApplication::applicationFilePath());
-                env << "SSH_ASKPASS_REQUIRE=force";
-                env << QString("BANCHOXTERM_ASKPASS_ID=%1").arg(m_session.id);
-            }
-
-            m_terminal->setEnvironment(env);
+            setupSshTerminal();
         } else if (m_session.type == SessionType::Telnet) {
 #ifdef Q_OS_WIN
             m_terminal->setShellProgram("telnet");
@@ -113,6 +78,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             QStringList args;
             args << m_session.host << QString::number(m_session.port);
             m_terminal->setArgs(args);
+            m_terminal->startShellProgram();
         } else if (m_session.type == SessionType::Serial) {
 #ifdef Q_OS_WIN
             m_terminal->setShellProgram("cmd.exe");
@@ -136,6 +102,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             }
             m_terminal->setArgs(args);
 #endif
+            m_terminal->startShellProgram();
         } else {
             QString shell = m_session.shellPath;
             if (shell.isEmpty()) {
@@ -151,19 +118,107 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 #endif
             }
             m_terminal->setShellProgram(shell);
+            m_terminal->startShellProgram();
         }
-
-        layout->addWidget(m_terminal);
-
-        connect(m_terminal, &QTermWidget::finished, this, &TerminalTab::onTerminalFinished);
-        connect(m_terminal, &QTermWidget::titleChanged, this, &TerminalTab::onTitleChanged);
-
-        m_terminal->startShellProgram();
     }
 }
 
 TerminalTab::~TerminalTab() {
     closeExternalProcess();
+
+    if (m_connection && m_connectionThread && m_connectionThread->isRunning()) {
+        QMetaObject::invokeMethod(m_connection, "disconnectFromHost", Qt::BlockingQueuedConnection);
+    }
+    if (m_connectionThread) {
+        m_connectionThread->quit();
+        m_connectionThread->wait();
+        delete m_connectionThread;
+        m_connectionThread = nullptr;
+    }
+    if (m_connection) {
+        delete m_connection;
+        m_connection = nullptr;
+    }
+}
+
+void TerminalTab::resizeEvent(QResizeEvent* event) {
+    QWidget::resizeEvent(event);
+    if (m_connection && m_terminal && m_session.type == SessionType::SSH) {
+        int rows = m_terminal->screenLinesCount();
+        int cols = m_terminal->screenColumnsCount();
+        if (rows > 0 && cols > 0) {
+            QMetaObject::invokeMethod(m_connection, "resizePty", Qt::QueuedConnection, Q_ARG(int, rows),
+                                      Q_ARG(int, cols));
+        }
+    }
+}
+
+void TerminalTab::setupSshTerminal() {
+    m_terminal->startTerminalTeletype();
+
+    connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
+
+    m_connection = new SshConnection();
+    m_connectionThread = new QThread(this);
+    m_connection->moveToThread(m_connectionThread);
+    m_connectionThread->start();
+
+    connect(m_connection, &SshConnection::shellDataReceived, this, &TerminalTab::onShellDataReceived);
+    connect(m_connection, &SshConnection::shellClosed, this, &TerminalTab::onShellClosed);
+    connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
+        if (m_terminal) {
+            QString text = tr("\r\n[Connection failed: %1]\r\n").arg(error);
+            int fd = m_terminal->getPtySlaveFd();
+            if (fd >= 0) {
+#ifdef Q_OS_WIN
+                _write(fd, text.toUtf8().constData(), static_cast<unsigned int>(text.size()));
+#else
+                ::write(fd, text.toUtf8().constData(), static_cast<size_t>(text.size()));
+#endif
+            }
+        }
+        m_isActive = false;
+        emit titleChanged("[Closed] " + m_session.name);
+    });
+
+    // The connection itself is triggered by SftpSidebar::startSession(), which
+    // shares this same SshConnection with the terminal.
+}
+
+void TerminalTab::onSendData(const char* data, int size) {
+    if (m_connection) {
+        QMetaObject::invokeMethod(m_connection, "sendToShell", Qt::QueuedConnection,
+                                  Q_ARG(QByteArray, QByteArray(data, size)));
+    }
+}
+
+void TerminalTab::onShellDataReceived(const QByteArray& data) {
+    if (!m_terminal)
+        return;
+    int fd = m_terminal->getPtySlaveFd();
+    if (fd < 0)
+        return;
+#ifdef Q_OS_WIN
+    _write(fd, data.constData(), static_cast<unsigned int>(data.size()));
+#else
+    ::write(fd, data.constData(), static_cast<size_t>(data.size()));
+#endif
+}
+
+void TerminalTab::onShellClosed() {
+    m_isActive = false;
+    if (m_terminal) {
+        int fd = m_terminal->getPtySlaveFd();
+        if (fd >= 0) {
+            QString text = tr("\r\n[Connection closed]\r\n");
+#ifdef Q_OS_WIN
+            _write(fd, text.toUtf8().constData(), static_cast<unsigned int>(text.size()));
+#else
+            ::write(fd, text.toUtf8().constData(), static_cast<size_t>(text.size()));
+#endif
+        }
+    }
+    emit titleChanged("[Closed] " + m_session.name);
 }
 
 void TerminalTab::onTerminalFinished() {
@@ -258,11 +313,7 @@ void TerminalTab::launchExternalClient() {
              << "/dynamic-resolution";
 #endif
     } else if (m_session.type == SessionType::VNC) {
-#ifdef Q_OS_WIN
         program = "vncviewer";
-#else
-        program = "vncviewer";
-#endif
         args << m_session.host + "::" + QString::number(m_session.port);
     }
 

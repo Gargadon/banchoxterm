@@ -45,6 +45,8 @@ set(SOURCES
     src/remoteeditordialog.h
     src/settingsdialog.cpp
     src/settingsdialog.h
+    src/sshconnection.cpp
+    src/sshconnection.h
     src/theme.cpp
     src/theme.h
     resources.qrc
