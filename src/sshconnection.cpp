@@ -236,11 +236,13 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     if (!authenticated && keyPath.isEmpty() && password.isEmpty()) {
         LIBSSH2_AGENT* agent = libssh2_agent_init(m_session);
         if (agent) {
-            if (libssh2_agent_connect(agent) == 0) {
-                if (libssh2_agent_list_identities(agent) == 0) {
+            if (retry([&agent]() { return libssh2_agent_connect(agent); }) == 0) {
+                if (retry([&agent]() { return libssh2_agent_list_identities(agent); }) == 0) {
                     struct libssh2_agent_publickey* identity = nullptr;
                     struct libssh2_agent_publickey* prev_identity = nullptr;
-                    while (libssh2_agent_get_identity(agent, &identity, prev_identity) == 0) {
+                    while (retry([&agent, &identity, &prev_identity]() {
+                               return libssh2_agent_get_identity(agent, &identity, prev_identity);
+                           }) == 0) {
                         rc = retry([this, &agent, &identity]() {
                             return libssh2_agent_userauth(agent, m_user.toUtf8().constData(), identity);
                         });
@@ -263,7 +265,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
         return;
     }
 
-    m_sftp = libssh2_sftp_init(m_session);
+    m_sftp = retryPtr([this]() { return libssh2_sftp_init(m_session); });
     if (!m_sftp) {
         emit connectionFailed("Failed to initialize SFTP session");
         disconnectFromHost();
@@ -286,7 +288,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
 }
 
 void SshConnection::openShell() {
-    m_channel = libssh2_channel_open_session(m_session);
+    m_channel = retryPtr([this]() { return libssh2_channel_open_session(m_session); });
     if (!m_channel) {
         emit connectionFailed("Failed to open shell channel");
         return;
@@ -405,7 +407,8 @@ void SshConnection::listDirectory(const QString& path) {
         return;
     }
 
-    LIBSSH2_SFTP_HANDLE* handle = libssh2_sftp_opendir(m_sftp, path.toUtf8().constData());
+    LIBSSH2_SFTP_HANDLE* handle =
+        retryPtr([this, &path]() { return libssh2_sftp_opendir(m_sftp, path.toUtf8().constData()); });
     if (!handle) {
         emit operationFinished(false, "Failed to open remote directory: " + path);
         return;
@@ -447,7 +450,9 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
         return;
     }
 
-    LIBSSH2_SFTP_HANDLE* handle = libssh2_sftp_open(m_sftp, remotePath.toUtf8().constData(), LIBSSH2_FXF_READ, 0);
+    LIBSSH2_SFTP_HANDLE* handle = retryPtr([this, &remotePath]() {
+        return libssh2_sftp_open(m_sftp, remotePath.toUtf8().constData(), LIBSSH2_FXF_READ, 0);
+    });
     if (!handle) {
         emit operationFinished(false, "Failed to open remote file: " + remotePath);
         return;
@@ -491,9 +496,11 @@ void SshConnection::uploadFile(const QString& localPath, const QString& remotePa
         return;
     }
 
-    LIBSSH2_SFTP_HANDLE* handle = libssh2_sftp_open(
-        m_sftp, remotePath.toUtf8().constData(), LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
-        LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR | LIBSSH2_SFTP_S_IRGRP | LIBSSH2_SFTP_S_IROTH);
+    LIBSSH2_SFTP_HANDLE* handle = retryPtr([this, &remotePath]() {
+        return libssh2_sftp_open(
+            m_sftp, remotePath.toUtf8().constData(), LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
+            LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR | LIBSSH2_SFTP_S_IRGRP | LIBSSH2_SFTP_S_IROTH);
+    });
     if (!handle) {
         localFile.close();
         emit operationFinished(false, "Failed to create remote file: " + remotePath);
@@ -551,7 +558,7 @@ void SshConnection::queryStats() {
     if (!m_session)
         return;
 
-    LIBSSH2_CHANNEL* channel = libssh2_channel_open_session(m_session);
+    LIBSSH2_CHANNEL* channel = retryPtr([this]() { return libssh2_channel_open_session(m_session); });
     if (!channel)
         return;
 

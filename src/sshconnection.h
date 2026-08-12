@@ -66,6 +66,19 @@ private:
     void closeSocket();
     bool waitSocket(int timeoutMs);
     int retry(const std::function<int()>& fn);
+
+    template <typename Fn> auto retryPtr(Fn&& fn) -> decltype(fn()) {
+        while (true) {
+            auto result = fn();
+            if (result)
+                return result;
+            if (libssh2_session_last_errno(m_session) != LIBSSH2_ERROR_EAGAIN)
+                return nullptr;
+            if (!waitSocket(15000))
+                return nullptr;
+        }
+    }
+
     void openShell();
     void readShell();
     void setupX11Cookie();
