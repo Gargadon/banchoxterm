@@ -3,8 +3,9 @@
 #include <QColor>
 #include <QVector>
 #include <QFont>
+#include <QPoint>
 
-// A minimal, self-contained VT/xterm terminal emulator widget.
+// A self-contained VT/xterm terminal emulator widget.
 //
 // Unlike QTermWidget it does not spawn a process; instead it renders bytes
 // passed to writeData() and emits keystrokes via dataReady(). This makes it
@@ -33,6 +34,10 @@ protected:
     void keyPressEvent(QKeyEvent* e) override;
     void paintEvent(QPaintEvent* e) override;
     void resizeEvent(QResizeEvent* e) override;
+    void mousePressEvent(QMouseEvent* e) override;
+    void mouseMoveEvent(QMouseEvent* e) override;
+    void mouseReleaseEvent(QMouseEvent* e) override;
+    void wheelEvent(QWheelEvent* e) override;
 
 private:
     struct Cell {
@@ -61,8 +66,12 @@ private:
     void parseOsc(const QByteArray& data, int& i);
     void applySgr(const QVector<int>& params);
 
-    int clampX(int x) const;
-    int clampY(int y) const;
+    int totalLines() const;
+    int firstVisibleLine() const;
+    Cell cellAt(int x, int fullLine) const;
+    QPoint posToGrid(const QPoint& pos) const;
+    QString selectedText() const;
+    bool inSelection(int x, int fullLine) const;
 
     int m_cols = 80;
     int m_rows = 24;
@@ -79,5 +88,13 @@ private:
 
     // scrollback
     QVector<QVector<Cell>> m_scrollback;
-    int m_scrollbackMax = 1000;
+    int m_scrollbackMax = 5000;
+    int m_scrollOffset = 0;
+
+    // selection (in full-content line coordinates)
+    bool m_selecting = false;
+    int m_selStartX = 0;
+    int m_selStartY = 0;
+    int m_selEndX = 0;
+    int m_selEndY = 0;
 };

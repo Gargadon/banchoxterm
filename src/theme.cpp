@@ -7,7 +7,6 @@ QString getDarkTheme() {
         /* Global Styles */
         QWidget {
             color: #a9b1d6;
-            font-family: 'Inter', 'Segoe UI', 'Ubuntu', sans-serif;
             font-size: 13px;
         }
 
@@ -288,7 +287,6 @@ QString getLightTheme() {
         /* Global Styles */
         QWidget {
             color: #333333;
-            font-family: 'Inter', 'Segoe UI', 'Ubuntu', sans-serif;
             font-size: 13px;
         }
 

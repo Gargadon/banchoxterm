@@ -1,5 +1,7 @@
 #include "vtterminalwidget.h"
 #include <QKeyEvent>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QPainter>
 #include <QFontMetrics>
 #include <QApplication>
@@ -103,9 +105,21 @@ void VtTerminalWidget::resizeEvent(QResizeEvent* e) {
     int newCols = qMax(1, width() / m_charWidth);
     int newRows = qMax(1, height() / m_charHeight);
     if (newCols != m_cols || newRows != m_rows) {
+        // Preserve the visible screen content across the resize.
+        QVector<Cell> old = m_cells;
+        int oldCols = m_cols;
+        int oldRows = m_rows;
         m_cols = newCols;
         m_rows = newRows;
-        ensureSize();
+        m_cells.fill(Cell{}, m_cols * m_rows);
+        for (int y = 0; y < qMin(oldRows, m_rows); y++)
+            for (int x = 0; x < qMin(oldCols, m_cols); x++)
+                m_cells[y * m_cols + x] = old[y * oldCols + x];
+        m_cursorX = qMin(m_cursorX, m_cols - 1);
+        m_cursorY = qMin(m_cursorY, m_rows - 1);
+        m_scrollback.clear();
+        m_scrollOffset = 0;
+        m_selecting = false;
         emit resized(m_cols, m_rows);
     }
 }
@@ -130,6 +144,9 @@ void VtTerminalWidget::scrollUp() {
         m_scrollback.removeFirst();
     m_cells.remove(0, m_cols);
     m_cells.append(QVector<Cell>(m_cols, Cell{}));
+    // Keep the scrolled-up view anchored to the same content.
+    if (m_scrollOffset > 0)
+        m_scrollOffset = qMin(m_scrollOffset + 1, m_scrollback.size());
 }
 
 void VtTerminalWidget::newLine() {
@@ -532,18 +549,26 @@ void VtTerminalWidget::paintEvent(QPaintEvent*) {
 
     painter.fillRect(rect(), darkPalette().bg);
 
+    int firstLine = firstVisibleLine();
     for (int y = 0; y < m_rows; y++) {
+        int fullLine = firstLine + y;
         for (int x = 0; x < m_cols; x++) {
-            const Cell& c = m_cells[y * m_cols + x];
+            Cell c = cellAt(x, fullLine);
+            if (inSelection(x, fullLine)) {
+                c.bg = QColor("#264f78");
+                c.bgSet = true;
+            }
             if (c.ch != u' ' || c.bgSet || c.inverse || c.underline)
                 drawCell(painter, x, y, c);
         }
     }
 
-    painter.setPen(darkPalette().fg);
-    int cx = m_cursorX * m_charWidth;
-    int cy = m_cursorY * m_charHeight;
-    painter.drawRect(cx, cy, m_charWidth, m_charHeight);
+    if (m_scrollOffset == 0) {
+        painter.setPen(darkPalette().fg);
+        int cx = m_cursorX * m_charWidth;
+        int cy = m_cursorY * m_charHeight;
+        painter.drawRect(cx, cy, m_charWidth, m_charHeight);
+    }
 }
 
 void VtTerminalWidget::drawCell(QPainter& painter, int x, int y, const Cell& c) {
@@ -584,8 +609,137 @@ void VtTerminalWidget::drawCell(QPainter& painter, int x, int y, const Cell& c) 
     }
 }
 
+int VtTerminalWidget::totalLines() const {
+    return m_scrollback.size() + m_rows;
+}
+
+int VtTerminalWidget::firstVisibleLine() const {
+    return m_scrollback.size() - m_scrollOffset;
+}
+
+VtTerminalWidget::Cell VtTerminalWidget::cellAt(int x, int fullLine) const {
+    if (x < 0 || x >= m_cols)
+        return Cell{};
+    if (fullLine < m_scrollback.size()) {
+        if (fullLine < 0)
+            return Cell{};
+        return m_scrollback[fullLine][x];
+    }
+    int screenLine = fullLine - m_scrollback.size();
+    if (screenLine >= 0 && screenLine < m_rows) {
+        return m_cells[screenLine * m_cols + x];
+    }
+    return Cell{};
+}
+
+QPoint VtTerminalWidget::posToGrid(const QPoint& pos) const {
+    int x = qBound(0, pos.x() / m_charWidth, m_cols - 1);
+    int row = qBound(0, pos.y() / m_charHeight, m_rows - 1);
+    int fullLine = firstVisibleLine() + row;
+    return QPoint(x, fullLine);
+}
+
+bool VtTerminalWidget::inSelection(int x, int fullLine) const {
+    int sx = m_selStartX;
+    int sy = m_selStartY;
+    int ex = m_selEndX;
+    int ey = m_selEndY;
+    if (sy > ey || (sy == ey && sx > ex)) {
+        std::swap(sx, ex);
+        std::swap(sy, ey);
+    }
+    if (sx == ex && sy == ey)
+        return false;
+
+    if (fullLine < sy || fullLine > ey)
+        return false;
+    if (fullLine == sy && fullLine == ey)
+        return x >= sx && x <= ex;
+    if (fullLine == sy)
+        return x >= sx;
+    if (fullLine == ey)
+        return x <= ex;
+    return true;
+}
+
+QString VtTerminalWidget::selectedText() const {
+    int sx = m_selStartX;
+    int sy = m_selStartY;
+    int ex = m_selEndX;
+    int ey = m_selEndY;
+    if (sy > ey || (sy == ey && sx > ex)) {
+        std::swap(sx, ex);
+        std::swap(sy, ey);
+    }
+    if (sx == ex && sy == ey)
+        return QString();
+
+    QString result;
+    for (int line = sy; line <= ey; line++) {
+        if (line != sy)
+            result += '\n';
+        int startX = (line == sy) ? sx : 0;
+        int endX = (line == ey) ? ex : m_cols - 1;
+        QString lineText;
+        for (int x = startX; x <= endX; x++) {
+            Cell c = cellAt(x, line);
+            lineText += QChar(c.ch);
+        }
+        while (lineText.endsWith(u' '))
+            lineText.chop(1);
+        result += lineText;
+    }
+    return result;
+}
+
+void VtTerminalWidget::mousePressEvent(QMouseEvent* e) {
+    if (e->button() == Qt::LeftButton) {
+        QPoint g = posToGrid(e->pos());
+        m_selecting = true;
+        m_selStartX = m_selEndX = g.x();
+        m_selStartY = m_selEndY = g.y();
+        update();
+    } else if (e->button() == Qt::MiddleButton) {
+        pasteClipboard();
+    }
+    QWidget::mousePressEvent(e);
+}
+
+void VtTerminalWidget::mouseMoveEvent(QMouseEvent* e) {
+    if (m_selecting) {
+        QPoint g = posToGrid(e->pos());
+        m_selEndX = g.x();
+        m_selEndY = g.y();
+        update();
+    }
+    QWidget::mouseMoveEvent(e);
+}
+
+void VtTerminalWidget::mouseReleaseEvent(QMouseEvent* e) {
+    if (e->button() == Qt::LeftButton && m_selecting) {
+        m_selecting = false;
+        update();
+    }
+    QWidget::mouseReleaseEvent(e);
+}
+
+void VtTerminalWidget::wheelEvent(QWheelEvent* e) {
+    int delta = e->angleDelta().y();
+    int lines = qMax(1, qAbs(delta) / 120);
+    if (delta > 0) {
+        m_scrollOffset = qMin(m_scrollback.size(), m_scrollOffset + lines);
+    } else {
+        m_scrollOffset = qMax(0, m_scrollOffset - lines);
+    }
+    update();
+    e->accept();
+}
+
 void VtTerminalWidget::copyClipboard() {
-    QApplication::clipboard()->setText(""); // TODO: selection-based copy
+    QString text = selectedText();
+    if (!text.isEmpty()) {
+        QApplication::clipboard()->setText(text);
+    }
 }
 
 void VtTerminalWidget::pasteClipboard() {
