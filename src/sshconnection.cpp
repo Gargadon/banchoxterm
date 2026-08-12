@@ -319,11 +319,13 @@ void SshConnection::openShell() {
     }
 
     // Enable OSC 7 working directory reporting so the SFTP browser can follow
-    // terminal navigation (bash and zsh).
+    // terminal navigation (bash and zsh). The trailing clear-screen erases the
+    // command's own echo so the user does not see the injected snippet.
     static const char* integration = "if [ -n \"$BASH_VERSION\" ]; then "
                                      "PROMPT_COMMAND='printf \"\\033]7;file://%s\\007\" \"$PWD\"'; "
                                      "elif [ -n \"$ZSH_VERSION\" ]; then "
-                                     "precmd(){ printf \"\\033]7;file://%s\\007\" \"$PWD\"; }; fi\n";
+                                     "precmd(){ printf \"\\033]7;file://%s\\007\" \"$PWD\"; }; fi"
+                                     "; printf '\\033[2J\\033[H'\n";
     libssh2_channel_write(m_channel, integration, std::strlen(integration));
 }
 
