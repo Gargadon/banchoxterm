@@ -10,7 +10,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # Find Qt6 components
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network Test LinguistTools)
 
 # Find QTermWidget6
 find_package(qtermwidget6 REQUIRED)
@@ -71,6 +71,30 @@ target_link_libraries(banchoxterm
 if(WIN32)
     target_link_libraries(banchoxterm PRIVATE advapi32)
 endif()
+
+# ── Translations ────────────────────────────────────────────────────
+# Generate the .qm files from the .ts sources so that a clean checkout can
+# build without pre-generating them. The .qm files are embedded via
+# resources.qrc.
+
+set(TS_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/translations/banchoxterm_es.ts
+    ${CMAKE_CURRENT_SOURCE_DIR}/translations/banchoxterm_pt.ts
+)
+set(QM_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/translations/banchoxterm_es.qm
+    ${CMAKE_CURRENT_SOURCE_DIR}/translations/banchoxterm_pt.qm
+)
+
+add_custom_command(
+    OUTPUT ${QM_FILES}
+    COMMAND Qt6::lrelease ${TS_FILES}
+    DEPENDS ${TS_FILES}
+    COMMENT "Generating translation files (.qm)"
+)
+
+add_custom_target(translations DEPENDS ${QM_FILES})
+add_dependencies(banchoxterm translations)
 
 # ── Tests ──────────────────────────────────────────────────────────
 
