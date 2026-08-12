@@ -6,7 +6,12 @@
 class QTermWidget;
 class QLabel;
 class QThread;
+class QTimer;
 class SshConnection;
+class VtTerminalWidget;
+#ifdef Q_OS_WIN
+#include "conpty.h"
+#endif
 
 class TerminalTab : public QWidget {
     Q_OBJECT
@@ -56,12 +61,20 @@ private slots:
 private:
     void launchExternalClient();
     void setupSshTerminal();
+    void setupWindowsTerminal();
+    void startConPtyPolling();
+    void pollConPtyOutput();
 
     Session m_session;
     QTermWidget* m_terminal = nullptr;
+    VtTerminalWidget* m_vtTerminal = nullptr;
     QLabel* m_statusLabel = nullptr;
     QProcess* m_externalProcess = nullptr;
     SshConnection* m_connection = nullptr;
     QThread* m_connectionThread = nullptr;
+#ifdef Q_OS_WIN
+    ConPty* m_conpty = nullptr;
+    QTimer* m_conptyPollTimer = nullptr;
+#endif
     bool m_isActive = true;
 };

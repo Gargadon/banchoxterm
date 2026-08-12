@@ -26,6 +26,8 @@ include_directories(
 
 # Source files
 set(SOURCES
+    src/conpty.cpp
+    src/conpty.h
     src/keyring.cpp
     src/keyring.h
     src/main.cpp
@@ -49,6 +51,8 @@ set(SOURCES
     src/sshconnection.h
     src/theme.cpp
     src/theme.h
+    src/vtterminalwidget.cpp
+    src/vtterminalwidget.h
     resources.qrc
 )
 

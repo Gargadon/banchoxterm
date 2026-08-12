@@ -1,5 +1,6 @@
 #include "terminaltab.h"
 #include "sshconnection.h"
+#include "vtterminalwidget.h"
 #include <qtermwidget.h>
 #include <QVBoxLayout>
 #include <QLabel>
@@ -42,6 +43,9 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 
         QTimer::singleShot(100, this, &TerminalTab::launchExternalClient);
     } else {
+#ifdef Q_OS_WIN
+        setupWindowsTerminal();
+#else
         m_terminal = new QTermWidget(0, this);
 
         QTimer::singleShot(0, this, &TerminalTab::updateFontFromSettings);
@@ -120,11 +124,24 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             m_terminal->setShellProgram(shell);
             m_terminal->startShellProgram();
         }
+#endif
     }
 }
 
 TerminalTab::~TerminalTab() {
     closeExternalProcess();
+
+#ifdef Q_OS_WIN
+    if (m_conptyPollTimer) {
+        m_conptyPollTimer->stop();
+        delete m_conptyPollTimer;
+        m_conptyPollTimer = nullptr;
+    }
+    if (m_conpty) {
+        delete m_conpty;
+        m_conpty = nullptr;
+    }
+#endif
 
     if (m_connection && m_connectionThread && m_connectionThread->isRunning()) {
         QMetaObject::invokeMethod(m_connection, "disconnectFromHost", Qt::BlockingQueuedConnection);
@@ -152,6 +169,105 @@ void TerminalTab::resizeEvent(QResizeEvent* event) {
         }
     }
 }
+
+#ifdef Q_OS_WIN
+void TerminalTab::setupWindowsTerminal() {
+    m_vtTerminal = new VtTerminalWidget(this);
+    layout()->addWidget(m_vtTerminal);
+
+    connect(m_vtTerminal, &VtTerminalWidget::workingDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
+    connect(m_vtTerminal, &VtTerminalWidget::titleChanged, this,
+            [this](const QString& title) { emit titleChanged(title); });
+    connect(m_vtTerminal, &VtTerminalWidget::finished, this, &TerminalTab::onTerminalFinished);
+
+    if (m_session.type == SessionType::SSH) {
+        connect(m_vtTerminal, &VtTerminalWidget::dataReady, this, [this](const QByteArray& data) {
+            if (m_connection) {
+                QMetaObject::invokeMethod(m_connection, "sendToShell", Qt::QueuedConnection, Q_ARG(QByteArray, data));
+            }
+        });
+        connect(m_vtTerminal, &VtTerminalWidget::resized, this, [this](int rows, int cols) {
+            if (m_connection) {
+                QMetaObject::invokeMethod(m_connection, "resizePty", Qt::QueuedConnection, Q_ARG(int, rows),
+                                          Q_ARG(int, cols));
+            }
+        });
+
+        m_connection = new SshConnection();
+        m_connectionThread = new QThread(this);
+        m_connection->moveToThread(m_connectionThread);
+        m_connectionThread->start();
+
+        connect(m_connection, &SshConnection::shellDataReceived, this, [this](const QByteArray& data) {
+            if (m_vtTerminal)
+                m_vtTerminal->writeData(data);
+        });
+        connect(m_connection, &SshConnection::shellClosed, this, [this]() {
+            m_isActive = false;
+            if (m_vtTerminal)
+                m_vtTerminal->writeData("\r\n[Connection closed]\r\n");
+            emit titleChanged("[Closed] " + m_session.name);
+        });
+        connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
+            if (m_vtTerminal)
+                m_vtTerminal->writeData(("\r\n[Connection failed: " + error + "]\r\n").toUtf8());
+            m_isActive = false;
+            emit titleChanged("[Closed] " + m_session.name);
+        });
+
+        if (m_session.x11Forwarding) {
+            QMetaObject::invokeMethod(m_connection, "setX11Forwarding", Qt::QueuedConnection, Q_ARG(bool, true));
+        }
+    } else if (m_session.type == SessionType::Telnet) {
+        m_conpty = new ConPty();
+        m_conpty->start("telnet", {m_session.host, QString::number(m_session.port)}, 80, 24);
+        startConPtyPolling();
+    } else if (m_session.type == SessionType::Serial) {
+        m_vtTerminal->writeData("Serial connections are not supported on Windows.\r\n");
+        m_isActive = false;
+    } else {
+        QString shell = m_session.shellPath;
+        if (shell.isEmpty())
+            shell = "cmd.exe";
+        m_conpty = new ConPty();
+        m_conpty->start(shell, {}, 80, 24);
+        startConPtyPolling();
+    }
+}
+
+void TerminalTab::startConPtyPolling() {
+    if (!m_conpty || !m_vtTerminal)
+        return;
+
+    connect(m_vtTerminal, &VtTerminalWidget::dataReady, this, [this](const QByteArray& data) {
+        if (m_conpty)
+            m_conpty->write(data);
+    });
+    connect(m_vtTerminal, &VtTerminalWidget::resized, this, [this](int rows, int cols) {
+        if (m_conpty)
+            m_conpty->resize(cols, rows);
+    });
+
+    m_conptyPollTimer = new QTimer(this);
+    connect(m_conptyPollTimer, &QTimer::timeout, this, &TerminalTab::pollConPtyOutput);
+    m_conptyPollTimer->start(10);
+}
+
+void TerminalTab::pollConPtyOutput() {
+    if (!m_conpty || !m_vtTerminal)
+        return;
+
+    QByteArray data = m_conpty->read();
+    if (!data.isEmpty())
+        m_vtTerminal->writeData(data);
+
+    if (!m_conpty->isRunning()) {
+        m_conptyPollTimer->stop();
+        m_isActive = false;
+        emit titleChanged("[Closed] " + m_session.name);
+    }
+}
+#endif
 
 void TerminalTab::setupSshTerminal() {
     m_terminal->startTerminalTeletype();
