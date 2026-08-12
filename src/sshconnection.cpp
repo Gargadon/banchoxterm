@@ -151,6 +151,18 @@ bool SshConnection::waitSocket(int timeoutMs) {
         return false;
 
     int dir = libssh2_session_block_directions(m_session);
+    if (dir == 0) {
+        // libssh2 does not need to wait on the socket (it has buffered data to
+        // process); yield briefly to avoid a busy loop, then let the caller
+        // retry the call immediately.
+#ifdef Q_OS_WIN
+        Sleep(10);
+#else
+        usleep(10000);
+#endif
+        return true;
+    }
+
     fd_set rfds;
     fd_set wfds;
     FD_ZERO(&rfds);
@@ -279,9 +291,9 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     m_pollTimer->start(15);
 
     m_statsTimer = new QTimer(this);
-    connect(m_statsTimer, &QTimer::timeout, this, &SshConnection::queryStats);
+    connect(m_statsTimer, &QTimer::timeout, this, &SshConnection::startStats);
     m_statsTimer->start(8000);
-    QTimer::singleShot(500, this, &SshConnection::queryStats);
+    QTimer::singleShot(500, this, &SshConnection::startStats);
 
     m_connected = true;
     emit connectionSuccess();
@@ -371,6 +383,7 @@ void SshConnection::onPollTimer() {
         return;
     readShell();
     pollX11Bridges();
+    pollStats();
 }
 
 void SshConnection::sendToShell(const QByteArray& data) {
@@ -556,49 +569,83 @@ void SshConnection::deleteFile(const QString& remotePath, bool isDir) {
     }
 }
 
-void SshConnection::queryStats() {
-    if (!m_session)
+void SshConnection::startStats() {
+    if (!m_session || m_statsState != StatsState::Idle)
         return;
+    m_statsState = StatsState::Opening;
+    m_statsBuffer.clear();
+}
 
-    LIBSSH2_CHANNEL* channel = retryPtr([this]() { return libssh2_channel_open_session(m_session); });
-    if (!channel)
+void SshConnection::pollStats() {
+    switch (m_statsState) {
+    case StatsState::Idle:
         return;
-
-    QString cmd = "read cpu u n s id iw irq soft steal rest < /proc/stat; previdle=$((id + iw)); prevtotal=$((u + n + "
-                  "s + id + iw + irq + soft + steal)); sleep 0.2; "
-                  "read cpu u2 n2 s2 id2 iw2 irq2 soft2 steal2 rest < /proc/stat; idle=$((id2 + iw2)); total=$((u2 + "
-                  "n2 + s2 + id2 + iw2 + irq2 + soft2 + steal2)); diffidle=$((idle - previdle)); "
-                  "difftotal=$((total - prevtotal)); if [ $difftotal -eq 0 ]; then echo 0; else echo \"$((100 * "
-                  "(difftotal - diffidle) / difftotal))\"; fi; "
-                  "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f\\n\", 100*(t-a)/t}' /proc/meminfo; "
-                  "df / | tail -n 1 | awk '{print $5}' | sed 's/%//'; "
-                  "cat /proc/uptime | awk '{print $1}'";
-
-    int rc = retry([this, &channel, &cmd]() { return libssh2_channel_exec(channel, cmd.toUtf8().constData()); });
-    if (rc == 0) {
-        QByteArray response;
+    case StatsState::Opening:
+        m_statsChannel = libssh2_channel_open_session(m_session);
+        if (m_statsChannel) {
+            m_statsState = StatsState::Execing;
+        } else if (libssh2_session_last_errno(m_session) != LIBSSH2_ERROR_EAGAIN) {
+            m_statsState = StatsState::Idle;
+        }
+        break;
+    case StatsState::Execing: {
+        static const char* cmd = "read cpu u n s id iw irq soft steal rest < /proc/stat; previdle=$((id + iw)); "
+                                 "prevtotal=$((u + n + s + id + iw + irq + soft + steal)); sleep 0.2; "
+                                 "read cpu u2 n2 s2 id2 iw2 irq2 soft2 steal2 rest < /proc/stat; idle=$((id2 + iw2)); "
+                                 "total=$((u2 + n2 + s2 + id2 + iw2 + irq2 + soft2 + steal2)); "
+                                 "diffidle=$((idle - previdle)); difftotal=$((total - prevtotal)); "
+                                 "if [ $difftotal -eq 0 ]; then echo 0; else echo \"$((100 * (difftotal - diffidle) / "
+                                 "difftotal))\"; fi; "
+                                 "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f\\n\", 100*(t-a)/t}' "
+                                 "/proc/meminfo; "
+                                 "df / | tail -n 1 | awk '{print $5}' | sed 's/%//'; "
+                                 "cat /proc/uptime | awk '{print $1}'";
+        int rc = libssh2_channel_exec(m_statsChannel, cmd);
+        if (rc == 0) {
+            m_statsState = StatsState::Reading;
+        } else if (rc != LIBSSH2_ERROR_EAGAIN) {
+            closeStats();
+        }
+        break;
+    }
+    case StatsState::Reading: {
         char buffer[256];
         while (true) {
-            int bytesRead =
-                retry([this, &channel, &buffer]() { return libssh2_channel_read(channel, buffer, sizeof(buffer)); });
-            if (bytesRead <= 0)
-                break;
-            response.append(buffer, bytesRead);
+            int bytesRead = libssh2_channel_read(m_statsChannel, buffer, sizeof(buffer));
+            if (bytesRead > 0) {
+                m_statsBuffer.append(buffer, bytesRead);
+            } else if (bytesRead == 0) {
+                finishStats();
+                return;
+            } else {
+                break; // EAGAIN or error
+            }
         }
-
-        QString resStr = QString::fromUtf8(response).trimmed();
-        QStringList lines = resStr.split('\n');
-        if (lines.size() >= 4) {
-            double cpu = lines[0].toDouble();
-            double mem = lines[1].toDouble();
-            double disk = lines[2].toDouble();
-            double uptimeSecs = lines[3].toDouble();
-            emit remoteStatsUpdated(cpu, mem, disk, uptimeSecs);
-        }
+        break;
     }
+    }
+}
 
-    libssh2_channel_close(channel);
-    libssh2_channel_free(channel);
+void SshConnection::finishStats() {
+    QString resStr = QString::fromUtf8(m_statsBuffer).trimmed();
+    QStringList lines = resStr.split('\n');
+    if (lines.size() >= 4) {
+        double cpu = lines[0].toDouble();
+        double mem = lines[1].toDouble();
+        double disk = lines[2].toDouble();
+        double uptimeSecs = lines[3].toDouble();
+        emit remoteStatsUpdated(cpu, mem, disk, uptimeSecs);
+    }
+    closeStats();
+}
+
+void SshConnection::closeStats() {
+    if (m_statsChannel) {
+        libssh2_channel_close(m_statsChannel);
+        libssh2_channel_free(m_statsChannel);
+        m_statsChannel = nullptr;
+    }
+    m_statsState = StatsState::Idle;
 }
 
 void SshConnection::setX11Forwarding(bool enabled) {
@@ -767,6 +814,8 @@ void SshConnection::pollX11Bridges() {
 
 void SshConnection::disconnectFromHost() {
     m_connected = false;
+
+    closeStats();
 
     for (X11Bridge* b : m_x11Bridges) {
         if (b->channel) {

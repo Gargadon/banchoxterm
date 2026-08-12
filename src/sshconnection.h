@@ -46,7 +46,6 @@ public slots:
     void downloadFile(const QString& remotePath, const QString& localPath);
     void uploadFile(const QString& localPath, const QString& remotePath);
     void deleteFile(const QString& remotePath, bool isDir);
-    void queryStats();
 
 signals:
     void connectionSuccess();
@@ -88,6 +87,11 @@ private:
     static void x11OpenCallback(LIBSSH2_SESSION* session, LIBSSH2_CHANNEL* channel, const char* shost, int sport,
                                 void** abstract);
 
+    void startStats();
+    void pollStats();
+    void finishStats();
+    void closeStats();
+
     int m_sock = -1;
     LIBSSH2_SESSION* m_session = nullptr;
     LIBSSH2_CHANNEL* m_channel = nullptr;
@@ -104,6 +108,12 @@ private:
     QTimer* m_pollTimer = nullptr;
     QTimer* m_statsTimer = nullptr;
     bool m_connected = false;
+
+    // non-blocking stats query state machine
+    enum class StatsState { Idle, Opening, Execing, Reading };
+    StatsState m_statsState = StatsState::Idle;
+    LIBSSH2_CHANNEL* m_statsChannel = nullptr;
+    QByteArray m_statsBuffer;
 
     // X11 forwarding
     bool m_x11Forwarding = false;

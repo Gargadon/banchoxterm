@@ -148,7 +148,10 @@ TerminalTab::~TerminalTab() {
     }
     if (m_connectionThread) {
         m_connectionThread->quit();
-        m_connectionThread->wait();
+        if (!m_connectionThread->wait(3000)) {
+            m_connectionThread->terminate();
+            m_connectionThread->wait();
+        }
         delete m_connectionThread;
         m_connectionThread = nullptr;
     }
