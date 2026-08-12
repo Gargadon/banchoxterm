@@ -9,7 +9,17 @@
 #include <QSettings>
 #include <QTimer>
 #include <QApplication>
+#include <QMenu>
+#include <QAction>
 #include "keyring.h"
+
+namespace {
+// Remote shell integration: reports the current working directory back to the
+// terminal via OSC 7 so the SFTP browser can follow terminal navigation.
+const char* kShellIntegration = "if command -v bash >/dev/null 2>&1; then "
+                                "PROMPT_COMMAND='printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"'; "
+                                "exec bash -l; else exec \"$SHELL\"; fi";
+} // namespace
 
 TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(parent), m_session(session) {
     auto* layout = new QVBoxLayout(this);
@@ -48,6 +58,10 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         m_terminal->setHistorySize(5000);
         m_terminal->setScrollBarPosition(QTermWidget::ScrollBarRight);
 
+        m_terminal->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(m_terminal, &QWidget::customContextMenuRequested, this, &TerminalTab::showTerminalContextMenu);
+        connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
+
         if (m_session.type == SessionType::SSH) {
 #ifdef Q_OS_WIN
             m_terminal->setShellProgram("ssh");
@@ -67,6 +81,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             }
 
             args << QString("%1@%2").arg(m_session.user, m_session.host);
+            args << QString::fromLatin1(kShellIntegration);
             m_terminal->setArgs(args);
 
             QStringList env = QProcess::systemEnvironment();
@@ -159,6 +174,45 @@ void TerminalTab::onTerminalFinished() {
 void TerminalTab::onTitleChanged() {
     if (m_terminal)
         emit titleChanged(m_terminal->title());
+}
+
+void TerminalTab::onRemoteDirChanged(const QString& dir) {
+    emit remoteDirChanged(dir);
+}
+
+void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
+    if (!m_terminal)
+        return;
+
+    QMenu menu(this);
+
+    auto* copyAct = menu.addAction(tr("&Copy"));
+    copyAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+    copyAct->setEnabled(m_terminal->selectedText().isEmpty() == false);
+
+    auto* pasteAct = menu.addAction(tr("&Paste"));
+    pasteAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+
+    menu.addSeparator();
+
+    auto* clearAct = menu.addAction(tr("Clear Scrollback"));
+    auto* zoomInAct = menu.addAction(tr("Zoom &In"));
+    zoomInAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Plus));
+    auto* zoomOutAct = menu.addAction(tr("Zoom &Out"));
+    zoomOutAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Minus));
+
+    auto* selected = menu.exec(m_terminal->mapToGlobal(pos));
+    if (selected == copyAct) {
+        m_terminal->copyClipboard();
+    } else if (selected == pasteAct) {
+        m_terminal->pasteClipboard();
+    } else if (selected == clearAct) {
+        m_terminal->clear();
+    } else if (selected == zoomInAct) {
+        m_terminal->zoomIn();
+    } else if (selected == zoomOutAct) {
+        m_terminal->zoomOut();
+    }
 }
 
 void TerminalTab::updateFontFromSettings() {

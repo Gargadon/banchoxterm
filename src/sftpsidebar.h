@@ -69,6 +69,9 @@ public:
     void startSession(const Session& session);
     void stopSession();
 
+public slots:
+    void navigateTo(const QString& path);
+
 private slots:
     void onConnectionSuccess();
     void onConnectionFailed(const QString& error);

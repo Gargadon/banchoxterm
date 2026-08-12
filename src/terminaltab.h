@@ -34,10 +34,13 @@ public:
 signals:
     void tabFinished();
     void titleChanged(const QString& title);
+    void remoteDirChanged(const QString& dir);
 
 private slots:
     void onTerminalFinished();
     void onTitleChanged();
+    void onRemoteDirChanged(const QString& dir);
+    void showTerminalContextMenu(const QPoint& pos);
 
 private:
     void launchExternalClient();

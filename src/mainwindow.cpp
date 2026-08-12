@@ -255,6 +255,9 @@ void MainWindow::onConnectSession(const Session& session) {
         m_sftpSidebar->startSession(session);
         m_sftpTabBtn->setEnabled(true);
         switchSidebarTab(1); // Switch sidebar to SFTP files
+
+        // Keep the SFTP browser in sync with the terminal's working directory
+        connect(tab, &TerminalTab::remoteDirChanged, m_sftpSidebar, &SftpSidebar::navigateTo);
     } else if (session.type == SessionType::Telnet) {
         m_tabWidget->setTabIcon(index, QIcon(":/icons/telnet.svg"));
     } else if (session.type == SessionType::RDP) {

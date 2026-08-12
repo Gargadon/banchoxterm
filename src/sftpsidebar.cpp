@@ -393,6 +393,7 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     // Tree view for files
     m_treeWidget = new QTreeWidget(this);
     m_treeWidget->setHeaderLabels({tr("Name"), tr("Size"), tr("Modified")});
+    m_treeWidget->setRootIsDecorated(false);
     m_treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_treeWidget->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
@@ -635,6 +636,19 @@ void SftpSidebar::onParentDirClicked() {
         m_currentPath = m_currentPath.left(lastSlash);
     }
     emit requestList(m_currentPath);
+}
+
+void SftpSidebar::navigateTo(const QString& path) {
+    if (!m_isConnected)
+        return;
+
+    QString cleanPath = path.trimmed();
+    if (cleanPath.isEmpty() || cleanPath == m_currentPath)
+        return;
+
+    m_currentPath = cleanPath;
+    m_pathEdit->setText(cleanPath);
+    emit requestList(cleanPath);
 }
 
 void SftpSidebar::onRefreshClicked() {
