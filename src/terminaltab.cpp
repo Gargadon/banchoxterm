@@ -183,6 +183,9 @@ void TerminalTab::setupSshTerminal() {
 
     // The connection itself is triggered by SftpSidebar::startSession(), which
     // shares this same SshConnection with the terminal.
+    if (m_session.x11Forwarding) {
+        QMetaObject::invokeMethod(m_connection, "setX11Forwarding", Qt::QueuedConnection, Q_ARG(bool, true));
+    }
 }
 
 void TerminalTab::onSendData(const char* data, int size) {

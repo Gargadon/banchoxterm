@@ -2,6 +2,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QThread>
+#include <QProcess>
+#include <QRegularExpression>
 #include <cstring>
 #include <mutex>
 
@@ -11,6 +13,7 @@
 using SockLenT = int;
 #else
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -32,6 +35,12 @@ bool wouldBlock(int err) {
 void closeSocketFd(int sock) {
     ::closesocket(sock);
 }
+ssize_t sockRead(int sock, void* buf, size_t len) {
+    return ::recv(sock, static_cast<char*>(buf), static_cast<int>(len), 0);
+}
+ssize_t sockWrite(int sock, const void* buf, size_t len) {
+    return ::send(sock, static_cast<const char*>(buf), static_cast<int>(len), 0);
+}
 #else
 int lastError() {
     return errno;
@@ -41,6 +50,12 @@ bool wouldBlock(int err) {
 }
 void closeSocketFd(int sock) {
     ::close(sock);
+}
+ssize_t sockRead(int sock, void* buf, size_t len) {
+    return ::read(sock, buf, len);
+}
+ssize_t sockWrite(int sock, const void* buf, size_t len) {
+    return ::write(sock, buf, len);
 }
 #endif
 
@@ -168,6 +183,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     m_port = port;
     m_user = user;
     m_keyPath = keyPath;
+    m_abstract = this;
 
     static std::once_flag init_flag;
     std::call_once(init_flag, []() { libssh2_init(0); });
@@ -177,7 +193,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     if (!openSocket())
         return;
 
-    m_session = libssh2_session_init();
+    m_session = libssh2_session_init_ex(nullptr, nullptr, nullptr, &m_abstract);
     if (!m_session) {
         emit connectionFailed("Failed to initialize SSH session");
         closeSocket();
@@ -185,6 +201,11 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     }
 
     libssh2_session_set_blocking(m_session, 0);
+
+    if (m_x11Forwarding && !m_x11Cookie.isEmpty()) {
+        libssh2_session_callback_set2(m_session, LIBSSH2_CALLBACK_X11,
+                                      reinterpret_cast<libssh2_cb_generic*>(&SshConnection::x11OpenCallback));
+    }
 
     int rc = retry([this]() { return libssh2_session_handshake(m_session, m_sock); });
     if (rc != 0) {
@@ -279,6 +300,16 @@ void SshConnection::openShell() {
 
     libssh2_channel_request_pty_size(m_channel, m_ptyCols, m_ptyRows);
 
+    if (m_x11Forwarding && !m_x11Cookie.isEmpty()) {
+        int xrc = retry([this]() {
+            return libssh2_channel_x11_req_ex(m_channel, 0, "MIT-MAGIC-COOKIE-1", m_x11Cookie.toLatin1().constData(),
+                                              m_x11Screen);
+        });
+        if (xrc != 0) {
+            m_x11Forwarding = false;
+        }
+    }
+
     rc = retry([this]() { return libssh2_channel_shell(m_channel); });
     if (rc != 0) {
         emit connectionFailed("Failed to start shell");
@@ -335,6 +366,7 @@ void SshConnection::onPollTimer() {
     if (!m_connected)
         return;
     readShell();
+    pollX11Bridges();
 }
 
 void SshConnection::sendToShell(const QByteArray& data) {
@@ -560,8 +592,183 @@ void SshConnection::queryStats() {
     libssh2_channel_free(channel);
 }
 
+void SshConnection::setX11Forwarding(bool enabled) {
+    m_x11Forwarding = enabled;
+    if (!enabled)
+        return;
+
+    m_x11Display = QString::fromLocal8Bit(qgetenv("DISPLAY"));
+    if (m_x11Display.isEmpty()) {
+        m_x11Forwarding = false;
+        return;
+    }
+
+    // Parse screen number (default 0) and strip it from the display string.
+    int dotIdx = m_x11Display.lastIndexOf('.');
+    int colonIdx = m_x11Display.lastIndexOf(':');
+    if (dotIdx > colonIdx && colonIdx >= 0) {
+        bool ok = false;
+        int screen = m_x11Display.mid(dotIdx + 1).toInt(&ok);
+        if (ok)
+            m_x11Screen = screen;
+    }
+
+    QProcess proc;
+    proc.start("xauth", {"list", m_x11Display});
+    if (!proc.waitForFinished(2000)) {
+        m_x11Forwarding = false;
+        return;
+    }
+    QString out = QString::fromLocal8Bit(proc.readAllStandardOutput());
+    const QStringList lines = out.split('\n');
+    for (const QString& line : lines) {
+        if (line.contains("MIT-MAGIC-COOKIE-1")) {
+            const QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+            if (parts.size() >= 3) {
+                m_x11Cookie = parts.last().trimmed();
+                return;
+            }
+        }
+    }
+    m_x11Forwarding = false;
+}
+
+int SshConnection::connectToXServer() {
+#ifdef Q_OS_WIN
+    return -1;
+#else
+    int colonIdx = m_x11Display.lastIndexOf(':');
+    int dotIdx = m_x11Display.lastIndexOf('.');
+    if (dotIdx < 0 || dotIdx < colonIdx)
+        dotIdx = m_x11Display.size();
+
+    QString hostPart = m_x11Display.left(colonIdx);
+    int dispNum = m_x11Display.mid(colonIdx + 1, dotIdx - colonIdx - 1).toInt();
+
+    if (hostPart.isEmpty() || hostPart == "unix") {
+        int sock = static_cast<int>(::socket(AF_UNIX, SOCK_STREAM, 0));
+        if (sock >= 0) {
+            struct sockaddr_un addr;
+            memset(&addr, 0, sizeof(addr));
+            addr.sun_family = AF_UNIX;
+            QString path = QString("/tmp/.X11-unix/X%1").arg(dispNum);
+            strncpy(addr.sun_path, path.toLatin1().constData(), sizeof(addr.sun_path) - 1);
+            if (::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
+                setNonBlocking(sock);
+                return sock;
+            }
+            ::close(sock);
+        }
+    }
+
+    // TCP fallback: host:6000+display
+    int sock = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
+    if (sock < 0)
+        return -1;
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(6000 + dispNum);
+    QString tcpHost = hostPart.isEmpty() ? QString("127.0.0.1") : hostPart;
+    inet_pton(AF_INET, tcpHost.toLatin1().constData(), &addr.sin_addr);
+    setNonBlocking(sock);
+    if (::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
+        return sock;
+    }
+    ::close(sock);
+    return -1;
+#endif
+}
+
+void SshConnection::x11OpenCallback(LIBSSH2_SESSION* session, LIBSSH2_CHANNEL* channel, const char* shost, int sport,
+                                    void** abstract) {
+    Q_UNUSED(session);
+    SshConnection* self = static_cast<SshConnection*>(*abstract);
+    if (self)
+        self->handleX11Open(channel, shost, sport);
+}
+
+void SshConnection::handleX11Open(LIBSSH2_CHANNEL* channel, const char* shost, int sport) {
+    Q_UNUSED(shost);
+    Q_UNUSED(sport);
+
+    int xSock = connectToXServer();
+    if (xSock < 0) {
+        libssh2_channel_close(channel);
+        libssh2_channel_free(channel);
+        return;
+    }
+
+    auto* bridge = new X11Bridge();
+    bridge->channel = channel;
+    bridge->xSock = xSock;
+    m_x11Bridges.append(bridge);
+}
+
+void SshConnection::pollX11Bridges() {
+    for (auto it = m_x11Bridges.begin(); it != m_x11Bridges.end();) {
+        X11Bridge* b = *it;
+
+        char buf[8192];
+        ssize_t n;
+        while ((n = libssh2_channel_read(b->channel, buf, sizeof(buf))) > 0) {
+            ssize_t off = 0;
+            while (off < n) {
+                ssize_t w = sockWrite(b->xSock, buf + off, static_cast<size_t>(n - off));
+                if (w <= 0) {
+                    b->sockEof = true;
+                    break;
+                }
+                off += w;
+            }
+        }
+        if (n < 0 && n != LIBSSH2_ERROR_EAGAIN)
+            b->channelEof = true;
+        if (libssh2_channel_eof(b->channel))
+            b->channelEof = true;
+
+        while ((n = sockRead(b->xSock, buf, sizeof(buf))) > 0) {
+            ssize_t off = 0;
+            while (off < n) {
+                ssize_t w = libssh2_channel_write(b->channel, buf + off, static_cast<size_t>(n - off));
+                if (w == LIBSSH2_ERROR_EAGAIN) {
+                    if (!waitSocket(1000))
+                        break;
+                    continue;
+                }
+                if (w <= 0)
+                    break;
+                off += w;
+            }
+        }
+        if (n == 0)
+            b->sockEof = true;
+
+        if (b->channelEof && b->sockEof) {
+            libssh2_channel_close(b->channel);
+            libssh2_channel_free(b->channel);
+            closeSocketFd(b->xSock);
+            delete b;
+            it = m_x11Bridges.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void SshConnection::disconnectFromHost() {
     m_connected = false;
+
+    for (X11Bridge* b : m_x11Bridges) {
+        if (b->channel) {
+            libssh2_channel_close(b->channel);
+            libssh2_channel_free(b->channel);
+        }
+        if (b->xSock >= 0)
+            closeSocketFd(b->xSock);
+        delete b;
+    }
+    m_x11Bridges.clear();
 
     if (m_pollTimer) {
         m_pollTimer->stop();

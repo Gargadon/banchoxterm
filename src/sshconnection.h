@@ -15,6 +15,14 @@ struct SftpFile {
     QDateTime mtime;
 };
 
+// Bridges an incoming X11 channel to the local X server socket.
+struct X11Bridge {
+    LIBSSH2_CHANNEL* channel = nullptr;
+    int xSock = -1;
+    bool channelEof = false;
+    bool sockEof = false;
+};
+
 // Owns a single libssh2 session shared by the terminal shell channel and the
 // SFTP file browser. Runs in its own thread; all libssh2 calls happen there.
 class SshConnection : public QObject {
@@ -30,6 +38,7 @@ public:
 public slots:
     void connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
                        const QString& password = QString());
+    void setX11Forwarding(bool enabled);
     void disconnectFromHost();
     void sendToShell(const QByteArray& data);
     void resizePty(int rows, int cols);
@@ -59,6 +68,12 @@ private:
     int retry(const std::function<int()>& fn);
     void openShell();
     void readShell();
+    void setupX11Cookie();
+    int connectToXServer();
+    void handleX11Open(LIBSSH2_CHANNEL* channel, const char* shost, int sport);
+    void pollX11Bridges();
+    static void x11OpenCallback(LIBSSH2_SESSION* session, LIBSSH2_CHANNEL* channel, const char* shost, int sport,
+                                void** abstract);
 
     int m_sock = -1;
     LIBSSH2_SESSION* m_session = nullptr;
@@ -76,4 +91,12 @@ private:
     QTimer* m_pollTimer = nullptr;
     QTimer* m_statsTimer = nullptr;
     bool m_connected = false;
+
+    // X11 forwarding
+    bool m_x11Forwarding = false;
+    QString m_x11Display;
+    QString m_x11Cookie;
+    int m_x11Screen = 0;
+    QList<X11Bridge*> m_x11Bridges;
+    void* m_abstract = nullptr;
 };
