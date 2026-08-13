@@ -4,6 +4,7 @@
 #include <QTabWidget>
 #include <QComboBox>
 #include <QRadioButton>
+#include <QCheckBox>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QLabel>
@@ -13,6 +14,8 @@
 #include <QDialogButtonBox>
 #include <QMessageBox>
 #include <qtermwidget.h>
+#include <QInputDialog>
+#include "masterpasswordmanager.h"
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Configuration"));
@@ -92,6 +95,11 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     fontLayout->addLayout(fontBtnLayout);
 
     appLayout->addWidget(fontGroupBox);
+
+    m_shellIntegrationCheck = new QCheckBox(tr("Enable remote shell integration (directory tracking)"), appearanceTab);
+    m_shellIntegrationCheck->setChecked(m_enableShellIntegration);
+    appLayout->addWidget(m_shellIntegrationCheck);
+
     appLayout->addStretch();
     tabWidget->addTab(appearanceTab, tr("Appearance"));
 
@@ -136,6 +144,23 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     editorLayout->addStretch();
     tabWidget->addTab(editorTab, tr("Text Editor"));
 
+    // 3. Security Tab
+    auto* securityTab = new QWidget(tabWidget);
+    auto* securityLayout = new QVBoxLayout(securityTab);
+    securityLayout->setSpacing(12);
+    securityLayout->setContentsMargins(15, 15, 15, 15);
+
+    auto* securityTitle = new QLabel(tr("Master Password:"), securityTab);
+    securityTitle->setStyleSheet("font-weight: bold;");
+    securityLayout->addWidget(securityTitle);
+
+    m_masterPasswordCheck = new QCheckBox(tr("Use Master Password to protect session credentials"), securityTab);
+    m_masterPasswordCheck->setChecked(MasterPasswordManager::instance().isEnabled());
+    securityLayout->addWidget(m_masterPasswordCheck);
+
+    securityLayout->addStretch();
+    tabWidget->addTab(securityTab, tr("Security"));
+
     mainLayout->addWidget(tabWidget);
 
     // Dialog buttons
@@ -151,6 +176,42 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     connect(m_customRadio, &QRadioButton::toggled, this, [this, browseBtn](bool checked) {
         m_editorPathEdit->setEnabled(checked);
         browseBtn->setEnabled(checked);
+    });
+
+    connect(m_masterPasswordCheck, &QCheckBox::clicked, this, [this](bool checked) {
+        if (checked) {
+            bool ok;
+            QString pwd1 = QInputDialog::getText(this, tr("Set Master Password"),
+                                                 tr("Enter new Master Password:"), QLineEdit::Password, "", &ok);
+            if (!ok || pwd1.isEmpty()) {
+                m_masterPasswordCheck->setChecked(false);
+                return;
+            }
+            QString pwd2 = QInputDialog::getText(this, tr("Confirm Master Password"),
+                                                 tr("Confirm new Master Password:"), QLineEdit::Password, "", &ok);
+            if (!ok || pwd2.isEmpty() || pwd1 != pwd2) {
+                QMessageBox::warning(this, tr("Passwords Mismatch"), tr("Passwords do not match or are empty."));
+                m_masterPasswordCheck->setChecked(false);
+                return;
+            }
+
+            MasterPasswordManager::instance().setMasterPassword(pwd1);
+            QMessageBox::information(this, tr("Master Password Set"), tr("All future session passwords will be encrypted with your Master Password."));
+        } else {
+            bool ok;
+            QString currentPwd = QInputDialog::getText(this, tr("Disable Master Password"),
+                                                       tr("Enter current Master Password:"), QLineEdit::Password, "", &ok);
+            if (!ok || currentPwd.isEmpty()) {
+                m_masterPasswordCheck->setChecked(true);
+                return;
+            }
+            if (MasterPasswordManager::instance().disableMasterPassword(currentPwd)) {
+                QMessageBox::information(this, tr("Master Password Disabled"), tr("Master Password protection is now disabled. Saved passwords will be stored in plain text."));
+            } else {
+                QMessageBox::warning(this, tr("Incorrect Password"), tr("The Master Password you entered is incorrect. Protection remains enabled."));
+                m_masterPasswordCheck->setChecked(true);
+            }
+        }
     });
 }
 
@@ -177,6 +238,9 @@ void SettingsDialog::loadSettings() {
 
     // Language
     m_lang = settings.value("locale/lang", "en").toString();
+
+    // Shell Integration
+    m_enableShellIntegration = settings.value("terminal/shellIntegration", true).toBool();
 }
 
 void SettingsDialog::saveSettings() {
@@ -188,11 +252,14 @@ void SettingsDialog::saveSettings() {
     QString newLang = m_langCombo->currentData().toString();
     m_colorScheme = m_colorSchemeCombo->currentText();
 
+    m_enableShellIntegration = m_shellIntegrationCheck->isChecked();
+
     settings.setValue("theme/dark", m_darkTheme);
     settings.setValue("terminal/font", m_font.toString());
     settings.setValue("editor/useCustom", m_useCustomEditor);
     settings.setValue("editor/customPath", m_customEditorPath);
     settings.setValue("terminal/colorScheme", m_colorScheme);
+    settings.setValue("terminal/shellIntegration", m_enableShellIntegration);
 
     if (newLang != m_lang) {
         settings.setValue("locale/lang", newLang);

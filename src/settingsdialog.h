@@ -6,6 +6,7 @@ class QComboBox;
 class QLineEdit;
 class QLabel;
 class QRadioButton;
+class QCheckBox;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -30,6 +31,9 @@ public:
     QString selectedLang() const {
         return m_lang;
     }
+    bool enableShellIntegration() const {
+        return m_enableShellIntegration;
+    }
 
 private slots:
     void onChangeFontClicked();
@@ -47,6 +51,7 @@ private:
     QString m_customEditorPath;
     QString m_colorScheme;
     QString m_lang;
+    bool m_enableShellIntegration = true;
 
     QLabel* m_fontPreviewLabel = nullptr;
     QComboBox* m_themeCombo = nullptr;
@@ -55,4 +60,6 @@ private:
     QRadioButton* m_sysDefaultRadio = nullptr;
     QRadioButton* m_customRadio = nullptr;
     QLineEdit* m_editorPathEdit = nullptr;
+    QCheckBox* m_shellIntegrationCheck = nullptr;
+    QCheckBox* m_masterPasswordCheck = nullptr;
 };

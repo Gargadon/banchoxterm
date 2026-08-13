@@ -6,6 +6,44 @@
 #include <QJsonArray>
 #include <QUuid>
 
+static QString tunnelTypeToString(TunnelConfig::Type type) {
+    switch (type) {
+    case TunnelConfig::Type::Local:
+        return "local";
+    case TunnelConfig::Type::Remote:
+        return "remote";
+    case TunnelConfig::Type::Dynamic:
+        return "dynamic";
+    }
+    return "local";
+}
+
+static TunnelConfig::Type tunnelTypeFromString(const QString& s) {
+    if (s == "remote")
+        return TunnelConfig::Type::Remote;
+    if (s == "dynamic")
+        return TunnelConfig::Type::Dynamic;
+    return TunnelConfig::Type::Local;
+}
+
+QJsonObject TunnelConfig::toJson() const {
+    QJsonObject json;
+    json["type"] = tunnelTypeToString(type);
+    json["localPort"] = localPort;
+    json["remoteHost"] = remoteHost;
+    json["remotePort"] = remotePort;
+    return json;
+}
+
+TunnelConfig TunnelConfig::fromJson(const QJsonObject& json) {
+    TunnelConfig c;
+    c.type = tunnelTypeFromString(json["type"].toString());
+    c.localPort = json["localPort"].toInt();
+    c.remoteHost = json["remoteHost"].toString();
+    c.remotePort = json["remotePort"].toInt();
+    return c;
+}
+
 static QString sessionTypeToString(SessionType type) {
     switch (type) {
     case SessionType::SSH:
@@ -51,6 +89,13 @@ QJsonObject Session::toJson() const {
     json["serialPort"] = serialPort;
     json["baudRate"] = baudRate;
     json["serialCmd"] = serialCmd;
+
+    QJsonArray tunnelArray;
+    for (const auto& t : tunnels) {
+        tunnelArray.append(t.toJson());
+    }
+    json["tunnels"] = tunnelArray;
+
     return json;
 }
 
@@ -71,6 +116,14 @@ Session Session::fromJson(const QJsonObject& json) {
     s.serialPort = json["serialPort"].toString();
     s.baudRate = json["baudRate"].toInt(115200);
     s.serialCmd = json["serialCmd"].toString();
+
+    if (json.contains("tunnels") && json["tunnels"].isArray()) {
+        QJsonArray tunnelArray = json["tunnels"].toArray();
+        for (const auto& val : tunnelArray) {
+            s.tunnels.append(TunnelConfig::fromJson(val.toObject()));
+        }
+    }
+
     return s;
 }
 

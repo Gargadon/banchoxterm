@@ -49,6 +49,10 @@ set(SOURCES
     src/settingsdialog.h
     src/sshconnection.cpp
     src/sshconnection.h
+    src/sshtunnel.cpp
+    src/sshtunnel.h
+    src/masterpasswordmanager.cpp
+    src/masterpasswordmanager.h
     src/theme.cpp
     src/theme.h
     src/vtterminalwidget.cpp
@@ -104,12 +108,17 @@ add_executable(banchoxterm_tests
     tests/test_session.cpp
     src/session.cpp
     src/session.h
+    src/masterpasswordmanager.cpp
+    src/masterpasswordmanager.h
+    src/vtterminalwidget.cpp
+    src/vtterminalwidget.h
 )
 
 target_link_libraries(banchoxterm_tests
     PRIVATE
         Qt6::Core
         Qt6::Test
+        Qt6::Widgets
 )
 
 target_include_directories(banchoxterm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

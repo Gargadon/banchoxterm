@@ -15,6 +15,12 @@
 #include <QAction>
 #include <QThread>
 #include <QResizeEvent>
+#include <QFrame>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QCheckBox>
+#include <QKeyEvent>
+#include <QShortcut>
 
 #ifdef Q_OS_WIN
 #include <io.h>
@@ -33,14 +39,17 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         m_statusLabel->setWordWrap(true);
 
         QString proto = session.type == SessionType::RDP ? "RDP" : "VNC";
-        m_statusLabel->setText(tr("%1 session to %2 launched in an external window.\n\nClose this tab when done.")
-                                   .arg(proto, session.host));
+        m_statusLabel->setText(tr("Connecting %1 session to %2...").arg(proto, session.host));
 
         QFont statusFont = m_statusLabel->font();
         statusFont.setPointSize(12);
         m_statusLabel->setFont(statusFont);
 
         layout->addWidget(m_statusLabel);
+
+        m_embeddedContainer = new QWidget(this);
+        m_embeddedContainer->hide();
+        layout->addWidget(m_embeddedContainer);
 
         QTimer::singleShot(100, this, &TerminalTab::launchExternalClient);
     } else {
@@ -127,6 +136,67 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         }
 #endif
     }
+
+    // Construir la barra de búsqueda (Ctrl+F)
+    m_searchFrame = new QFrame(this);
+    m_searchFrame->setFrameShape(QFrame::StyledPanel);
+    m_searchFrame->setStyleSheet("QFrame { background-color: #1a1b26; border-top: 1px solid #414868; }");
+    m_searchFrame->hide();
+
+    auto* searchLayout = new QHBoxLayout(m_searchFrame);
+    searchLayout->setContentsMargins(10, 4, 10, 4);
+    searchLayout->setSpacing(8);
+
+    auto* searchLabel = new QLabel(tr("Search:"), m_searchFrame);
+    searchLabel->setStyleSheet("color: #a9b1d6; font-weight: bold;");
+
+    m_searchEdit = new QLineEdit(m_searchFrame);
+    m_searchEdit->setStyleSheet("QLineEdit { background-color: #16161e; color: #c0caf5; border: 1px solid #414868; padding: 4px; border-radius: 4px; }");
+    m_searchEdit->setPlaceholderText(tr("Find text..."));
+
+    m_btnPrev = new QPushButton(tr("Previous"), m_searchFrame);
+    m_btnPrev->setStyleSheet("QPushButton { background-color: #24283b; color: #a9b1d6; border: 1px solid #414868; padding: 4px 8px; border-radius: 4px; } QPushButton:hover { background-color: #414868; }");
+
+    m_btnNext = new QPushButton(tr("Next"), m_searchFrame);
+    m_btnNext->setStyleSheet("QPushButton { background-color: #24283b; color: #a9b1d6; border: 1px solid #414868; padding: 4px 8px; border-radius: 4px; } QPushButton:hover { background-color: #414868; }");
+
+    m_caseSensitiveCheck = new QCheckBox(tr("Case Sensitive"), m_searchFrame);
+    m_caseSensitiveCheck->setStyleSheet("QCheckBox { color: #a9b1d6; }");
+
+    auto* closeBtn = new QPushButton("X", m_searchFrame);
+    closeBtn->setFlat(true);
+    closeBtn->setStyleSheet("QPushButton { color: #f7768e; font-weight: bold; } QPushButton:hover { color: #ff8998; }");
+
+    searchLayout->addWidget(searchLabel);
+    searchLayout->addWidget(m_searchEdit, 1);
+    searchLayout->addWidget(m_btnPrev);
+    searchLayout->addWidget(m_btnNext);
+    searchLayout->addWidget(m_caseSensitiveCheck);
+    searchLayout->addWidget(closeBtn);
+
+    layout->addWidget(m_searchFrame);
+
+    connect(m_searchEdit, &QLineEdit::returnPressed, this, &TerminalTab::onSearchNext);
+    connect(m_btnNext, &QPushButton::clicked, this, &TerminalTab::onSearchNext);
+    connect(m_btnPrev, &QPushButton::clicked, this, &TerminalTab::onSearchPrev);
+    connect(closeBtn, &QPushButton::clicked, this, &TerminalTab::hideSearchFrame);
+
+    // Atajos de teclado utilizando QShortcut para interceptar eventos de forma limpia
+    auto* searchShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_F), this);
+    connect(searchShortcut, &QShortcut::activated, this, [this]() {
+        if (m_terminal) {
+            m_terminal->toggleShowSearchBar();
+        } else if (m_vtTerminal) {
+            showSearchFrame();
+        }
+    });
+
+    auto* closeSearchShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    connect(closeSearchShortcut, &QShortcut::activated, this, [this]() {
+        if (m_searchFrame && m_searchFrame->isVisible()) {
+            hideSearchFrame();
+        }
+    });
 }
 
 TerminalTab::~TerminalTab() {
@@ -457,23 +527,28 @@ void TerminalTab::updateFontFromSettings() {
 void TerminalTab::launchExternalClient() {
     QString program;
     QStringList args;
+    WId winId = m_embeddedContainer->winId();
 
     if (m_session.type == SessionType::RDP) {
 #ifdef Q_OS_WIN
         program = "mstsc";
-        args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
+        args << "/v:" + m_session.host + ":" + QString::number(m_session.port)
+             << "/parent:" + QString::number(winId);
 #else
         program = "xfreerdp";
-        args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
+        args << "/v:" + m_session.host + ":" + QString::number(m_session.port)
+             << "/parent-window:" + QString::number(winId)
+             << "/cert:ignore"
+             << "/dynamic-resolution"
+             << "+decoration";
         if (!m_session.user.isEmpty()) {
             args << "/u:" + m_session.user;
         }
-        args << "/cert:ignore"
-             << "/dynamic-resolution";
 #endif
     } else if (m_session.type == SessionType::VNC) {
         program = "vncviewer";
-        args << m_session.host + "::" + QString::number(m_session.port);
+        args << m_session.host + "::" + QString::number(m_session.port)
+             << "-parentwindow" << QString::number(winId);
     }
 
     if (program.isEmpty())
@@ -482,11 +557,18 @@ void TerminalTab::launchExternalClient() {
     m_externalProcess = new QProcess(this);
     m_externalProcess->setProcessChannelMode(QProcess::ForwardedChannels);
 
+    connect(m_externalProcess, &QProcess::started, this, [this]() {
+        if (m_statusLabel) m_statusLabel->hide();
+        if (m_embeddedContainer) m_embeddedContainer->show();
+    });
+
     connect(m_externalProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int exitCode, QProcess::ExitStatus) {
                 Q_UNUSED(exitCode);
                 m_isActive = false;
+                if (m_embeddedContainer) m_embeddedContainer->hide();
                 if (m_statusLabel) {
+                    m_statusLabel->show();
                     m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
                 }
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
@@ -494,8 +576,10 @@ void TerminalTab::launchExternalClient() {
 
     connect(m_externalProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         Q_UNUSED(error);
+        if (m_embeddedContainer) m_embeddedContainer->hide();
         if (m_statusLabel) {
-            m_statusLabel->setText(tr("Failed to launch external client.\n\n") +
+            m_statusLabel->show();
+            m_statusLabel->setText(tr("Failed to launch embedded client.\n\n") +
                                    tr("Make sure the required program is installed:\n") +
                                    (m_session.type == SessionType::RDP ? tr("RDP: xfreerdp (Linux) or mstsc (Windows)")
                                                                        : tr("VNC: vncviewer")));
@@ -511,5 +595,45 @@ void TerminalTab::closeExternalProcess() {
         if (!m_externalProcess->waitForFinished(3000)) {
             m_externalProcess->kill();
         }
+    }
+}
+
+
+void TerminalTab::showSearchFrame() {
+    if (m_searchFrame) {
+        m_searchFrame->show();
+        m_searchEdit->setFocus();
+        m_searchEdit->selectAll();
+    }
+}
+
+void TerminalTab::hideSearchFrame() {
+    if (m_searchFrame) {
+        m_searchFrame->hide();
+        if (m_terminal) {
+            m_terminal->setFocus();
+        } else if (m_vtTerminal) {
+            m_vtTerminal->setFocus();
+        }
+    }
+}
+
+void TerminalTab::onSearchNext() {
+    QString text = m_searchEdit->text();
+    if (text.isEmpty())
+        return;
+    bool cs = m_caseSensitiveCheck->isChecked();
+    if (m_vtTerminal) {
+        m_vtTerminal->findText(text, true, cs);
+    }
+}
+
+void TerminalTab::onSearchPrev() {
+    QString text = m_searchEdit->text();
+    if (text.isEmpty())
+        return;
+    bool cs = m_caseSensitiveCheck->isChecked();
+    if (m_vtTerminal) {
+        m_vtTerminal->findText(text, false, cs);
     }
 }

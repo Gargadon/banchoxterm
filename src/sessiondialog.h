@@ -7,6 +7,8 @@ class QLineEdit;
 class QSpinBox;
 class QStackedWidget;
 class QCheckBox;
+class QTableWidget;
+class QPushButton;
 
 class SessionDialog : public QDialog {
     Q_OBJECT
@@ -54,6 +56,12 @@ private:
     QLineEdit* m_serialPortEdit;
     QComboBox* m_serialBaudCombo;
     QComboBox* m_serialCmdCombo;
+
+    // Tunnels
+    QTableWidget* m_tunnelsTable;
+    QPushButton* m_addTunnelBtn;
+    QPushButton* m_deleteTunnelBtn;
+    QList<TunnelConfig> m_tunnels;
 
     QString m_id;
 };

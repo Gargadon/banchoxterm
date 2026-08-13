@@ -142,6 +142,39 @@ QString getDarkTheme() {
             width: 12px;
             height: 12px;
         }
+        QSpinBox::up-button {
+            subcontrol-origin: border;
+            subcontrol-position: top right;
+            width: 18px;
+            border-left: 1px solid #24283b;
+            border-bottom: 1px solid #24283b;
+            background: transparent;
+            border-top-right-radius: 6px;
+        }
+        QSpinBox::up-button:hover {
+            background-color: #24283b;
+        }
+        QSpinBox::up-arrow {
+            image: url(:/icons/chevron-up.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QSpinBox::down-button {
+            subcontrol-origin: border;
+            subcontrol-position: bottom right;
+            width: 18px;
+            border-left: 1px solid #24283b;
+            background: transparent;
+            border-bottom-right-radius: 6px;
+        }
+        QSpinBox::down-button:hover {
+            background-color: #24283b;
+        }
+        QSpinBox::down-arrow {
+            image: url(:/icons/chevron-down.svg);
+            width: 10px;
+            height: 10px;
+        }
 
         /* List and Tree Views */
         QListView, QTreeView {
@@ -200,36 +233,84 @@ QString getDarkTheme() {
         QScrollBar:vertical {
             border: none;
             background: #16161e;
-            width: 10px;
-            margin: 0px;
+            width: 14px;
+            margin: 14px 0px 14px 0px;
         }
         QScrollBar::handle:vertical {
             background: #24283b;
             min-height: 20px;
-            border-radius: 5px;
+            border-radius: 4px;
         }
         QScrollBar::handle:vertical:hover {
             background: #414868;
         }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-            height: 0px;
+        QScrollBar::add-line:vertical {
+            border: none;
+            background: #16161e;
+            height: 14px;
+            subcontrol-position: bottom;
+            subcontrol-origin: margin;
+        }
+        QScrollBar::sub-line:vertical {
+            border: none;
+            background: #16161e;
+            height: 14px;
+            subcontrol-position: top;
+            subcontrol-origin: margin;
+        }
+        QScrollBar::up-arrow:vertical {
+            image: url(:/icons/chevron-up.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QScrollBar::down-arrow:vertical {
+            image: url(:/icons/chevron-down.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: none;
         }
         QScrollBar:horizontal {
             border: none;
             background: #16161e;
-            height: 10px;
-            margin: 0px;
+            height: 14px;
+            margin: 0px 14px 0px 14px;
         }
         QScrollBar::handle:horizontal {
             background: #24283b;
             min-width: 20px;
-            border-radius: 5px;
+            border-radius: 4px;
         }
         QScrollBar::handle:horizontal:hover {
             background: #414868;
         }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-            width: 0px;
+        QScrollBar::add-line:horizontal {
+            border: none;
+            background: #16161e;
+            width: 14px;
+            subcontrol-position: right;
+            subcontrol-origin: margin;
+        }
+        QScrollBar::sub-line:horizontal {
+            border: none;
+            background: #16161e;
+            width: 14px;
+            subcontrol-position: left;
+            subcontrol-origin: margin;
+        }
+        QScrollBar::left-arrow:horizontal {
+            image: url(:/icons/chevron-left.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QScrollBar::right-arrow:horizontal {
+            image: url(:/icons/chevron-right.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: none;
         }
 
         /* Menus */
@@ -418,6 +499,39 @@ QString getLightTheme() {
             width: 12px;
             height: 12px;
         }
+        QSpinBox::up-button {
+            subcontrol-origin: border;
+            subcontrol-position: top right;
+            width: 18px;
+            border-left: 1px solid #ccc;
+            border-bottom: 1px solid #ccc;
+            background: transparent;
+            border-top-right-radius: 6px;
+        }
+        QSpinBox::up-button:hover {
+            background-color: #f0f0f2;
+        }
+        QSpinBox::up-arrow {
+            image: url(:/icons/chevron-up.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QSpinBox::down-button {
+            subcontrol-origin: border;
+            subcontrol-position: bottom right;
+            width: 18px;
+            border-left: 1px solid #ccc;
+            background: transparent;
+            border-bottom-right-radius: 6px;
+        }
+        QSpinBox::down-button:hover {
+            background-color: #f0f0f2;
+        }
+        QSpinBox::down-arrow {
+            image: url(:/icons/chevron-down.svg);
+            width: 10px;
+            height: 10px;
+        }
 
         /* List and Tree Views */
         QListView, QTreeView {
@@ -476,30 +590,84 @@ QString getLightTheme() {
         QScrollBar:vertical {
             border: none;
             background: #f5f6f9;
-            width: 10px;
-            margin: 0px;
+            width: 14px;
+            margin: 14px 0px 14px 0px;
         }
         QScrollBar::handle:vertical {
             background: #ccc;
             min-height: 20px;
-            border-radius: 5px;
+            border-radius: 4px;
         }
         QScrollBar::handle:vertical:hover {
             background: #bbb;
         }
+        QScrollBar::add-line:vertical {
+            border: none;
+            background: #f5f6f9;
+            height: 14px;
+            subcontrol-position: bottom;
+            subcontrol-origin: margin;
+        }
+        QScrollBar::sub-line:vertical {
+            border: none;
+            background: #f5f6f9;
+            height: 14px;
+            subcontrol-position: top;
+            subcontrol-origin: margin;
+        }
+        QScrollBar::up-arrow:vertical {
+            image: url(:/icons/chevron-up.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QScrollBar::down-arrow:vertical {
+            image: url(:/icons/chevron-down.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: none;
+        }
         QScrollBar:horizontal {
             border: none;
             background: #f5f6f9;
-            height: 10px;
-            margin: 0px;
+            height: 14px;
+            margin: 0px 14px 0px 14px;
         }
         QScrollBar::handle:horizontal {
             background: #ccc;
             min-width: 20px;
-            border-radius: 5px;
+            border-radius: 4px;
         }
         QScrollBar::handle:horizontal:hover {
             background: #bbb;
+        }
+        QScrollBar::add-line:horizontal {
+            border: none;
+            background: #f5f6f9;
+            width: 14px;
+            subcontrol-position: right;
+            subcontrol-origin: margin;
+        }
+        QScrollBar::sub-line:horizontal {
+            border: none;
+            background: #f5f6f9;
+            width: 14px;
+            subcontrol-position: left;
+            subcontrol-origin: margin;
+        }
+        QScrollBar::left-arrow:horizontal {
+            image: url(:/icons/chevron-left.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QScrollBar::right-arrow:horizontal {
+            image: url(:/icons/chevron-right.svg);
+            width: 10px;
+            height: 10px;
+        }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: none;
         }
 
         /* Menus */

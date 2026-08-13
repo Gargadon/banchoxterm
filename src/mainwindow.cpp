@@ -18,6 +18,7 @@
 #include <QIcon>
 #include <QApplication>
 #include <QStyle>
+#include <QShortcut>
 #include <QToolBar>
 #include <QMenuBar>
 #include <QAction>
@@ -30,6 +31,7 @@
 #include <QMessageBox>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    setWindowIcon(QIcon(":/icons/logo.svg"));
     QSettings settings;
     m_isDarkTheme = settings.value("theme/dark", true).toBool();
     setupUi();
@@ -222,6 +224,15 @@ void MainWindow::setupUi() {
     connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, &MainWindow::onTabCloseRequested);
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::onCurrentTabChanged);
     connect(m_sftpSidebar, &SftpSidebar::remoteStatsUpdated, this, &MainWindow::onRemoteStatsUpdated);
+
+    // Atajo Ctrl+W para cerrar la pestaña activa
+    auto* closeTabShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_W), this);
+    connect(closeTabShortcut, &QShortcut::activated, this, [this]() {
+        int idx = m_tabWidget->currentIndex();
+        if (idx != -1) {
+            onTabCloseRequested(idx);
+        }
+    });
 
     // Status bar remote stats label
     m_remoteMonitorLabel = new QLabel(this);
@@ -477,12 +488,17 @@ void MainWindow::setupMenuBar() {
 }
 
 void MainWindow::showAbout() {
-    QMessageBox::about(this, tr("About BanchoXterm"),
-                       tr("<h3>BanchoXterm</h3>"
-                          "<p>A multi-protocol terminal emulator and remote session manager.</p>"
-                          "<p>Version %1</p>"
-                          "<p>Supports SSH, SFTP, Telnet, RDP, VNC, Serial and local terminals.</p>")
-                           .arg(QStringLiteral("0.1.0")));
+    QString content = QString("<h2>BanchoXterm</h2>"
+                              "<p><b>%1</b></p>"
+                              "<p>%2</p>"
+                              "<p style=\"font-size: 11px; color: #888;\">%3</p>"
+                              "<p style=\"font-size: 11px; color: #888;\">%4</p>")
+                      .arg(tr("Version %1").arg(QStringLiteral("0.1.0")))
+                      .arg(tr("A multi-protocol terminal emulator and remote session manager designed for command-line rebels."))
+                      .arg(tr("Supports SSH, SFTP, Telnet, Serial, RDP, VNC, and local terminals."))
+                      .arg(tr("Copyright &copy; 2026 BanchoXterm. All rights reserved."));
+
+    QMessageBox::about(this, tr("About BanchoXterm"), content);
 }
 
 TerminalTab* MainWindow::currentTerminalTab() const {

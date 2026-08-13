@@ -7,6 +7,7 @@
 #include <QProcess>
 #include <QDebug>
 #endif
+#include "masterpasswordmanager.h"
 
 namespace Keyring {
 
@@ -16,9 +17,14 @@ bool storePassword(const QString& sessionId, const QString& password) {
     if (sessionId.isEmpty() || password.isEmpty())
         return false;
 
+    QString storedPassword = password;
+    if (MasterPasswordManager::instance().isEnabled()) {
+        storedPassword = MasterPasswordManager::instance().encryptPassword(password);
+    }
+
     std::wstring targetName = QString("BanchoXterm:%1").arg(sessionId).toStdWString();
     std::wstring userName = sessionId.toStdWString();
-    std::wstring blob = password.toStdWString();
+    std::wstring blob = storedPassword.toStdWString();
 
     CREDENTIALW cred = {};
     cred.Type = CRED_TYPE_GENERIC;
@@ -46,6 +52,10 @@ QString lookupPassword(const QString& sessionId) {
         len = 0;
     QString password = QString::fromWCharArray(reinterpret_cast<const wchar_t*>(cred->CredentialBlob), len);
     CredFree(cred);
+
+    if (password.startsWith("BANCHO:")) {
+        return MasterPasswordManager::instance().decryptPassword(password);
+    }
     return password;
 }
 
@@ -63,13 +73,18 @@ bool storePassword(const QString& sessionId, const QString& password) {
     if (sessionId.isEmpty() || password.isEmpty())
         return false;
 
+    QString storedPassword = password;
+    if (MasterPasswordManager::instance().isEnabled()) {
+        storedPassword = MasterPasswordManager::instance().encryptPassword(password);
+    }
+
     QProcess process;
     process.start("secret-tool", {"store", "--label=BanchoXterm Session Password", "id", sessionId});
     if (!process.waitForStarted(2000)) {
         return false;
     }
 
-    process.write(password.toUtf8());
+    process.write(storedPassword.toUtf8());
     process.write("\n");
     process.closeWriteChannel();
 
@@ -92,7 +107,11 @@ QString lookupPassword(const QString& sessionId) {
         return "";
     }
 
-    return QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    QString password = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    if (password.startsWith("BANCHO:")) {
+        return MasterPasswordManager::instance().decryptPassword(password);
+    }
+    return password;
 }
 
 bool deletePassword(const QString& sessionId) {

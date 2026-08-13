@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QTranslator>
 #include <QSettings>
+#include <QIcon>
 #include <iostream>
 #include "mainwindow.h"
 #include "keyring.h"
@@ -19,6 +20,7 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("BanchoXterm");
     app.setApplicationDisplayName("BanchoXterm");
     app.setOrganizationName("BanchoXterm");
+    app.setWindowIcon(QIcon(":/icons/logo.svg"));
 
     QSettings settings;
     QString lang = settings.value("locale/lang", "en").toString();

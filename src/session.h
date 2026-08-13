@@ -5,6 +5,17 @@
 
 enum class SessionType { SSH, Local, Telnet, Serial, RDP, VNC };
 
+struct TunnelConfig {
+    enum class Type { Local, Remote, Dynamic };
+    Type type;
+    int localPort;
+    QString remoteHost;
+    int remotePort;
+
+    QJsonObject toJson() const;
+    static TunnelConfig fromJson(const QJsonObject& json);
+};
+
 struct Session {
     QString id;
     QString name;
@@ -24,6 +35,8 @@ struct Session {
     QString serialPort;
     int baudRate = 115200;
     QString serialCmd;
+
+    QList<TunnelConfig> tunnels;
 
     QJsonObject toJson() const;
     static Session fromJson(const QJsonObject& json);

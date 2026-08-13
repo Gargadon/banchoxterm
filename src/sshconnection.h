@@ -7,6 +7,8 @@
 #include <functional>
 #include <libssh2.h>
 #include <libssh2_sftp.h>
+#include "session.h"
+#include "sshtunnel.h"
 
 struct SftpFile {
     QString name;
@@ -37,7 +39,7 @@ public:
 
 public slots:
     void connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
-                       const QString& password = QString());
+                       const QString& password, const QList<TunnelConfig>& tunnels);
     void setX11Forwarding(bool enabled);
     void disconnectFromHost();
     void sendToShell(const QByteArray& data);
@@ -122,4 +124,8 @@ private:
     int m_x11Screen = 0;
     QList<X11Bridge*> m_x11Bridges;
     void* m_abstract = nullptr;
+
+    // Tunnels
+    QList<TunnelConfig> m_tunnelConfigs;
+    QList<SshTunnel*> m_tunnels;
 };

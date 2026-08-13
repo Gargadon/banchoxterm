@@ -9,6 +9,7 @@
 #include <QScrollBar>
 #include <QDebug>
 #include <utility>
+#include <QRegularExpression>
 
 namespace {
 
@@ -543,6 +544,24 @@ void VtTerminalWidget::keyPressEvent(QKeyEvent* e) {
     QWidget::keyPressEvent(e);
 }
 
+struct HighlightRule {
+    QRegularExpression regex;
+    QColor fgColor;
+    bool bold = false;
+};
+
+static QVector<HighlightRule> getHighlightRules() {
+    static QVector<HighlightRule> rules = {
+        {QRegularExpression(R"(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)"), QColor("#9ece6a"), true},
+        {QRegularExpression(R"(\b\d+\b)"), QColor("#ff9e64"), false},
+        {QRegularExpression(R"(\b(error|failed|failure|critical|fatal|exception)\b)", QRegularExpression::CaseInsensitiveOption), QColor("#f7768e"), true},
+        {QRegularExpression(R"(\b(success|ok|connected|accepted|established|online)\b)", QRegularExpression::CaseInsensitiveOption), QColor("#9ece6a"), true},
+        {QRegularExpression(R"(\b(warning|warn|attention)\b)", QRegularExpression::CaseInsensitiveOption), QColor("#e0af68"), true},
+        {QRegularExpression(R"(\b(https?://\S+|/[a-zA-Z0-9_\-\./]+)\b)"), QColor("#7dcfff"), false}
+    };
+    return rules;
+}
+
 void VtTerminalWidget::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.setFont(m_font);
@@ -550,15 +569,51 @@ void VtTerminalWidget::paintEvent(QPaintEvent*) {
     painter.fillRect(rect(), darkPalette().bg);
 
     int firstLine = firstVisibleLine();
+    QVector<HighlightRule> rules = getHighlightRules();
+
+    QVector<QVector<QColor>> overrideFg(m_rows, QVector<QColor>(m_cols, QColor()));
+    QVector<QVector<bool>> overrideBold(m_rows, QVector<bool>(m_cols, false));
+
+    for (int y = 0; y < m_rows; ++y) {
+        int fullLine = firstLine + y;
+        QString lineText;
+        lineText.reserve(m_cols);
+        for (int x = 0; x < m_cols; ++x) {
+            lineText.append(QChar(cellAt(x, fullLine).ch));
+        }
+
+        for (const auto& rule : rules) {
+            auto matchIterator = rule.regex.globalMatch(lineText);
+            while (matchIterator.hasNext()) {
+                auto match = matchIterator.next();
+                int start = match.capturedStart();
+                int end = match.capturedEnd();
+                for (int x = start; x < end && x < m_cols; ++x) {
+                    overrideFg[y][x] = rule.fgColor;
+                    if (rule.bold) {
+                        overrideBold[y][x] = true;
+                    }
+                }
+            }
+        }
+    }
+
     for (int y = 0; y < m_rows; y++) {
         int fullLine = firstLine + y;
         for (int x = 0; x < m_cols; x++) {
             Cell c = cellAt(x, fullLine);
+            if (overrideFg[y][x].isValid()) {
+                c.fg = overrideFg[y][x];
+                c.fgSet = true;
+                if (overrideBold[y][x]) {
+                    c.bold = true;
+                }
+            }
             if (inSelection(x, fullLine)) {
                 c.bg = QColor("#264f78");
                 c.bgSet = true;
             }
-            if (c.ch != u' ' || c.bgSet || c.inverse || c.underline)
+            if (c.ch != u' ' || c.bgSet || c.inverse || c.underline || c.fgSet)
                 drawCell(painter, x, y, c);
         }
     }
@@ -747,4 +802,135 @@ void VtTerminalWidget::pasteClipboard() {
     if (!text.isEmpty()) {
         emit dataReady(text.toUtf8());
     }
+}
+
+bool VtTerminalWidget::findText(const QString& str, bool next, bool caseSensitive) {
+    if (str.isEmpty())
+        return false;
+
+    int total = totalLines();
+    int startLine = 0;
+    int startCol = 0;
+
+    if (m_selStartX != m_selEndX || m_selStartY != m_selEndY) {
+        if (next) {
+            int ey = m_selEndY;
+            int ex = m_selEndX;
+            int sy = m_selStartY;
+            int sx = m_selStartX;
+            if (sy > ey || (sy == ey && sx > ex)) {
+                std::swap(sx, ex);
+                std::swap(sy, ey);
+            }
+            startLine = ey;
+            startCol = ex + 1;
+        } else {
+            int ey = m_selEndY;
+            int ex = m_selEndX;
+            int sy = m_selStartY;
+            int sx = m_selStartX;
+            if (sy > ey || (sy == ey && sx > ex)) {
+                std::swap(sx, ex);
+                std::swap(sy, ey);
+            }
+            startLine = sy;
+            startCol = sx - 1;
+        }
+    } else {
+        startLine = firstVisibleLine();
+        startCol = 0;
+    }
+
+    auto getLineText = [this](int line) {
+        QString txt;
+        txt.reserve(m_cols);
+        for (int x = 0; x < m_cols; ++x) {
+            txt.append(QChar(cellAt(x, line).ch));
+        }
+        return txt;
+    };
+
+    Qt::CaseSensitivity cs = caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive;
+
+    if (next) {
+        for (int line = startLine; line < total; ++line) {
+            QString lineText = getLineText(line);
+            int col = (line == startLine) ? startCol : 0;
+            if (col >= lineText.size())
+                continue;
+
+            int idx = lineText.indexOf(str, col, cs);
+            if (idx != -1) {
+                m_selStartX = idx;
+                m_selStartY = line;
+                m_selEndX = idx + str.length() - 1;
+                m_selEndY = line;
+                ensureLineVisible(line);
+                update();
+                return true;
+            }
+        }
+
+        // Bucle desde el inicio
+        for (int line = 0; line <= startLine; ++line) {
+            QString lineText = getLineText(line);
+            int idx = lineText.indexOf(str, 0, cs);
+            if (line == startLine && idx >= startCol)
+                continue;
+            if (idx != -1) {
+                m_selStartX = idx;
+                m_selStartY = line;
+                m_selEndX = idx + str.length() - 1;
+                m_selEndY = line;
+                ensureLineVisible(line);
+                update();
+                return true;
+            }
+        }
+    } else {
+        for (int line = startLine; line >= 0; --line) {
+            QString lineText = getLineText(line);
+            int col = (line == startLine) ? startCol : lineText.size();
+
+            int idx = lineText.lastIndexOf(str, col, cs);
+            if (idx != -1) {
+                m_selStartX = idx;
+                m_selStartY = line;
+                m_selEndX = idx + str.length() - 1;
+                m_selEndY = line;
+                ensureLineVisible(line);
+                update();
+                return true;
+            }
+        }
+
+        // Bucle desde el final
+        for (int line = total - 1; line >= startLine; --line) {
+            QString lineText = getLineText(line);
+            int col = (line == startLine) ? startCol : lineText.size();
+            int idx = lineText.lastIndexOf(str, col, cs);
+            if (idx != -1) {
+                m_selStartX = idx;
+                m_selStartY = line;
+                m_selEndX = idx + str.length() - 1;
+                m_selEndY = line;
+                ensureLineVisible(line);
+                update();
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void VtTerminalWidget::ensureLineVisible(int line) {
+    int firstVis = firstVisibleLine();
+    int lastVis = firstVis + m_rows - 1;
+    if (line < firstVis) {
+        m_scrollOffset = m_scrollback.size() - line;
+    } else if (line > lastVis) {
+        m_scrollOffset = m_scrollback.size() - (line - m_rows + 1);
+    }
+    m_scrollOffset = qBound(0, m_scrollOffset, m_scrollback.size());
 }

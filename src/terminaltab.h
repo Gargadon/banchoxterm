@@ -9,9 +9,11 @@ class QThread;
 class QTimer;
 class SshConnection;
 class VtTerminalWidget;
-#ifdef Q_OS_WIN
-#include "conpty.h"
-#endif
+class QFrame;
+class QLineEdit;
+class QPushButton;
+class QCheckBox;
+class ConPty;
 
 class TerminalTab : public QWidget {
     Q_OBJECT
@@ -58,6 +60,10 @@ private slots:
     void onShellClosed();
     void onSendData(const char* data, int size);
     void flushWriteBuffer();
+    void showSearchFrame();
+    void hideSearchFrame();
+    void onSearchNext();
+    void onSearchPrev();
 
 private:
     void launchExternalClient();
@@ -70,6 +76,7 @@ private:
     QTermWidget* m_terminal = nullptr;
     VtTerminalWidget* m_vtTerminal = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QWidget* m_embeddedContainer = nullptr;
     QProcess* m_externalProcess = nullptr;
     SshConnection* m_connection = nullptr;
     QThread* m_connectionThread = nullptr;
@@ -80,4 +87,10 @@ private:
     QTimer* m_conptyPollTimer = nullptr;
 #endif
     bool m_isActive = true;
+
+    QFrame* m_searchFrame = nullptr;
+    QLineEdit* m_searchEdit = nullptr;
+    QPushButton* m_btnPrev = nullptr;
+    QPushButton* m_btnNext = nullptr;
+    QCheckBox* m_caseSensitiveCheck = nullptr;
 };

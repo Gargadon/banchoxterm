@@ -1,5 +1,6 @@
 <!DOCTYPE RCC><RCC version="1.0">
 <qresource>
+    <file>icons/logo.svg</file>
     <file>icons/terminal.svg</file>
     <file>icons/server.svg</file>
     <file>icons/folder.svg</file>
@@ -20,7 +21,9 @@
     <file>icons/vnc.svg</file>
     <file>icons/gear.svg</file>
     <file>icons/chevron-right.svg</file>
+    <file>icons/chevron-left.svg</file>
     <file>icons/chevron-down.svg</file>
+    <file>icons/chevron-up.svg</file>
     <file>icons/close.svg</file>
     <file>translations/banchoxterm_es.qm</file>
     <file>translations/banchoxterm_pt.qm</file>

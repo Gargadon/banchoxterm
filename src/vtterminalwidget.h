@@ -20,6 +20,8 @@ public:
     void writeData(const QByteArray& data);
     void copyClipboard();
     void pasteClipboard();
+    bool findText(const QString& str, bool next, bool caseSensitive);
+    void ensureLineVisible(int line);
 
     QSize sizeHint() const override;
 

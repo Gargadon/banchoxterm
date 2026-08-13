@@ -5,6 +5,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <cstring>
+#include <QSettings>
 #include <mutex>
 
 #ifdef Q_OS_WIN
@@ -190,11 +191,12 @@ int SshConnection::retry(const std::function<int()>& fn) {
 }
 
 void SshConnection::connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
-                                  const QString& password) {
+                                  const QString& password, const QList<TunnelConfig>& tunnels) {
     m_host = host;
     m_port = port;
     m_user = user;
     m_keyPath = keyPath;
+    m_tunnelConfigs = tunnels;
     m_abstract = this;
 
     static std::once_flag init_flag;
@@ -296,6 +298,17 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     QTimer::singleShot(500, this, &SshConnection::startStats);
 
     m_connected = true;
+
+    // Start active tunnels
+    for (const TunnelConfig& config : m_tunnelConfigs) {
+        SshTunnel* tunnel = new SshTunnel(m_session, config, this);
+        if (tunnel->start()) {
+            m_tunnels.append(tunnel);
+        } else {
+            delete tunnel;
+        }
+    }
+
     emit connectionSuccess();
 }
 
@@ -331,18 +344,21 @@ void SshConnection::openShell() {
     }
 
     // Enable OSC 7 working directory reporting so the SFTP browser can follow
-    // terminal navigation (bash and zsh). The trailing clear-screen erases the
-    // command's own echo so the user does not see the injected snippet.
-    static const char* integration = "if [ -n \"$BASH_VERSION\" ]; then "
-                                     "PROMPT_COMMAND='printf \"\\033]7;file://%s\\007\" \"$PWD\"'; "
-                                     "elif [ -n \"$ZSH_VERSION\" ]; then "
-                                     "precmd(){ printf \"\\033]7;file://%s\\007\" \"$PWD\"; }; fi"
-                                     "; printf '\\033[2J\\033[H'\n";
-    libssh2_channel_write(m_channel, integration, std::strlen(integration));
+    // terminal navigation (bash and zsh), if enabled in settings. The trailing clear-screen
+    // erases the command's own echo so the user does not see the injected snippet.
+    QSettings settings;
+    if (settings.value("terminal/shellIntegration", true).toBool()) {
+        static const char* integration = "if [ -n \"$BASH_VERSION\" ]; then "
+                                         "PROMPT_COMMAND='printf \"\\033]7;file://%s\\007\" \"$PWD\"'; "
+                                         "elif [ -n \"$ZSH_VERSION\" ]; then "
+                                         "precmd(){ printf \"\\033]7;file://%s\\007\" \"$PWD\"; }; fi"
+                                         "; printf '\\033[2J\\033[H'\n";
+        libssh2_channel_write(m_channel, integration, std::strlen(integration));
+    }
 }
 
 void SshConnection::readShell() {
-    if (!m_channel)
+    if (!m_channel || !m_connected)
         return;
 
     LIBSSH2_POLLFD pfds[1];
@@ -362,6 +378,9 @@ void SshConnection::readShell() {
             emit shellDataReceived(QByteArray(buf, static_cast<int>(n)));
         }
         if (n < 0 && n != LIBSSH2_ERROR_EAGAIN) {
+            m_connected = false;
+            if (m_pollTimer) m_pollTimer->stop();
+            if (m_statsTimer) m_statsTimer->stop();
             emit shellClosed();
             return;
         }
@@ -374,6 +393,9 @@ void SshConnection::readShell() {
         while ((n = libssh2_channel_read(m_channel, buf, sizeof(buf))) > 0) {
             emit shellDataReceived(QByteArray(buf, static_cast<int>(n)));
         }
+        m_connected = false;
+        if (m_pollTimer) m_pollTimer->stop();
+        if (m_statsTimer) m_statsTimer->stop();
         emit shellClosed();
     }
 }
@@ -384,6 +406,10 @@ void SshConnection::onPollTimer() {
     readShell();
     pollX11Bridges();
     pollStats();
+
+    for (SshTunnel* t : m_tunnels) {
+        t->poll();
+    }
 }
 
 void SshConnection::sendToShell(const QByteArray& data) {
@@ -814,6 +840,13 @@ void SshConnection::pollX11Bridges() {
 
 void SshConnection::disconnectFromHost() {
     m_connected = false;
+
+    for (SshTunnel* t : m_tunnels) {
+        t->stop();
+        delete t;
+    }
+    m_tunnels.clear();
+    m_tunnelConfigs.clear();
 
     closeStats();
 

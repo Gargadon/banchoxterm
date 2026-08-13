@@ -6,6 +6,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include "session.h"
+#include "masterpasswordmanager.h"
+#include "vtterminalwidget.h"
 
 class TestSession : public QObject {
     Q_OBJECT
@@ -45,6 +47,42 @@ private slots:
         QCOMPARE(restored.port, original.port);
         QCOMPARE(restored.keyPath, original.keyPath);
         QCOMPARE(restored.x11Forwarding, original.x11Forwarding);
+    }
+
+    void testSshSessionTunnelsRoundtrip() {
+        Session original;
+        original.id = "test-id-tunnels";
+        original.name = "My Tunnel Server";
+        original.type = SessionType::SSH;
+        original.host = "example.com";
+        original.user = "admin";
+        
+        TunnelConfig t1;
+        t1.type = TunnelConfig::Type::Local;
+        t1.localPort = 8080;
+        t1.remoteHost = "10.0.0.5";
+        t1.remotePort = 80;
+        original.tunnels.append(t1);
+        
+        TunnelConfig t2;
+        t2.type = TunnelConfig::Type::Dynamic;
+        t2.localPort = 1080;
+        original.tunnels.append(t2);
+
+        QJsonObject json = original.toJson();
+        QVERIFY(json.contains("tunnels"));
+        QVERIFY(json["tunnels"].isArray());
+        
+        Session restored = Session::fromJson(json);
+        QCOMPARE(restored.tunnels.size(), 2);
+        
+        QCOMPARE(restored.tunnels[0].type, TunnelConfig::Type::Local);
+        QCOMPARE(restored.tunnels[0].localPort, 8080);
+        QCOMPARE(restored.tunnels[0].remoteHost, QString("10.0.0.5"));
+        QCOMPARE(restored.tunnels[0].remotePort, 80);
+        
+        QCOMPARE(restored.tunnels[1].type, TunnelConfig::Type::Dynamic);
+        QCOMPARE(restored.tunnels[1].localPort, 1080);
     }
 
     void testLocalSessionRoundtrip() {
@@ -142,6 +180,46 @@ private slots:
         telnet.type = SessionType::Telnet;
         QJsonObject jsonT = telnet.toJson();
         QCOMPARE(jsonT["port"].toInt(), 22); // struct default
+    }
+
+    void testMasterPasswordEncryption() {
+        MasterPasswordManager& mpm = MasterPasswordManager::instance();
+        
+        mpm.lock();
+        QVERIFY(!mpm.isUnlocked());
+        
+        QVERIFY(mpm.setMasterPassword("SuperSecure123!"));
+        QVERIFY(mpm.isEnabled());
+        QVERIFY(mpm.isUnlocked());
+        
+        QString plaintext = "MySshSecretPassword";
+        QString encrypted = mpm.encryptPassword(plaintext);
+        QVERIFY(encrypted.startsWith("BANCHO:"));
+        QVERIFY(encrypted != plaintext);
+        
+        QString decrypted = mpm.decryptPassword(encrypted);
+        QCOMPARE(decrypted, plaintext);
+        
+        mpm.lock();
+        QVERIFY(!mpm.isUnlocked());
+        
+        QVERIFY(mpm.unlock("SuperSecure123!"));
+        QVERIFY(mpm.isUnlocked());
+        QCOMPARE(mpm.decryptPassword(encrypted), plaintext);
+        
+        QVERIFY(mpm.disableMasterPassword("SuperSecure123!"));
+        QVERIFY(!mpm.isEnabled());
+    }
+
+    void testVtTerminalWidgetSearch() {
+        VtTerminalWidget widget;
+        widget.resize(800, 600); // Trigger resize to allocate buffer
+        
+        widget.writeData("Hello World\r\nThis is a test line\r\nError: connection failed\r\n");
+        
+        QVERIFY(widget.findText("test", true, true));
+        QVERIFY(!widget.findText("ERROR", true, true));
+        QVERIFY(widget.findText("ERROR", true, false));
     }
 };
 

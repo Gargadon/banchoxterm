@@ -1,0 +1,323 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 374.69244 325.87692"
+   width="374.69244"
+   height="325.87692"
+   version="1.1"
+   id="svg19"
+   sodipodi:docname="logo2.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview19"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.5566406"
+     inkscape:cx="227.734"
+     inkscape:cy="211.03137"
+     inkscape:window-width="1920"
+     inkscape:window-height="1006"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg19" />
+  <defs
+     id="defs6">
+    <!-- Shadow filter for the terminal and cap -->
+    <filter
+       id="shadow"
+       x="-0.010416667"
+       y="-0.013392857"
+       width="1.0208333"
+       height="1.0267857">
+      <feDropShadow
+         dx="0"
+         dy="12"
+         stdDeviation="10"
+         flood-color="#000000"
+         flood-opacity="0.5" />
+    </filter>
+    <!-- Gradients -->
+    <linearGradient
+       id="bgGrad"
+       x1="96.408816"
+       y1="159.41488"
+       x2="356.44728"
+       y2="419.45334"
+       gradientTransform="scale(1.130602,0.88448455)"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         offset="0%"
+         stop-color="#1e142a"
+         id="stop1" />
+      <stop
+         offset="100%"
+         stop-color="#0f0718"
+         id="stop2" />
+    </linearGradient>
+    <linearGradient
+       id="goldGrad"
+       x1="0"
+       y1="0"
+       x2="0"
+       y2="1">
+      <stop
+         offset="0%"
+         stop-color="#ffd43b"
+         id="stop3" />
+      <stop
+         offset="100%"
+         stop-color="#fab005"
+         id="stop4" />
+    </linearGradient>
+    <linearGradient
+       id="capGrad"
+       x1="-47.196398"
+       y1="-118.42005"
+       x2="47.196398"
+       y2="-24.027257"
+       gradientTransform="scale(1.7162327,0.58267158)"
+       gradientUnits="userSpaceOnUse">
+      <stop
+         offset="0%"
+         stop-color="#3a3a3c"
+         id="stop5" />
+      <stop
+         offset="100%"
+         stop-color="#1c1c1e"
+         id="stop6" />
+    </linearGradient>
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#goldGrad"
+       id="linearGradient19"
+       x1="159.23873"
+       y1="202.05512"
+       x2="159.23873"
+       y2="257.73253"
+       gradientTransform="scale(0.89802276,1.1135575)"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#goldGrad"
+       id="linearGradient20"
+       x1="89.442719"
+       y1="619.39083"
+       x2="89.442719"
+       y2="641.75151"
+       gradientTransform="scale(2.236068,0.4472136)"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#goldGrad"
+       id="linearGradient21"
+       x1="-68"
+       y1="4"
+       x2="-68"
+       y2="16"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#goldGrad"
+       id="linearGradient22"
+       x1="56"
+       y1="4"
+       x2="56"
+       y2="16"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#goldGrad"
+       id="linearGradient23"
+       x1="-15.546361"
+       y1="-47.737939"
+       x2="-15.546361"
+       y2="-16.645218"
+       gradientTransform="scale(1.0018654,0.99813811)"
+       gradientUnits="userSpaceOnUse" />
+    <linearGradient
+       inkscape:collect="always"
+       xlink:href="#goldGrad"
+       id="linearGradient24"
+       x1="-2.5"
+       y1="-34"
+       x2="-2.5"
+       y2="-29"
+       gradientUnits="userSpaceOnUse" />
+  </defs>
+  <!-- 1. Terminal Window -->
+  <g
+     filter="url(#shadow)"
+     id="g10"
+     transform="translate(-28.30754,-45.123076)">
+    <rect
+       x="112"
+       y="144"
+       width="288"
+       height="224"
+       rx="20"
+       fill="url(#bgGrad)"
+       stroke="#343a40"
+       stroke-width="6"
+       id="rect6"
+       style="fill:url(#bgGrad)" />
+    <line
+       x1="112"
+       y1="192"
+       x2="400"
+       y2="192"
+       stroke="#2d2238"
+       stroke-width="4"
+       id="line6" />
+    <circle
+       cx="376"
+       cy="168"
+       r="6"
+       fill="#ff6b6b"
+       id="circle6" />
+    <circle
+       cx="356"
+       cy="168"
+       r="6"
+       fill="#fcc419"
+       id="circle7" />
+    <circle
+       cx="336"
+       cy="168"
+       r="6"
+       fill="#51cf66"
+       id="circle8" />
+    <path
+       d="m 148,230 40,26 -40,26"
+       fill="none"
+       stroke="url(#goldGrad)"
+       stroke-width="10"
+       stroke-linecap="round"
+       stroke-linejoin="round"
+       id="path8"
+       style="stroke:url(#linearGradient19)" />
+    <line
+       x1="205"
+       y1="282"
+       x2="245"
+       y2="282"
+       stroke="url(#goldGrad)"
+       stroke-width="10"
+       stroke-linecap="round"
+       id="line8"
+       style="stroke:url(#linearGradient20)" />
+    <!-- Jagged X-Scar -->
+    <path
+       d="m 350,310 c -10,-15 -25,-30 -38,-42 10,14 20,24 22,30 -6,-8 -16,-20 -12,-16 12,16 20,22 24,24 8,-8 24,-24 42,-36 -12,14 -22,24 -24,28 6,-6 16,-14 12,-12 -12,12 -20,18 -22,22 8,14 24,30 34,42 -12,-14 -22,-24 -24,-28 6,6 16,14 12,12 -12,-12 -20,-18 -22,-22 -8,10 -24,26 -42,38 12,-14 22,-24 24,-28 -6,6 -16,14 -12,12 12,-12 20,-18 26,-24 z"
+       fill="#821c1c"
+       id="path9" />
+    <path
+       d="m 350,310 c -10,-15 -25,-30 -35,-40 7,12 17,22 19,28 -6,-8 -14,-18 -10,-14 10,14 18,20 22,22 8,-8 24,-24 39,-34 -9,12 -19,22 -21,26 6,-6 14,-12 10,-10 -10,10 -18,16 -20,20 8,14 24,30 31,40 -9,-12 -19,-22 -21,-26 6,6 14,12 10,10 -10,-10 -18,-16 -20,-20 -8,10 -24,26 -39,36 9,-12 19,-22 21,-26 -6,6 -14,12 -10,10 10,-10 18,-16 24,-22 z"
+       fill="#c92a2a"
+       stroke="#ff6b6b"
+       stroke-width="1.5"
+       id="path10" />
+  </g>
+  <!-- 3. Rigid Bancho Cap -->
+  <g
+     transform="rotate(-22,294.89596,-214.14271)"
+     filter="url(#shadow)"
+     id="g19">
+    <path
+       d="m -60,-15 -20,-17 c 0,-23 30,-36 80,-36 50,0 80,13 80,36 l -20,17 z"
+       fill="url(#capGrad)"
+       stroke="#1a1a1c"
+       stroke-width="2"
+       id="path11"
+       style="fill:url(#capGrad)" />
+    <polygon
+       points="-24,-66 -35,-65 -28,-53 "
+       fill="#0f0718"
+       stroke="#1c1c1e"
+       stroke-width="1"
+       id="polygon11" />
+    <polygon
+       points="26,-66 15,-67 22,-52 "
+       fill="#0f0718"
+       stroke="#1c1c1e"
+       stroke-width="1"
+       id="polygon12" />
+    <path
+       d="m -65,5 c 0,10 130,10 130,0 l -5,-20 c 0,5 -120,5 -120,0 z"
+       fill="#1a1a1c"
+       stroke="#2d2d30"
+       stroke-width="1.5"
+       id="path12" />
+    <path
+       d="M -70,12 C -40,38 40,38 70,12 55,24 -55,24 -70,12 Z"
+       fill="#121214"
+       stroke="#ffb825"
+       stroke-width="1.5"
+       id="path13" />
+    <path
+       d="m -55,17 c 30,12 80,12 110,0 -10,5 -100,5 -110,0 z"
+       fill="#ffffff"
+       opacity="0.12"
+       id="path14" />
+    <path
+       d="M -62,8 C -30,18 30,18 62,8"
+       fill="none"
+       stroke="#fab005"
+       stroke-width="3"
+       id="path15" />
+    <path
+       d="m -60,12 c 30,10 90,10 120,0"
+       fill="none"
+       stroke="#fab005"
+       stroke-width="3"
+       id="path16" />
+    <circle
+       cx="-62"
+       cy="10"
+       r="5.5"
+       fill="url(#goldGrad)"
+       stroke="#d9480f"
+       stroke-width="1"
+       id="circle16"
+       style="fill:url(#linearGradient21)" />
+    <circle
+       cx="62"
+       cy="10"
+       r="5.5"
+       fill="url(#goldGrad)"
+       stroke="#d9480f"
+       stroke-width="1"
+       id="circle17"
+       style="fill:url(#linearGradient22)" />
+    <polygon
+       points="14,-35 5.5,-29 8.5,-18 0,-25 -8.5,-18 -5.5,-29 -14,-35 -3.5,-35 0,-46 3.5,-35 "
+       fill="url(#goldGrad)"
+       stroke="#d9480f"
+       stroke-width="1"
+       id="polygon17"
+       style="fill:url(#linearGradient23)" />
+    <circle
+       cx="0"
+       cy="-31.5"
+       r="4.5"
+       fill="#1a1a1c"
+       opacity="0.8"
+       id="circle18" />
+    <circle
+       cx="0"
+       cy="-31.5"
+       r="2.5"
+       fill="url(#goldGrad)"
+       id="circle19"
+       style="fill:url(#linearGradient24)" />
+  </g>
+</svg>

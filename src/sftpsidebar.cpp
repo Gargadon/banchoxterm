@@ -142,7 +142,7 @@ void SftpSidebar::startSession(const Session& session) {
     m_statusLabel->setStyleSheet("color: #7aa2f7; font-weight: bold;");
 
     QString password = Keyring::lookupPassword(session.id);
-    emit requestConnect(session.host, session.port, session.user, session.keyPath, password);
+    emit requestConnect(session.host, session.port, session.user, session.keyPath, password, session.tunnels);
 }
 
 void SftpSidebar::stopSession() {
@@ -314,7 +314,7 @@ void SftpSidebar::onPasswordRequired(const QString& prompt) {
     if (ok) {
         m_statusLabel->setText(tr("Connecting with password..."));
         emit requestConnect(m_currentSession.host, m_currentSession.port, m_currentSession.user,
-                            m_currentSession.keyPath, password);
+                            m_currentSession.keyPath, password, m_currentSession.tunnels);
     } else {
         stopSession();
     }

@@ -12,6 +12,67 @@
 #include <QCheckBox>
 #include <QUuid>
 #include "keyring.h"
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QTabWidget>
+#include <QDialogButtonBox>
+
+class TunnelEditDialog : public QDialog {
+public:
+    explicit TunnelEditDialog(QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle(tr("Add SSH Tunnel"));
+        setMinimumWidth(320);
+
+        auto* layout = new QFormLayout(this);
+
+        m_typeCombo = new QComboBox(this);
+        m_typeCombo->addItem(tr("Local (Forward local port to remote)"), static_cast<int>(TunnelConfig::Type::Local));
+        m_typeCombo->addItem(tr("Remote (Forward remote port to local)"), static_cast<int>(TunnelConfig::Type::Remote));
+        m_typeCombo->addItem(tr("Dynamic (SOCKS5 proxy)"), static_cast<int>(TunnelConfig::Type::Dynamic));
+
+        m_localPortSpin = new QSpinBox(this);
+        m_localPortSpin->setRange(1, 65535);
+        m_localPortSpin->setValue(8080);
+
+        m_remoteHostEdit = new QLineEdit(this);
+        m_remoteHostEdit->setPlaceholderText("e.g. localhost or 192.168.1.50");
+
+        m_remotePortSpin = new QSpinBox(this);
+        m_remotePortSpin->setRange(1, 65535);
+        m_remotePortSpin->setValue(80);
+
+        layout->addRow(tr("Tunnel Type:"), m_typeCombo);
+        layout->addRow(tr("Local Port:"), m_localPortSpin);
+        layout->addRow(tr("Remote Host:"), m_remoteHostEdit);
+        layout->addRow(tr("Remote Port:"), m_remotePortSpin);
+
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+        layout->addRow(buttons);
+
+        connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int) {
+            bool isDynamic = (m_typeCombo->currentData().toInt() == static_cast<int>(TunnelConfig::Type::Dynamic));
+            m_remoteHostEdit->setDisabled(isDynamic);
+            m_remotePortSpin->setDisabled(isDynamic);
+        });
+    }
+
+    TunnelConfig getTunnelConfig() const {
+        TunnelConfig c;
+        c.type = static_cast<TunnelConfig::Type>(m_typeCombo->currentData().toInt());
+        c.localPort = m_localPortSpin->value();
+        c.remoteHost = m_remoteHostEdit->text().trimmed();
+        c.remotePort = m_remotePortSpin->value();
+        return c;
+    }
+
+private:
+    QComboBox* m_typeCombo;
+    QSpinBox* m_localPortSpin;
+    QLineEdit* m_remoteHostEdit;
+    QSpinBox* m_remotePortSpin;
+};
 
 SessionDialog::SessionDialog(QWidget* parent) : QDialog(parent) {
     m_id = QUuid::createUuid().toString();
@@ -58,41 +119,110 @@ void SessionDialog::setupUi() {
 
     // ── SSH page ──
     auto* sshWidget = new QWidget(this);
-    auto* sshForm = new QFormLayout(sshWidget);
-    sshForm->setContentsMargins(0, 10, 0, 10);
+    auto* sshLayout = new QVBoxLayout(sshWidget);
+    sshLayout->setContentsMargins(0, 5, 0, 5);
+    sshLayout->setSpacing(10);
+
+    auto* sshTabs = new QTabWidget(sshWidget);
+    sshLayout->addWidget(sshTabs);
+
+    // Tab 1: Connection Info
+    auto* connTab = new QWidget(sshTabs);
+    auto* sshForm = new QFormLayout(connTab);
+    connTab->setLayout(sshForm);
+    sshForm->setContentsMargins(10, 10, 10, 10);
     sshForm->setSpacing(10);
 
-    m_hostEdit = new QLineEdit(sshWidget);
+    m_hostEdit = new QLineEdit(connTab);
     m_hostEdit->setPlaceholderText(tr("192.168.1.100 or example.com"));
     sshForm->addRow(tr("Host / IP:"), m_hostEdit);
 
-    m_portSpin = new QSpinBox(sshWidget);
+    m_portSpin = new QSpinBox(connTab);
     m_portSpin->setRange(1, 65535);
     m_portSpin->setValue(22);
     sshForm->addRow(tr("Port:"), m_portSpin);
 
-    m_userEdit = new QLineEdit(sshWidget);
+    m_userEdit = new QLineEdit(connTab);
     m_userEdit->setPlaceholderText(tr("root / username"));
     sshForm->addRow(tr("Username:"), m_userEdit);
 
-    m_passwordEdit = new QLineEdit(sshWidget);
+    m_passwordEdit = new QLineEdit(connTab);
     m_passwordEdit->setEchoMode(QLineEdit::Password);
     m_passwordEdit->setPlaceholderText(tr("Optional (stored in Keyring)"));
     sshForm->addRow(tr("Password:"), m_passwordEdit);
 
-    m_savePasswordCheck = new QCheckBox(tr("Save securely in system keyring"), sshWidget);
+    m_savePasswordCheck = new QCheckBox(tr("Save securely in system keyring"), connTab);
     sshForm->addRow("", m_savePasswordCheck);
 
-    m_x11ForwardCheck = new QCheckBox(tr("Enable X11 Forwarding (-Y)"), sshWidget);
+    m_x11ForwardCheck = new QCheckBox(tr("Enable X11 Forwarding (-Y)"), connTab);
     sshForm->addRow("", m_x11ForwardCheck);
 
     auto* keyLayout = new QHBoxLayout();
-    m_keyEdit = new QLineEdit(sshWidget);
+    m_keyEdit = new QLineEdit(connTab);
     m_keyEdit->setPlaceholderText(tr("Optional (uses agent if empty)"));
-    auto* keyBrowseBtn = new QPushButton(tr("Browse..."), sshWidget);
+    auto* keyBrowseBtn = new QPushButton(tr("Browse..."), connTab);
     keyLayout->addWidget(m_keyEdit);
     keyLayout->addWidget(keyBrowseBtn);
     sshForm->addRow(tr("Private Key:"), keyLayout);
+
+    connect(keyBrowseBtn, &QPushButton::clicked, this, [this]() {
+        QString path = QFileDialog::getOpenFileName(this, tr("Select Private Key"), QDir::homePath(), tr("All Files (*)"));
+        if (!path.isEmpty()) {
+            m_keyEdit->setText(path);
+        }
+    });
+
+    sshTabs->addTab(connTab, tr("SSH Connection"));
+
+    // Tab 2: Tunnels Config
+    auto* tunnelsTab = new QWidget(sshTabs);
+    auto* tunnelsLayout = new QVBoxLayout(tunnelsTab);
+    tunnelsTab->setLayout(tunnelsLayout);
+    tunnelsLayout->setContentsMargins(10, 10, 10, 10);
+    tunnelsLayout->setSpacing(10);
+
+    m_tunnelsTable = new QTableWidget(tunnelsTab);
+    m_tunnelsTable->setColumnCount(4);
+    m_tunnelsTable->setHorizontalHeaderLabels({tr("Type"), tr("Local Port"), tr("Remote Host"), tr("Remote Port")});
+    m_tunnelsTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    m_tunnelsTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_tunnelsTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    tunnelsLayout->addWidget(m_tunnelsTable);
+
+    auto* tbtnLayout = new QHBoxLayout();
+    m_addTunnelBtn = new QPushButton(tr("Add Tunnel"), tunnelsTab);
+    m_deleteTunnelBtn = new QPushButton(tr("Delete Tunnel"), tunnelsTab);
+    tbtnLayout->addWidget(m_addTunnelBtn);
+    tbtnLayout->addWidget(m_deleteTunnelBtn);
+    tunnelsLayout->addLayout(tbtnLayout);
+
+    connect(m_addTunnelBtn, &QPushButton::clicked, this, [this]() {
+        TunnelEditDialog dialog(this);
+        if (dialog.exec() == QDialog::Accepted) {
+            TunnelConfig config = dialog.getTunnelConfig();
+            m_tunnels.append(config);
+            
+            int row = m_tunnelsTable->rowCount();
+            m_tunnelsTable->insertRow(row);
+            
+            QString typeStr = (config.type == TunnelConfig::Type::Local) ? tr("Local (L)") :
+                              (config.type == TunnelConfig::Type::Remote) ? tr("Remote (R)") : tr("Dynamic (D)");
+            m_tunnelsTable->setItem(row, 0, new QTableWidgetItem(typeStr));
+            m_tunnelsTable->setItem(row, 1, new QTableWidgetItem(QString::number(config.localPort)));
+            m_tunnelsTable->setItem(row, 2, new QTableWidgetItem(config.remoteHost));
+            m_tunnelsTable->setItem(row, 3, new QTableWidgetItem(config.type == TunnelConfig::Type::Dynamic ? "-" : QString::number(config.remotePort)));
+        }
+    });
+
+    connect(m_deleteTunnelBtn, &QPushButton::clicked, this, [this]() {
+        int row = m_tunnelsTable->currentRow();
+        if (row >= 0 && row < m_tunnels.size()) {
+            m_tunnels.removeAt(row);
+            m_tunnelsTable->removeRow(row);
+        }
+    });
+
+    sshTabs->addTab(tunnelsTab, tr("Port Forwarding"));
 
     m_stackedWidget->addWidget(sshWidget); // index 0
 
@@ -193,14 +323,6 @@ void SessionDialog::setupUi() {
     connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this](int index) { m_stackedWidget->setCurrentIndex(index); });
 
-    connect(keyBrowseBtn, &QPushButton::clicked, this, [this]() {
-        QString path =
-            QFileDialog::getOpenFileName(this, tr("Select Private Key"), QDir::homePath(), tr("All Files (*)"));
-        if (!path.isEmpty()) {
-            m_keyEdit->setText(path);
-        }
-    });
-
     auto* btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
     auto* cancelBtn = new QPushButton(tr("Cancel"), this);
@@ -226,6 +348,20 @@ void SessionDialog::loadSession(const Session& session) {
         m_userEdit->setText(session.user);
         m_keyEdit->setText(session.keyPath);
         m_x11ForwardCheck->setChecked(session.x11Forwarding);
+
+        m_tunnels = session.tunnels;
+        m_tunnelsTable->setRowCount(0);
+        for (const TunnelConfig& config : m_tunnels) {
+            int row = m_tunnelsTable->rowCount();
+            m_tunnelsTable->insertRow(row);
+            
+            QString typeStr = (config.type == TunnelConfig::Type::Local) ? tr("Local (L)") :
+                              (config.type == TunnelConfig::Type::Remote) ? tr("Remote (R)") : tr("Dynamic (D)");
+            m_tunnelsTable->setItem(row, 0, new QTableWidgetItem(typeStr));
+            m_tunnelsTable->setItem(row, 1, new QTableWidgetItem(QString::number(config.localPort)));
+            m_tunnelsTable->setItem(row, 2, new QTableWidgetItem(config.remoteHost));
+            m_tunnelsTable->setItem(row, 3, new QTableWidgetItem(config.type == TunnelConfig::Type::Dynamic ? "-" : QString::number(config.remotePort)));
+        }
 
         {
             QString password = Keyring::lookupPassword(session.id);
@@ -301,6 +437,7 @@ Session SessionDialog::getSession() const {
         s.user = m_userEdit->text().trimmed();
         s.keyPath = m_keyEdit->text().trimmed();
         s.x11Forwarding = m_x11ForwardCheck->isChecked();
+        s.tunnels = m_tunnels;
         break;
     case 1:
         s.type = SessionType::Local;

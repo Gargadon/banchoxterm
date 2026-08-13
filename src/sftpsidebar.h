@@ -49,7 +49,7 @@ private slots:
 
 signals:
     void requestConnect(const QString& host, int port, const QString& user, const QString& keyPath,
-                        const QString& password);
+                        const QString& password, const QList<TunnelConfig>& tunnels);
     void requestList(const QString& path);
     void requestDownload(const QString& remotePath, const QString& localPath);
     void requestUpload(const QString& localPath, const QString& remotePath);
