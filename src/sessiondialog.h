@@ -53,11 +53,18 @@ private:
     // VNC
     QLineEdit* m_vncHostEdit;
     QSpinBox* m_vncPortSpin;
+    QLineEdit* m_vncPasswordEdit = nullptr;
 
     // Serial
     QLineEdit* m_serialPortEdit;
     QComboBox* m_serialBaudCombo;
     QComboBox* m_serialCmdCombo;
+
+    // FTP
+    QLineEdit* m_ftpHostEdit = nullptr;
+    QSpinBox* m_ftpPortSpin = nullptr;
+    QLineEdit* m_ftpUserEdit = nullptr;
+    QLineEdit* m_ftpPasswordEdit = nullptr;
 
     // Tunnels
     QTableWidget* m_tunnelsTable;

@@ -116,6 +116,10 @@ void SessionsSidebar::loadSessions() {
                                    .arg(session.baudRate)
                                    .arg(session.serialCmd));
             break;
+        case SessionType::FTP:
+            item->setIcon(0, QIcon(":/icons/folder.svg"));
+            item->setToolTip(0, QString("ftp://%1:%2").arg(session.host).arg(session.port));
+            break;
         default:
             item->setIcon(0, QIcon(":/icons/terminal.svg"));
             item->setToolTip(0, session.shellPath);

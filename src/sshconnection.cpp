@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <cstring>
+#include <cstdlib>
 #include <QSettings>
 #include <mutex>
 #include <QStandardPaths>
@@ -13,6 +14,7 @@
 #include <QCryptographicHash>
 #include <QApplication>
 #include <QMessageBox>
+#include <QInputDialog>
 
 #ifdef Q_OS_WIN
 #include <winsock2.h>
@@ -317,6 +319,92 @@ bool SshConnection::verifyHostKey() {
     return ok;
 }
 
+void SshConnection::kbdIntResponseCallback(const char* name, int name_len, const char* instruction,
+                                           int instruction_len, int num_prompts,
+                                           const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
+                                           LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses, void** abstract) {
+    SshConnection* self = static_cast<SshConnection*>(*abstract);
+    if (!self) {
+        for (int i = 0; i < num_prompts; ++i) {
+            responses[i].text = nullptr;
+            responses[i].length = 0;
+        }
+        return;
+    }
+    self->handleKbdInt(name, name_len, instruction, instruction_len, num_prompts, prompts, responses);
+}
+
+void SshConnection::handleKbdInt(const char* name, int name_len, const char* instruction, int instruction_len,
+                                 int num_prompts, const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
+                                 LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses) {
+    const QString nameStr = QString::fromUtf8(name, name_len);
+    const QString instrStr = QString::fromUtf8(instruction, instruction_len);
+
+    QList<QByteArray> promptTexts;
+    QList<bool> echoFlags;
+    for (int i = 0; i < num_prompts; ++i) {
+        promptTexts.append(QByteArray(reinterpret_cast<const char*>(prompts[i].text),
+                                      static_cast<int>(prompts[i].length)));
+        echoFlags.append(prompts[i].echo != 0);
+    }
+
+    QStringList answers;
+    const bool ok = promptKbdInteractive(nameStr, instrStr, promptTexts, echoFlags, answers);
+
+    for (int i = 0; i < num_prompts; ++i) {
+        if (ok && i < answers.size() && !answers[i].isEmpty()) {
+            const QByteArray a = answers[i].toUtf8();
+            responses[i].text = static_cast<char*>(malloc(static_cast<size_t>(a.size()) + 1));
+            if (responses[i].text) {
+                memcpy(responses[i].text, a.constData(), static_cast<size_t>(a.size()));
+                responses[i].text[a.size()] = '\0';
+                responses[i].length = static_cast<unsigned int>(a.size());
+            } else {
+                responses[i].length = 0;
+            }
+        } else {
+            responses[i].text = nullptr;
+            responses[i].length = 0;
+        }
+    }
+}
+
+bool SshConnection::promptKbdInteractive(const QString& name, const QString& instruction,
+                                         const QList<QByteArray>& promptTexts, const QList<bool>& echoFlags,
+                                         QStringList& answers) {
+    bool ok = false;
+
+    auto doPrompt = [&]() {
+        QString header;
+        if (!name.isEmpty())
+            header += name + "\n";
+        if (!instruction.isEmpty())
+            header += instruction + "\n";
+
+        for (int i = 0; i < promptTexts.size(); ++i) {
+            const QString prompt = QString::fromUtf8(promptTexts[i]);
+            bool okOne = false;
+            QString answer = QInputDialog::getText(nullptr, tr("SSH Authentication"),
+                                                   header + prompt,
+                                                   echoFlags[i] ? QLineEdit::Password : QLineEdit::Normal, "", &okOne);
+            if (!okOne) {
+                answers.clear();
+                ok = false;
+                return;
+            }
+            answers.append(answer);
+        }
+        ok = true;
+    };
+
+    if (QThread::currentThread() == qApp->thread()) {
+        doPrompt();
+    } else {
+        QMetaObject::invokeMethod(qApp, doPrompt, Qt::BlockingQueuedConnection);
+    }
+    return ok;
+}
+
 void SshConnection::connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
                                   const QString& password, const QList<TunnelConfig>& tunnels) {
     m_host = host;
@@ -343,7 +431,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
 
     libssh2_session_set_blocking(m_session, 0);
 
-    if (m_x11Forwarding && !m_x11Cookie.isEmpty()) {
+    if (m_x11Forwarding) {
         libssh2_session_callback_set2(m_session, LIBSSH2_CALLBACK_X11,
                                       reinterpret_cast<libssh2_cb_generic*>(&SshConnection::x11OpenCallback));
     }
@@ -407,6 +495,17 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     }
 
     if (!authenticated) {
+        // Keyboard-interactive: used for OTP/2FA and password prompts.
+        rc = retry([this]() {
+            return libssh2_userauth_keyboard_interactive_ex(m_session, m_user.toUtf8().constData(),
+                                                            static_cast<unsigned int>(m_user.toUtf8().size()),
+                                                            &SshConnection::kbdIntResponseCallback);
+        });
+        if (rc == 0)
+            authenticated = true;
+    }
+
+    if (!authenticated) {
         emit passwordRequired("Password required for " + user + "@" + host);
         disconnectFromHost();
         return;
@@ -460,10 +559,12 @@ void SshConnection::openShell() {
 
     libssh2_channel_request_pty_size(m_channel, m_ptyCols, m_ptyRows);
 
-    if (m_x11Forwarding && !m_x11Cookie.isEmpty()) {
-        int xrc = retry([this]() {
-            return libssh2_channel_x11_req_ex(m_channel, 0, "MIT-MAGIC-COOKIE-1", m_x11Cookie.toLatin1().constData(),
-                                              m_x11Screen);
+    if (m_x11Forwarding) {
+        // Empty auth protocol/cookie means "no access control" (the local X
+        // server, e.g. VcXsrv/X410 on Windows, must accept local connections).
+        const char* proto = m_x11Cookie.isEmpty() ? "" : "MIT-MAGIC-COOKIE-1";
+        int xrc = retry([this, proto]() {
+            return libssh2_channel_x11_req_ex(m_channel, 0, proto, m_x11Cookie.toLatin1().constData(), m_x11Screen);
         });
         if (xrc != 0) {
             m_x11Forwarding = false;
@@ -951,6 +1052,29 @@ void SshConnection::setX11Forwarding(bool enabled) {
     if (!enabled)
         return;
 
+#ifdef Q_OS_WIN
+    // No DISPLAY/xauth on Windows. Assume a local X server (VcXsrv, X410, Xming)
+    // listening on TCP 6000 with no access control. Probe it before enabling.
+    m_x11Display = QStringLiteral("127.0.0.1:0");
+    m_x11Screen = 0;
+    m_x11Cookie.clear();
+
+    int probe = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
+    if (probe < 0) {
+        m_x11Forwarding = false;
+        return;
+    }
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(6000);
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    int rc = ::connect(probe, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+    closeSocketFd(probe);
+    if (rc != 0)
+        m_x11Forwarding = false;
+    return;
+#else
     m_x11Display = QString::fromLocal8Bit(qgetenv("DISPLAY"));
     if (m_x11Display.isEmpty()) {
         m_x11Forwarding = false;
@@ -985,12 +1109,10 @@ void SshConnection::setX11Forwarding(bool enabled) {
         }
     }
     m_x11Forwarding = false;
+#endif
 }
 
 int SshConnection::connectToXServer() {
-#ifdef Q_OS_WIN
-    return -1;
-#else
     int colonIdx = m_x11Display.lastIndexOf(':');
     int dotIdx = m_x11Display.lastIndexOf('.');
     if (dotIdx < 0 || dotIdx < colonIdx)
@@ -999,6 +1121,7 @@ int SshConnection::connectToXServer() {
     QString hostPart = m_x11Display.left(colonIdx);
     int dispNum = m_x11Display.mid(colonIdx + 1, dotIdx - colonIdx - 1).toInt();
 
+#ifndef Q_OS_WIN
     if (hostPart.isEmpty() || hostPart == "unix") {
         int sock = static_cast<int>(::socket(AF_UNIX, SOCK_STREAM, 0));
         if (sock >= 0) {
@@ -1014,8 +1137,9 @@ int SshConnection::connectToXServer() {
             ::close(sock);
         }
     }
+#endif
 
-    // TCP fallback: host:6000+display
+    // TCP: host:6000+display
     int sock = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
     if (sock < 0)
         return -1;
@@ -1029,9 +1153,8 @@ int SshConnection::connectToXServer() {
     if (::connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
         return sock;
     }
-    ::close(sock);
+    closeSocketFd(sock);
     return -1;
-#endif
 }
 
 void SshConnection::x11OpenCallback(LIBSSH2_SESSION* session, LIBSSH2_CHANNEL* channel, const char* shost, int sport,

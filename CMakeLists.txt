@@ -81,6 +81,8 @@ set(SOURCES
     src/settingsdialog.h
     src/sshconnection.cpp
     src/sshconnection.h
+    src/ftpclient.cpp
+    src/ftpclient.h
     src/sshtunnel.cpp
     src/sshtunnel.h
     src/masterpasswordmanager.cpp
@@ -91,6 +93,13 @@ set(SOURCES
     src/vtterminalwidget.h
     resources.qrc
 )
+
+if(BANCHO_ENABLE_VNC)
+    list(APPEND SOURCES
+        src/vncclientwidget.cpp
+        src/vncclientwidget.h
+    )
+endif()
 
 add_executable(banchoxterm ${SOURCES})
 
@@ -108,6 +117,64 @@ if(NOT WIN32)
 else()
     target_compile_definitions(banchoxterm PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006)
     target_link_libraries(banchoxterm PRIVATE advapi32)
+endif()
+
+# Optional: embed RDP on Windows via the native Remote Desktop ActiveX control
+# (ActiveQt). When ActiveQt is not available we fall back to launching mstsc.exe.
+if(WIN32)
+    find_package(Qt6 QUIET COMPONENTS AxContainer)
+    if(TARGET Qt6::AxContainer)
+        target_link_libraries(banchoxterm PRIVATE Qt6::AxContainer)
+        target_compile_definitions(banchoxterm PRIVATE BANCHO_HAVE_RDP_AX)
+    endif()
+endif()
+
+# Optional: embedded VNC client via libvncclient (libvncserver project).
+option(BANCHO_ENABLE_VNC "Enable the embedded VNC client" ON)
+if(BANCHO_ENABLE_VNC)
+    set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
+    set(WITH_LZO OFF CACHE BOOL "" FORCE)
+    set(WITH_JPEG OFF CACHE BOOL "" FORCE)
+    set(WITH_PNG OFF CACHE BOOL "" FORCE)
+    set(WITH_SDL OFF CACHE BOOL "" FORCE)
+    set(WITH_GTK OFF CACHE BOOL "" FORCE)
+    set(WITH_LIBSSH2 OFF CACHE BOOL "" FORCE)
+    set(WITH_THREADS OFF CACHE BOOL "" FORCE)
+    set(WITH_GNUTLS OFF CACHE BOOL "" FORCE)
+    set(WITH_OPENSSL OFF CACHE BOOL "" FORCE)
+    set(WITH_SYSTEMD OFF CACHE BOOL "" FORCE)
+    set(WITH_GCRYPT OFF CACHE BOOL "" FORCE)
+    set(WITH_FFMPEG OFF CACHE BOOL "" FORCE)
+    set(WITH_TIGHTVNC_FILETRANSFER OFF CACHE BOOL "" FORCE)
+    set(WITH_SASL OFF CACHE BOOL "" FORCE)
+    set(WITH_WEBSOCKETS OFF CACHE BOOL "" FORCE)
+    set(WITH_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(WITH_TESTS OFF CACHE BOOL "" FORCE)
+    set(LIBVNCSERVER_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        libvncserver
+        GIT_REPOSITORY https://github.com/LibVNC/libvncserver.git
+        GIT_TAG LibVNCServer-0.9.14
+    )
+    FetchContent_MakeAvailable(libvncserver)
+
+    # libvncserver 0.9.14 is not MSVC-clean: with threading disabled the
+    # MUTEX()/COND() macros expand to an empty declaration, which MSVC rejects
+    # inside a struct (GCC accepts it as a null declaration). Give them a dummy
+    # 'int' field instead so the client headers compile on MSVC.
+    file(READ "${libvncserver_SOURCE_DIR}/rfb/threading.h" _vnc_threading_h)
+    string(REPLACE "#define MUTEX(mutex)\n" "#define MUTEX(mutex) int (mutex)\n" _vnc_threading_h "${_vnc_threading_h}")
+    string(REPLACE "#define COND(cond)\n" "#define COND(cond) int (cond)\n" _vnc_threading_h "${_vnc_threading_h}")
+    file(WRITE "${libvncserver_SOURCE_DIR}/rfb/threading.h" "${_vnc_threading_h}")
+
+    target_link_libraries(banchoxterm PRIVATE vncclient)
+    target_include_directories(banchoxterm PRIVATE
+        ${libvncserver_SOURCE_DIR}
+        ${libvncserver_BINARY_DIR}
+    )
+    target_compile_definitions(banchoxterm PRIVATE BANCHO_HAVE_VNC)
 endif()
 
 # ── Translations ────────────────────────────────────────────────────

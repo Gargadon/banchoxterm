@@ -10,13 +10,6 @@
 #include "session.h"
 #include "sshtunnel.h"
 
-struct SftpFile {
-    QString name;
-    bool isDirectory = false;
-    qint64 size = 0;
-    QDateTime mtime;
-};
-
 // Bridges an incoming X11 channel to the local X server socket.
 struct X11Bridge {
     LIBSSH2_CHANNEL* channel = nullptr;
@@ -105,6 +98,16 @@ private:
     bool promptHostKey(const QString& host, const QString& fingerprint, const QString& keyType, bool changed);
     QString hostKeyFingerprint(const QByteArray& key) const;
     QString knownHostsPath() const;
+
+    static void kbdIntResponseCallback(const char* name, int name_len, const char* instruction,
+                                       int instruction_len, int num_prompts,
+                                       const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
+                                       LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses, void** abstract);
+    void handleKbdInt(const char* name, int name_len, const char* instruction, int instruction_len,
+                      int num_prompts, const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
+                      LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses);
+    bool promptKbdInteractive(const QString& name, const QString& instruction, const QList<QByteArray>& promptTexts,
+                              const QList<bool>& echoFlags, QStringList& answers);
 
     int m_sock = -1;
     LIBSSH2_SESSION* m_session = nullptr;

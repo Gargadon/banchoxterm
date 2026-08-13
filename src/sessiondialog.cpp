@@ -103,6 +103,7 @@ void SessionDialog::setupUi() {
     m_typeCombo->addItem(tr("RDP Session"), static_cast<int>(SessionType::RDP));
     m_typeCombo->addItem(tr("VNC Session"), static_cast<int>(SessionType::VNC));
     m_typeCombo->addItem(tr("Serial Connection"), static_cast<int>(SessionType::Serial));
+    m_typeCombo->addItem(tr("FTP Connection"), static_cast<int>(SessionType::FTP));
     typeLayout->addWidget(typeLabel);
     typeLayout->addWidget(m_typeCombo);
     mainLayout->addLayout(typeLayout);
@@ -162,10 +163,8 @@ void SessionDialog::setupUi() {
     m_savePasswordCheck = new QCheckBox(tr("Save securely in system keyring"), connTab);
     sshForm->addRow("", m_savePasswordCheck);
 
-#ifndef Q_OS_WIN
     m_x11ForwardCheck = new QCheckBox(tr("Enable X11 Forwarding (-Y)"), connTab);
     sshForm->addRow("", m_x11ForwardCheck);
-#endif
 
     m_autoReconnectCheck = new QCheckBox(tr("Auto-reconnect on disconnect"), connTab);
     sshForm->addRow("", m_autoReconnectCheck);
@@ -308,6 +307,11 @@ void SessionDialog::setupUi() {
     m_vncPortSpin->setValue(5900);
     vncForm->addRow(tr("Port:"), m_vncPortSpin);
 
+    m_vncPasswordEdit = new QLineEdit(vncWidget);
+    m_vncPasswordEdit->setEchoMode(QLineEdit::Password);
+    m_vncPasswordEdit->setPlaceholderText(tr("Optional (stored in Keyring)"));
+    vncForm->addRow(tr("Password:"), m_vncPasswordEdit);
+
     m_stackedWidget->addWidget(vncWidget); // index 4
 
     // ── Serial page ──
@@ -330,6 +334,32 @@ void SessionDialog::setupUi() {
     serialForm->addRow(tr("Serial Tool:"), m_serialCmdCombo);
 
     m_stackedWidget->addWidget(serialWidget); // index 5
+
+    // ── FTP page ──
+    auto* ftpWidget = new QWidget(this);
+    auto* ftpForm = new QFormLayout(ftpWidget);
+    ftpForm->setContentsMargins(0, 10, 0, 10);
+    ftpForm->setSpacing(10);
+
+    m_ftpHostEdit = new QLineEdit(ftpWidget);
+    m_ftpHostEdit->setPlaceholderText(tr("192.168.1.100 or example.com"));
+    ftpForm->addRow(tr("Host / IP:"), m_ftpHostEdit);
+
+    m_ftpPortSpin = new QSpinBox(ftpWidget);
+    m_ftpPortSpin->setRange(1, 65535);
+    m_ftpPortSpin->setValue(21);
+    ftpForm->addRow(tr("Port:"), m_ftpPortSpin);
+
+    m_ftpUserEdit = new QLineEdit(ftpWidget);
+    m_ftpUserEdit->setPlaceholderText(tr("anonymous / username"));
+    ftpForm->addRow(tr("Username:"), m_ftpUserEdit);
+
+    m_ftpPasswordEdit = new QLineEdit(ftpWidget);
+    m_ftpPasswordEdit->setEchoMode(QLineEdit::Password);
+    m_ftpPasswordEdit->setPlaceholderText(tr("Optional (stored in Keyring)"));
+    ftpForm->addRow(tr("Password:"), m_ftpPasswordEdit);
+
+    m_stackedWidget->addWidget(ftpWidget); // index 6
 
     mainLayout->addWidget(m_stackedWidget);
 
@@ -407,12 +437,28 @@ void SessionDialog::loadSession(const Session& session) {
         m_typeCombo->setCurrentIndex(4);
         m_vncHostEdit->setText(session.host);
         m_vncPortSpin->setValue(session.port > 0 ? session.port : 5900);
+        {
+            QString password = Keyring::lookupPassword(session.id);
+            if (m_vncPasswordEdit && !password.isEmpty())
+                m_vncPasswordEdit->setText(password);
+        }
         break;
     case SessionType::Serial:
         m_typeCombo->setCurrentIndex(5);
         m_serialPortEdit->setText(session.serialPort);
         m_serialBaudCombo->setCurrentText(QString::number(session.baudRate));
         m_serialCmdCombo->setCurrentText(session.serialCmd);
+        break;
+    case SessionType::FTP:
+        m_typeCombo->setCurrentIndex(6);
+        m_ftpHostEdit->setText(session.host);
+        m_ftpPortSpin->setValue(session.port > 0 ? session.port : 21);
+        m_ftpUserEdit->setText(session.user);
+        {
+            QString password = Keyring::lookupPassword(session.id);
+            if (m_ftpPasswordEdit && !password.isEmpty())
+                m_ftpPasswordEdit->setText(password);
+        }
         break;
     }
 }
@@ -443,6 +489,9 @@ Session SessionDialog::getSession() const {
             break;
         case 5:
             s.name = QString("Serial: %1").arg(m_serialPortEdit->text());
+            break;
+        case 6:
+            s.name = QString("FTP: %1").arg(m_ftpHostEdit->text());
             break;
         }
     }
@@ -484,6 +533,12 @@ Session SessionDialog::getSession() const {
         s.baudRate = m_serialBaudCombo->currentText().toInt();
         s.serialCmd = m_serialCmdCombo->currentText();
         break;
+    case 6:
+        s.type = SessionType::FTP;
+        s.host = m_ftpHostEdit->text().trimmed();
+        s.port = m_ftpPortSpin->value();
+        s.user = m_ftpUserEdit->text().trimmed();
+        break;
     }
     return s;
 }
@@ -495,6 +550,20 @@ void SessionDialog::accept() {
             if (!pwd.isEmpty()) {
                 Keyring::storePassword(m_id, pwd);
             }
+        } else {
+            Keyring::deletePassword(m_id);
+        }
+    } else if (m_typeCombo->currentIndex() == 4) {
+        QString pwd = m_vncPasswordEdit ? m_vncPasswordEdit->text() : QString();
+        if (!pwd.isEmpty()) {
+            Keyring::storePassword(m_id, pwd);
+        } else {
+            Keyring::deletePassword(m_id);
+        }
+    } else if (m_typeCombo->currentIndex() == 6) {
+        QString pwd = m_ftpPasswordEdit ? m_ftpPasswordEdit->text() : QString();
+        if (!pwd.isEmpty()) {
+            Keyring::storePassword(m_id, pwd);
         } else {
             Keyring::deletePassword(m_id);
         }

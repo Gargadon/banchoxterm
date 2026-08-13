@@ -20,6 +20,7 @@
 #include <QSettings>
 #include "keyring.h"
 #include "remoteeditordialog.h"
+#include "ftpclient.h"
 
 SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
@@ -122,6 +123,7 @@ void SftpSidebar::setConnection(SshConnection* connection) {
         return;
 
     detachConnection();
+    detachFtp();
     m_connection = connection;
     if (!m_connection)
         return;
@@ -154,7 +156,49 @@ void SftpSidebar::detachConnection() {
     m_connection = nullptr;
 }
 
+void SftpSidebar::setFtpClient(FtpClient* client) {
+    if (m_ftp == client)
+        return;
+    detachFtp();
+    m_ftp = client;
+    if (!m_ftp)
+        return;
+
+    connect(this, &SftpSidebar::requestFtpConnect, m_ftp, &FtpClient::connectToHost);
+    connect(this, &SftpSidebar::requestList, m_ftp, &FtpClient::listDirectory);
+    connect(this, &SftpSidebar::requestDownload, m_ftp, &FtpClient::downloadFile);
+    connect(this, &SftpSidebar::requestUpload, m_ftp, &FtpClient::uploadFile);
+    connect(this, &SftpSidebar::requestDelete, m_ftp, &FtpClient::deleteFile);
+    connect(this, &SftpSidebar::requestCreateDir, m_ftp, &FtpClient::createDirectory);
+    connect(this, &SftpSidebar::requestRename, m_ftp, &FtpClient::renamePath);
+
+    connect(m_ftp, &FtpClient::connectionSuccess, this, &SftpSidebar::onConnectionSuccess);
+    connect(m_ftp, &FtpClient::connectionFailed, this, &SftpSidebar::onConnectionFailed);
+    connect(m_ftp, &FtpClient::directoryListed, this, &SftpSidebar::onDirectoryListed);
+    connect(m_ftp, &FtpClient::operationFinished, this, &SftpSidebar::onOperationFinished);
+}
+
+void SftpSidebar::detachFtp() {
+    if (!m_ftp)
+        return;
+    disconnect(this, nullptr, m_ftp, nullptr);
+    disconnect(m_ftp, nullptr, this, nullptr);
+    m_ftp->deleteLater();
+    m_ftp = nullptr;
+}
+
 void SftpSidebar::startSession(const Session& session) {
+    if (session.type == SessionType::FTP) {
+        detachConnection();
+        m_currentSession = session;
+        m_statusLabel->setText(tr("Connecting to %1...").arg(session.host));
+        m_statusLabel->setStyleSheet("color: #7aa2f7; font-weight: bold;");
+        if (!m_ftp)
+            setFtpClient(new FtpClient(this));
+        const QString password = Keyring::lookupPassword(session.id);
+        emit requestFtpConnect(session.host, session.port, session.user, password);
+        return;
+    }
     if (session.type != SessionType::SSH) {
         stopSession();
         return;
@@ -176,6 +220,7 @@ void SftpSidebar::startSession(const Session& session) {
 
 void SftpSidebar::stopSession() {
     m_isConnected = false;
+    detachFtp();
     m_treeWidget->clear();
     m_pathEdit->clear();
     m_statusLabel->setText(tr("Disconnected"));

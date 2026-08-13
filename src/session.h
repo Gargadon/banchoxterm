@@ -2,8 +2,17 @@
 #include <QString>
 #include <QJsonObject>
 #include <QList>
+#include <QDateTime>
 
-enum class SessionType { SSH, Local, Telnet, Serial, RDP, VNC };
+enum class SessionType { SSH, Local, Telnet, Serial, RDP, VNC, FTP };
+
+// A remote file entry shared by the SFTP and FTP backends.
+struct SftpFile {
+    QString name;
+    bool isDirectory = false;
+    qint64 size = 0;
+    QDateTime mtime;
+};
 
 struct TunnelConfig {
     enum class Type { Local, Remote, Dynamic };

@@ -69,9 +69,11 @@ cmake --build build
 
 ## Limitations
 
-- **FTP is not supported** — file transfer uses SFTP only (over SSH).
-- **X11 forwarding** is available on Linux only.
-- **RDP/VNC** sessions rely on an external client (`mstsc`, `xfreerdp`, `vncviewer`) installed on the system.
+- **FTP** is passive-mode only (no TLS/FTPS, no chmod).
+- **X11 forwarding** on Windows requires a local X server (e.g. VcXsrv, X410 or Xming) listening on `127.0.0.1:6000`.
+- **RDP** on Windows is embedded via the native Remote Desktop ActiveX control
+  when Qt ActiveQt is available (falls back to `mstsc.exe` otherwise). On Linux
+  it uses `xfreerdp`. **VNC** uses the embedded `libvncclient`.
 
 ## License
 

@@ -779,7 +779,12 @@ void VtTerminalWidget::keyPressEvent(QKeyEvent* e) {
         out = "\x1b[6~";
         break;
     default: {
-        if (e->modifiers() & Qt::ControlModifier) {
+        // AltGr is reported as Ctrl+Alt on Windows and as GroupSwitchModifier
+        // on X11. We must not treat it as a Ctrl shortcut, otherwise layouts
+        // that use AltGr for symbols (e.g. '\', '@', '#', '~') produce nothing.
+        const bool altGr = (e->modifiers() & Qt::GroupSwitchModifier) ||
+                           ((e->modifiers() & Qt::ControlModifier) && (e->modifiers() & Qt::AltModifier));
+        if ((e->modifiers() & Qt::ControlModifier) && !altGr) {
             int k = e->key();
             if (k >= Qt::Key_A && k <= Qt::Key_Z) {
                 out.append(static_cast<char>(k - Qt::Key_A + 1));

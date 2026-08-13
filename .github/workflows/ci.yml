@@ -52,48 +52,42 @@ jobs:
   build-windows:
     runs-on: windows-latest
 
-    defaults:
-      run:
-        shell: msys2 {0}
-
     steps:
       - uses: actions/checkout@v4
 
-      - uses: msys2/setup-msys2@v2
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
         with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            mingw-w64-ucrt-x86_64-cmake
-            mingw-w64-ucrt-x86_64-ninja
-            mingw-w64-ucrt-x86_64-qt6-base
-            mingw-w64-ucrt-x86_64-libssh2
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-nsis
+          version: '6.7.*'
+          arch: 'win64_msvc2022_64'
+          cache: true
 
       - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -B build -A x64 -DBANCHO_ENABLE_VNC=ON
 
       - name: Build
-        run: cmake --build build
+        run: cmake --build build --config Release
 
       - name: Run tests
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Stage package (windeployqt + libssh2)
         run: |
-          mkdir -p pkg/banchoxterm
-          cp build/banchoxterm.exe pkg/banchoxterm/
-          cp build/_deps/libssh2-build/src/libssh2.dll pkg/banchoxterm/
-          windeployqt --release --compiler-runtime pkg/banchoxterm/banchoxterm.exe
+          New-Item -ItemType Directory -Path pkg\banchoxterm -Force
+          Copy-Item build\Release\banchoxterm.exe pkg\banchoxterm\
+          Copy-Item build\_deps\libssh2-build\src\Release\libssh2.dll pkg\banchoxterm\ -ErrorAction SilentlyContinue
+          Copy-Item build\_deps\libssh2-build\src\libssh2.dll pkg\banchoxterm\ -ErrorAction SilentlyContinue
+          windeployqt --release --compiler-runtime pkg\banchoxterm\banchoxterm.exe
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
 
       - name: Build NSIS installer
         run: |
-          DIST_DIR="$(cygpath -w "$PWD/pkg/banchoxterm")"
-          makensis -DDIST_DIR="$DIST_DIR" packaging/windows/installer.nsi
+          $dist = (Resolve-Path "pkg\banchoxterm").Path
+          makensis -DDIST_DIR="$dist" packaging\windows\installer.nsi
 
       - name: Create portable ZIP
-        shell: pwsh
         run: |
           Compress-Archive -Path "$env:GITHUB_WORKSPACE\pkg\banchoxterm\*" -DestinationPath "$env:GITHUB_WORKSPACE\BanchoXterm-windows-x64.zip"
 

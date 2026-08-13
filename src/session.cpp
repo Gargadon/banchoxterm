@@ -56,6 +56,8 @@ static QString sessionTypeToString(SessionType type) {
         return "rdp";
     case SessionType::VNC:
         return "vnc";
+    case SessionType::FTP:
+        return "ftp";
     default:
         return "local";
     }
@@ -72,6 +74,8 @@ static SessionType sessionTypeFromString(const QString& s) {
         return SessionType::RDP;
     if (s == "vnc")
         return SessionType::VNC;
+    if (s == "ftp")
+        return SessionType::FTP;
     return SessionType::Local;
 }
 

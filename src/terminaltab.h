@@ -15,6 +15,8 @@ class QPushButton;
 class QCheckBox;
 class ConPty;
 class QFile;
+class QAxWidget;
+class VncClientWidget;
 
 class TerminalTab : public QWidget {
     Q_OBJECT
@@ -79,6 +81,8 @@ private:
     void launchExternalClient();
     void setupSshTerminal();
     void setupWindowsTerminal();
+    void setupWindowsRdpActiveX();
+    void setupEmbeddedVnc();
     void startConPtyPolling();
     void pollConPtyOutput();
     void startLogging();
@@ -97,6 +101,10 @@ private:
     QTimer* m_flushTimer = nullptr;
     QFile* m_logFile = nullptr;
     QTimer* m_reconnectTimer = nullptr;
+    QAxWidget* m_rdpWidget = nullptr;
+    QTimer* m_rdpPollTimer = nullptr;
+    bool m_rdpWasConnected = false;
+    VncClientWidget* m_vncWidget = nullptr;
 #ifdef Q_OS_WIN
     ConPty* m_conpty = nullptr;
     QTimer* m_conptyPollTimer = nullptr;

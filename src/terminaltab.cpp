@@ -1,6 +1,7 @@
 #include "terminaltab.h"
 #include "sshconnection.h"
 #include "vtterminalwidget.h"
+#include "keyring.h"
 #ifndef Q_OS_WIN
 #include <qtermwidget.h>
 #endif
@@ -37,6 +38,14 @@
 #include <fcntl.h>
 #endif
 
+#ifdef BANCHO_HAVE_RDP_AX
+#include <QAxWidget>
+#endif
+
+#ifdef BANCHO_HAVE_VNC
+#include "vncclientwidget.h"
+#endif
+
 TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(parent), m_session(session) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -59,7 +68,19 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         m_embeddedContainer->hide();
         layout->addWidget(m_embeddedContainer);
 
-        QTimer::singleShot(100, this, &TerminalTab::launchExternalClient);
+#ifdef BANCHO_HAVE_RDP_AX
+        if (session.type == SessionType::RDP) {
+            QTimer::singleShot(100, this, &TerminalTab::setupWindowsRdpActiveX);
+        } else
+#endif
+#ifdef BANCHO_HAVE_VNC
+        if (session.type == SessionType::VNC) {
+            QTimer::singleShot(100, this, &TerminalTab::setupEmbeddedVnc);
+        } else
+#endif
+        {
+            QTimer::singleShot(100, this, &TerminalTab::launchExternalClient);
+        }
     } else {
 #ifdef Q_OS_WIN
         setupWindowsTerminal();
@@ -258,6 +279,16 @@ TerminalTab::~TerminalTab() {
 
 void TerminalTab::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
+#ifdef BANCHO_HAVE_RDP_AX
+    if (m_rdpWidget && m_isActive && m_embeddedContainer) {
+        int w = m_embeddedContainer->width();
+        int h = m_embeddedContainer->height();
+        if (w > 1 && h > 1) {
+            m_rdpWidget->setProperty("DesktopWidth", w);
+            m_rdpWidget->setProperty("DesktopHeight", h);
+        }
+    }
+#endif
 #ifndef Q_OS_WIN
     if (m_connection && m_terminal && m_session.type == SessionType::SSH) {
         int rows = m_terminal->screenLinesCount();
@@ -629,6 +660,127 @@ void TerminalTab::maybeScheduleReconnect() {
     connect(m_reconnectTimer, &QTimer::timeout, this, [this]() { emit reconnectRequested(m_session); });
     m_reconnectTimer->start();
 }
+
+#ifdef BANCHO_HAVE_RDP_AX
+void TerminalTab::setupWindowsRdpActiveX() {
+    m_rdpWidget = new QAxWidget(m_embeddedContainer);
+    auto* rdpLayout = new QVBoxLayout(m_embeddedContainer);
+    rdpLayout->setContentsMargins(0, 0, 0, 0);
+    rdpLayout->addWidget(m_rdpWidget);
+
+    // Newest to oldest CLSIDs; the first one available on this Windows wins.
+    static const char* kClsids[] = {
+        "{A0C63C30-F08D-4AB4-907C-34905D770C7D}", // MsRdpClient10NotSafeForScripting
+        "{301B94BA-5F25-4A12-BFFE-3B6B7A616585}", // MsRdpClient9NotSafeForScripting
+        "{A3BC03A0-041D-42E3-AD22-882B7865C9C5}", // MsRdpClient8NotSafeForScripting
+        "{54D38BF7-B1EF-4479-9674-1BD6EA465258}", // MsRdpClient7NotSafeForScripting
+        "{8C11EFA1-92C3-11D1-BC1E-00C04FA31489}", // MsTscAxNotSafeForScripting (legacy)
+    };
+
+    bool created = false;
+    for (const char* clsid : kClsids) {
+        if (m_rdpWidget->setControl(QString::fromLatin1(clsid))) {
+            created = true;
+            break;
+        }
+    }
+
+    if (!created) {
+        delete m_rdpWidget;
+        m_rdpWidget = nullptr;
+        if (m_statusLabel) {
+            m_statusLabel->show();
+            m_statusLabel->setText(tr("RDP control unavailable; falling back to mstsc.exe."));
+        }
+        launchExternalClient();
+        return;
+    }
+
+    m_rdpWidget->setProperty("Server", m_session.host + ":" + QString::number(m_session.port));
+    m_rdpWidget->setProperty("Domain", QString());
+    if (!m_session.user.isEmpty())
+        m_rdpWidget->setProperty("UserName", m_session.user);
+
+    if (m_embeddedContainer->width() > 1 && m_embeddedContainer->height() > 1) {
+        m_rdpWidget->setProperty("DesktopWidth", m_embeddedContainer->width());
+        m_rdpWidget->setProperty("DesktopHeight", m_embeddedContainer->height());
+    }
+
+    if (m_statusLabel)
+        m_statusLabel->hide();
+    m_embeddedContainer->show();
+    m_isActive = true;
+
+    // Poll the "Connected" property to detect disconnection.
+    m_rdpPollTimer = new QTimer(this);
+    connect(m_rdpPollTimer, &QTimer::timeout, this, [this]() {
+        if (!m_rdpWidget)
+            return;
+        QVariant connected = m_rdpWidget->property("Connected");
+        if (!connected.isValid())
+            return;
+        if (connected.toBool()) {
+            m_rdpWasConnected = true;
+        } else if (m_rdpWasConnected && m_isActive) {
+            m_isActive = false;
+            if (m_rdpPollTimer)
+                m_rdpPollTimer->stop();
+            if (m_embeddedContainer)
+                m_embeddedContainer->hide();
+            if (m_statusLabel) {
+                m_statusLabel->show();
+                m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
+            }
+            emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+        }
+    });
+    m_rdpPollTimer->start(2000);
+
+    m_rdpWidget->dynamicCall("Connect()");
+}
+#endif
+
+#ifdef BANCHO_HAVE_VNC
+void TerminalTab::setupEmbeddedVnc() {
+    m_vncWidget = new VncClientWidget(m_embeddedContainer);
+    auto* vncLayout = new QVBoxLayout(m_embeddedContainer);
+    vncLayout->setContentsMargins(0, 0, 0, 0);
+    vncLayout->addWidget(m_vncWidget);
+
+    const QString password = Keyring::lookupPassword(m_session.id);
+
+    connect(m_vncWidget, &VncClientWidget::connected, this, [this]() {
+        m_isActive = true;
+        if (m_statusLabel)
+            m_statusLabel->hide();
+        if (m_embeddedContainer)
+            m_embeddedContainer->show();
+    });
+    connect(m_vncWidget, &VncClientWidget::disconnected, this, [this]() {
+        m_isActive = false;
+        if (m_embeddedContainer)
+            m_embeddedContainer->hide();
+        if (m_statusLabel) {
+            m_statusLabel->show();
+            m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
+        }
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+    });
+    connect(m_vncWidget, &VncClientWidget::errorOccurred, this, [this](const QString& msg) {
+        m_isActive = false;
+        if (m_embeddedContainer)
+            m_embeddedContainer->hide();
+        if (m_statusLabel) {
+            m_statusLabel->show();
+            m_statusLabel->setText(tr("VNC error: %1").arg(msg));
+        }
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+    });
+
+    m_embeddedContainer->show();
+    m_vncWidget->start(m_session.host, m_session.port, password);
+}
+#endif
 
 void TerminalTab::launchExternalClient() {
     QString program;

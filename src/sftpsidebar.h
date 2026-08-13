@@ -11,6 +11,7 @@ class QTreeWidgetItem;
 class QLineEdit;
 class QPushButton;
 class QLabel;
+class FtpClient;
 
 class SftpSidebar : public QWidget {
     Q_OBJECT
@@ -54,6 +55,7 @@ private slots:
 signals:
     void requestConnect(const QString& host, int port, const QString& user, const QString& keyPath,
                         const QString& password, const QList<TunnelConfig>& tunnels);
+    void requestFtpConnect(const QString& host, int port, const QString& user, const QString& password);
     void requestList(const QString& path);
     void requestDownload(const QString& remotePath, const QString& localPath);
     void requestUpload(const QString& localPath, const QString& remotePath);
@@ -67,6 +69,8 @@ signals:
 
 private:
     void updatePath(const QString& path);
+    void setFtpClient(FtpClient* client);
+    void detachFtp();
 
     QLineEdit* m_pathEdit;
     QPushButton* m_upBtn;
@@ -80,6 +84,7 @@ private:
     QLabel* m_statusLabel;
 
     QPointer<SshConnection> m_connection;
+    QPointer<FtpClient> m_ftp;
 
     Session m_currentSession;
     QString m_currentPath;

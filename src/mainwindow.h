@@ -27,8 +27,8 @@ protected:
 
 private slots:
     void onConnectSession(const Session& session);
-    void onTabCloseRequested(int index);
-    void onCurrentTabChanged(int index);
+    void onTabCloseRequested(QTabWidget* pane, int index);
+    void onCurrentTabChanged(QTabWidget* pane, int index);
     void onNewLocalTerminal();
     void toggleTheme();
     void switchSidebarTab(int index);
@@ -37,6 +37,8 @@ private slots:
     void onSendMultiInput();
     void onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
     void onReconnectRequested(const Session& session);
+    void toggleSplitView();
+    void moveTabToOtherPane();
 
     void onCopy();
     void onPaste();
@@ -50,6 +52,8 @@ private:
     void applyThemeMode(const QString& mode);
     void rebuildMacrosMenu();
     TerminalTab* currentTerminalTab() const;
+    QTabWidget* activePane() const;
+    QTabWidget* otherPane(QTabWidget* pane) const;
 
     QString m_themeMode = "system";
     QSplitter* m_mainSplitter;
@@ -63,7 +67,10 @@ private:
     QToolButton* m_sftpTabBtn;
     QToolButton* m_multiInputBtn = nullptr;
 
-    QTabWidget* m_tabWidget;
+    QSplitter* m_tabSplitter = nullptr;
+    QTabWidget* m_tabWidget = nullptr;
+    QTabWidget* m_tabWidget2 = nullptr;
+    QTabWidget* m_activePane = nullptr;
 
     QWidget* m_multiInputBar;
     QComboBox* m_multiInputEdit;

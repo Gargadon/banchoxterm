@@ -38,6 +38,7 @@
 #include <QCheckBox>
 #include <QVBoxLayout>
 #include <QPushButton>
+#include <QPair>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowIcon(QIcon(":/icons/logo.svg"));
@@ -82,12 +83,16 @@ MainWindow::~MainWindow() {
 
 void MainWindow::closeEvent(QCloseEvent* event) {
     bool hasActive = false;
-    for (int i = 0; i < m_tabWidget->count(); ++i) {
-        auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(i));
-        if (tab && tab->isSessionActive()) {
-            hasActive = true;
-            break;
+    for (QTabWidget* pane : {m_tabWidget, m_tabWidget2}) {
+        for (int i = 0; i < pane->count(); ++i) {
+            auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
+            if (tab && tab->isSessionActive()) {
+                hasActive = true;
+                break;
+            }
         }
+        if (hasActive)
+            break;
     }
 
     if (hasActive) {
@@ -187,11 +192,19 @@ void MainWindow::setupUi() {
     sidebarLayout->addWidget(m_sidebarStacked);
     m_mainSplitter->addWidget(m_sidebarContainer);
 
-    // 4. Tab widget for terminals
-    m_tabWidget = new QTabWidget(m_mainSplitter);
+    // 4. Tab widgets for terminals (split into two panes)
+    m_tabSplitter = new QSplitter(Qt::Horizontal, m_mainSplitter);
+    m_tabWidget = new QTabWidget(m_tabSplitter);
     m_tabWidget->setTabsClosable(true);
     m_tabWidget->setMovable(true);
-    m_mainSplitter->addWidget(m_tabWidget);
+    m_tabWidget2 = new QTabWidget(m_tabSplitter);
+    m_tabWidget2->setTabsClosable(true);
+    m_tabWidget2->setMovable(true);
+    m_tabWidget2->hide();
+    m_tabSplitter->addWidget(m_tabWidget);
+    m_tabSplitter->addWidget(m_tabWidget2);
+    m_activePane = m_tabWidget;
+    m_mainSplitter->addWidget(m_tabSplitter);
 
     // Set initial sizes
     m_mainSplitter->setSizes({350, 850});
@@ -243,16 +256,19 @@ void MainWindow::setupUi() {
     connect(m_sftpTabBtn, &QToolButton::clicked, this, [this]() { switchSidebarTab(1); });
 
     connect(m_sessionsSidebar, &SessionsSidebar::connectSession, this, &MainWindow::onConnectSession);
-    connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, &MainWindow::onTabCloseRequested);
-    connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::onCurrentTabChanged);
+    connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, [this](int i) { onTabCloseRequested(m_tabWidget, i); });
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget, i); });
+    connect(m_tabWidget2, &QTabWidget::tabCloseRequested, this, [this](int i) { onTabCloseRequested(m_tabWidget2, i); });
+    connect(m_tabWidget2, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget2, i); });
     connect(m_sftpSidebar, &SftpSidebar::remoteStatsUpdated, this, &MainWindow::onRemoteStatsUpdated);
 
     // Atajo Ctrl+W para cerrar la pestaña activa
     auto* closeTabShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_W), this);
     connect(closeTabShortcut, &QShortcut::activated, this, [this]() {
-        int idx = m_tabWidget->currentIndex();
+        QTabWidget* pane = activePane();
+        int idx = pane ? pane->currentIndex() : -1;
         if (idx != -1) {
-            onTabCloseRequested(idx);
+            onTabCloseRequested(pane, idx);
         }
     });
 
@@ -273,11 +289,19 @@ void MainWindow::switchSidebarTab(int index) {
 }
 
 void MainWindow::onConnectSession(const Session& session) {
-    auto* tab = new TerminalTab(session, m_tabWidget);
-    int index = m_tabWidget->addTab(tab, session.name);
+    if (session.type == SessionType::FTP) {
+        m_sftpSidebar->startSession(session);
+        m_sftpTabBtn->setEnabled(true);
+        switchSidebarTab(1);
+        return;
+    }
+
+    QTabWidget* pane = activePane();
+    auto* tab = new TerminalTab(session, pane);
+    int index = pane->addTab(tab, session.name);
 
     if (session.type == SessionType::SSH) {
-        m_tabWidget->setTabIcon(index, QIcon(":/icons/server.svg"));
+        pane->setTabIcon(index, QIcon(":/icons/server.svg"));
         // Share the terminal's SSH connection with the SFTP browser.
         m_sftpSidebar->setConnection(tab->connection());
         m_sftpSidebar->startSession(session);
@@ -287,37 +311,37 @@ void MainWindow::onConnectSession(const Session& session) {
         // Keep the SFTP browser in sync with the terminal's working directory
         connect(tab, &TerminalTab::remoteDirChanged, m_sftpSidebar, &SftpSidebar::navigateTo);
     } else if (session.type == SessionType::Telnet) {
-        m_tabWidget->setTabIcon(index, QIcon(":/icons/telnet.svg"));
+        pane->setTabIcon(index, QIcon(":/icons/telnet.svg"));
     } else if (session.type == SessionType::RDP) {
-        m_tabWidget->setTabIcon(index, QIcon(":/icons/rdp.svg"));
+        pane->setTabIcon(index, QIcon(":/icons/rdp.svg"));
     } else if (session.type == SessionType::VNC) {
-        m_tabWidget->setTabIcon(index, QIcon(":/icons/vnc.svg"));
+        pane->setTabIcon(index, QIcon(":/icons/vnc.svg"));
     } else if (session.type == SessionType::Serial) {
-        m_tabWidget->setTabIcon(index, QIcon(":/icons/serial.svg"));
+        pane->setTabIcon(index, QIcon(":/icons/serial.svg"));
     } else {
-        m_tabWidget->setTabIcon(index, QIcon(":/icons/terminal.svg"));
+        pane->setTabIcon(index, QIcon(":/icons/terminal.svg"));
     }
 
-    m_tabWidget->setCurrentIndex(index);
+    pane->setCurrentIndex(index);
 
     // Auto-reconnect: when a session drops and asks to reconnect, swap this tab
     // for a fresh one with the same session.
     connect(tab, &TerminalTab::reconnectRequested, this, &MainWindow::onReconnectRequested);
 
     // Connect title updates
-    connect(tab, &TerminalTab::titleChanged, this, [this, tab](const QString& title) {
-        int idx = m_tabWidget->indexOf(tab);
+    connect(tab, &TerminalTab::titleChanged, this, [this, tab, pane](const QString& title) {
+        int idx = pane->indexOf(tab);
         if (idx != -1 && !title.isEmpty()) {
-            m_tabWidget->setTabText(idx, title);
-            if (idx == m_tabWidget->currentIndex()) {
+            pane->setTabText(idx, title);
+            if (pane == activePane() && idx == pane->currentIndex()) {
                 setWindowTitle(QString("BanchoXterm - %1").arg(title));
             }
         }
     });
 }
 
-void MainWindow::onTabCloseRequested(int index) {
-    auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(index));
+void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {
+    auto* tab = qobject_cast<TerminalTab*>(pane->widget(index));
     if (tab) {
         if (tab->isSessionActive()) {
             QMessageBox::StandardButton res = QMessageBox::question(
@@ -332,13 +356,24 @@ void MainWindow::onTabCloseRequested(int index) {
             m_sftpSidebar->detachConnection();
             m_sftpSidebar->stopSession();
         }
-        m_tabWidget->removeTab(index);
+        pane->removeTab(index);
         delete tab;
     }
 }
 
-void MainWindow::onCurrentTabChanged(int index) {
+void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
+    m_activePane = pane;
+
     if (index < 0) {
+        // If this pane has no tabs but the other does, switch active pane.
+        if (pane == m_tabWidget && m_tabWidget2->count() > 0) {
+            m_activePane = m_tabWidget2;
+            return;
+        }
+        if (pane == m_tabWidget2 && m_tabWidget->count() > 0) {
+            m_activePane = m_tabWidget;
+            return;
+        }
         m_sftpSidebar->stopSession();
         m_sftpTabBtn->setEnabled(false);
         m_remoteMonitorLabel->setVisible(false);
@@ -347,10 +382,10 @@ void MainWindow::onCurrentTabChanged(int index) {
         return;
     }
 
-    QString title = m_tabWidget->tabText(index);
+    QString title = pane->tabText(index);
     setWindowTitle(QString("BanchoXterm - %1").arg(title));
 
-    auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(index));
+    auto* tab = qobject_cast<TerminalTab*>(pane->widget(index));
     if (tab && tab->isSsh()) {
         m_sftpSidebar->setConnection(tab->connection());
         m_sftpSidebar->startSession(tab->getSession());
@@ -411,10 +446,12 @@ void MainWindow::onOpenSettings() {
         }
 
         // 2. Typography Configuration
-        for (int i = 0; i < m_tabWidget->count(); ++i) {
-            auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(i));
-            if (tab) {
-                tab->updateFontFromSettings();
+        for (QTabWidget* pane : {m_tabWidget, m_tabWidget2}) {
+            for (int i = 0; i < pane->count(); ++i) {
+                auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
+                if (tab) {
+                    tab->updateFontFromSettings();
+                }
             }
         }
     }
@@ -438,10 +475,12 @@ void MainWindow::onSendMultiInput() {
         return;
 
     // Send to all tabs
-    for (int i = 0; i < m_tabWidget->count(); ++i) {
-        auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(i));
-        if (tab) {
-            tab->sendInputText(text);
+    for (QTabWidget* pane : {m_tabWidget, m_tabWidget2}) {
+        for (int i = 0; i < pane->count(); ++i) {
+            auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
+            if (tab) {
+                tab->sendInputText(text);
+            }
         }
     }
 
@@ -464,13 +503,19 @@ void MainWindow::onSendMultiInput() {
 void MainWindow::onReconnectRequested(const Session& session) {
     auto* tab = qobject_cast<TerminalTab*>(sender());
     if (tab) {
-        int idx = m_tabWidget->indexOf(tab);
-        if (idx != -1) {
+        QTabWidget* pane = nullptr;
+        if (m_tabWidget->indexOf(tab) != -1)
+            pane = m_tabWidget;
+        else if (m_tabWidget2->indexOf(tab) != -1)
+            pane = m_tabWidget2;
+
+        if (pane) {
+            int idx = pane->indexOf(tab);
             if (tab->isSsh() && m_sftpSidebar->connection() == tab->connection()) {
                 m_sftpSidebar->detachConnection();
                 m_sftpSidebar->stopSession();
             }
-            m_tabWidget->removeTab(idx);
+            pane->removeTab(idx);
             tab->deleteLater();
         }
     }
@@ -545,6 +590,16 @@ void MainWindow::setupMenuBar() {
     globalSearchAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
     connect(globalSearchAction, &QAction::triggered, this, &MainWindow::onGlobalSearch);
 
+    auto* viewMenu = menuBar()->addMenu(tr("&View"));
+
+    auto* splitAction = viewMenu->addAction(tr("Toggle &Split View"));
+    splitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
+    connect(splitAction, &QAction::triggered, this, &MainWindow::toggleSplitView);
+
+    auto* moveTabAction = viewMenu->addAction(tr("Move Tab to &Other Pane"));
+    moveTabAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_M));
+    connect(moveTabAction, &QAction::triggered, this, &MainWindow::moveTabToOtherPane);
+
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
     auto* aboutAction = helpMenu->addAction(tr("&About BanchoXterm"));
     connect(aboutAction, &QAction::triggered, this, &MainWindow::showAbout);
@@ -568,10 +623,73 @@ void MainWindow::showAbout() {
 }
 
 TerminalTab* MainWindow::currentTerminalTab() const {
-    int idx = m_tabWidget->currentIndex();
+    QTabWidget* pane = activePane();
+    if (!pane)
+        return nullptr;
+    int idx = pane->currentIndex();
     if (idx < 0)
         return nullptr;
-    return qobject_cast<TerminalTab*>(m_tabWidget->widget(idx));
+    return qobject_cast<TerminalTab*>(pane->widget(idx));
+}
+
+QTabWidget* MainWindow::activePane() const {
+    if (m_activePane && (m_activePane == m_tabWidget || m_activePane == m_tabWidget2))
+        return m_activePane;
+    return m_tabWidget;
+}
+
+QTabWidget* MainWindow::otherPane(QTabWidget* pane) const {
+    return (pane == m_tabWidget) ? m_tabWidget2 : m_tabWidget;
+}
+
+void MainWindow::toggleSplitView() {
+    const bool visible = !m_tabWidget2->isVisible();
+    m_tabWidget2->setVisible(visible);
+    if (visible) {
+        // Move the current tab of the active pane to the new pane if the new
+        // pane is empty, so the user sees two sessions side by side immediately.
+        QTabWidget* from = activePane();
+        if (from == m_tabWidget2 && m_tabWidget2->count() == 0)
+            from = m_tabWidget;
+        if (m_tabWidget2->count() == 0 && from == m_tabWidget && m_tabWidget->count() > 0) {
+            int idx = m_tabWidget->currentIndex();
+            if (idx >= 0) {
+                QWidget* w = m_tabWidget->widget(idx);
+                QString title = m_tabWidget->tabText(idx);
+                m_tabWidget->removeTab(idx);
+                m_tabWidget2->addTab(w, title);
+                m_tabWidget2->setCurrentIndex(m_tabWidget2->count() - 1);
+            }
+        }
+        m_tabSplitter->setSizes({1, 1});
+        m_activePane = m_tabWidget2;
+    } else {
+        // Move all tabs back to the primary pane.
+        while (m_tabWidget2->count() > 0) {
+            QWidget* w = m_tabWidget2->widget(0);
+            QString title = m_tabWidget2->tabText(0);
+            m_tabWidget2->removeTab(0);
+            int idx = m_tabWidget->addTab(w, title);
+            m_tabWidget->setCurrentIndex(idx);
+        }
+        m_activePane = m_tabWidget;
+    }
+}
+
+void MainWindow::moveTabToOtherPane() {
+    QTabWidget* from = activePane();
+    QTabWidget* to = otherPane(from);
+    if (!to->isVisible())
+        toggleSplitView();
+    int idx = from->currentIndex();
+    if (idx < 0)
+        return;
+    QWidget* w = from->widget(idx);
+    QString title = from->tabText(idx);
+    from->removeTab(idx);
+    int newIdx = to->addTab(w, title);
+    to->setCurrentIndex(newIdx);
+    m_activePane = to;
 }
 
 void MainWindow::onCopy() {
@@ -689,8 +807,8 @@ void MainWindow::onManageMacros() {
 }
 
 void MainWindow::onGlobalSearch() {
-    int count = m_tabWidget->count();
-    if (count == 0)
+    const int total = m_tabWidget->count() + m_tabWidget2->count();
+    if (total == 0)
         return;
 
     QDialog dlg(this);
@@ -718,23 +836,39 @@ void MainWindow::onGlobalSearch() {
 
     connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
 
-    auto doSearch = [this, count, searchEdit, caseCheck, statusLabel](bool next) {
+    auto doSearch = [this, total, searchEdit, caseCheck, statusLabel](bool next) {
         QString str = searchEdit->text();
         if (str.isEmpty())
             return;
 
-        int start = m_tabWidget->currentIndex();
-        int dir = next ? 1 : -1;
+        // Flatten both panes into an ordered list of tabs.
+        QVector<QPair<QTabWidget*, int>> tabs;
+        for (QTabWidget* pane : {m_tabWidget, m_tabWidget2})
+            for (int i = 0; i < pane->count(); ++i)
+                tabs.append(qMakePair(pane, i));
 
-        for (int step = 0; step < count; ++step) {
-            int idx = (start + dir * step + count) % count;
-            auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(idx));
+        QTabWidget* curPane = activePane();
+        int start = 0;
+        for (int k = 0; k < tabs.size(); ++k) {
+            if (tabs[k].first == curPane && tabs[k].second == curPane->currentIndex()) {
+                start = k;
+                break;
+            }
+        }
+
+        const int dir = next ? 1 : -1;
+        for (int step = 0; step < tabs.size(); ++step) {
+            int k = (start + dir * step + tabs.size()) % tabs.size();
+            QTabWidget* pane = tabs[k].first;
+            int idx = tabs[k].second;
+            auto* tab = qobject_cast<TerminalTab*>(pane->widget(idx));
             if (!tab)
                 continue;
             bool found = tab->searchText(str, next, caseCheck->isChecked());
             if (found) {
-                m_tabWidget->setCurrentIndex(idx);
-                statusLabel->setText(tr("Match found in session: %1").arg(m_tabWidget->tabText(idx)));
+                pane->setCurrentIndex(idx);
+                m_activePane = pane;
+                statusLabel->setText(tr("Match found in session: %1").arg(pane->tabText(idx)));
                 return;
             }
         }

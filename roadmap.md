@@ -6,68 +6,79 @@ Objetivo: convertir BanchoXterm en una alternativa real a MobaXterm.
 
 Ya implementado:
 
-- SSH con libssh2 (password, clave privada, agente, X11 forwarding en Linux)
-- SFTP (navegar, subir, bajar, borrar, editar con auto-upload)
-- Túneles SSH (local, remoto, dinámico/SOCKS5)
-- Telnet, Serial (solo Linux), terminal local (ConPTY en Windows)
-- Gestor de sesiones (JSON), pestañas, multi-input, monitor remoto
-- Temas claro/oscuro, i18n (en/es/pt), master password + keyring
-- RDP/VNC (lanzadores de clientes externos)
+- **SSH** con libssh2 (password, clave privada, agente, X11 forwarding en Linux)
+- **Verificación de host key** (`known_hosts`, formato OpenSSH, diálogo de confianza)
+- **SFTP** (navegar, subir, bajar, borrar, renombrar, chmod, crear carpeta, subir carpetas, editar con auto-upload)
+- **Túneles SSH** (local, remoto, dinámico/SOCKS5)
+- **Telnet**, **Serial** (solo Linux), **terminal local** (ConPTY en Windows / QTermWidget en Linux)
+- **RDP embebido** en Windows vía ActiveQt (`QAxWidget` + `mstscax.dll`, con fallback a `mstsc.exe`); en Linux vía `xfreerdp`
+- **VNC embebido** vía `libvncclient` (renderizador propio + entrada de teclado/ratón)
+- **Gestor de sesiones** (JSON, grupos/carpetas, importar/exportar), pestañas, multi-input
+- **Monitor remoto** (CPU/RAM/disco/uptime; Linux `/proc` + fallback PowerShell en Windows)
+- **Macros de teclado**, **búsqueda global** (Windows), **logging de sesiones**, **auto-reconexión**
+- Temas claro/oscuro, i18n (en/es/pt), master password + keyring (Windows Credential Manager / secret-tool)
+- Licencia MIT, CI (MSVC) + instalador NSIS + ZIP portable
 
 ## Prioridades
 
-### P0 — Seguridad (innegociable)
+### P1 — Diferenciadores clave frente a MobaXterm
 
-- [x] **Verificación de host key / `known_hosts`** (`sshconnection.cpp`).
-  Se valida la huella del servidor con `libssh2_knownhost_*`, se guarda en
-  `known_hosts` (formato OpenSSH) y se muestra un diálogo de confirmación al
-  primer contacto o con una advertencia ante un cambio de clave.
+- [x] **Split-view / multi-terminal en rejilla**: dos paneles de pestañas
+      (`QSplitter` con dos `QTabWidget`), menú "View → Toggle Split View" y
+      "Move Tab to Other Pane".
+- [ ] **SSH gateway / jump host (ProxyJump)**: campo `jumpHost` en `Session`,
+      conexión en dos saltos en `SshConnection` (direct-tcpip sobre el bastión).
+- [x] **Keyboard-interactive / 2FA**: `libssh2_userauth_keyboard_interactive`
+      con diálogo de prompts (OTP/MFA) en `SshConnection`.
+- [x] **X server en Windows**: X11 forwarding habilitado en Windows usando un
+      servidor X local en `127.0.0.1:6000` (VcXsrv/X410/Xming); se sondea el
+      servidor antes de activarlo y se usa auth vacía.
+- [x] **FTP**: cliente FTP pasivo básico (`FtpClient` con QTcpSocket):
+      navegar, subir, bajar, borrar, crear carpeta y renombrar. Sin TLS/chmod.
 
-### P1 — Funcionalidades clave de MobaXterm
+### P2 — Calidad y robustez
 
-- [x] **X11 server en Windows** (o desactivar la opción correctamente).
-  La opción "Enable X11 Forwarding" se oculta en Windows (`sessiondialog.cpp`).
-- [x] **Importar/exportar sesiones** (`SessionManager::exportSessions` /
-  `importSessions` + botones Import/Export en el sidebar).
-- [x] **Carpetas/grupos de sesiones**: campo `group` en `Session` y sidebar
-  con `QTreeWidget` (grupos como nodos, sesiones como hijos).
-- [x] **Logging/grabación de sesiones**: opción en Ajustes (habilitar +
-  directorio) y captura de salida en `TerminalTab` (SSH en Linux/Windows y
-  ConPTY en Windows). La sesión local de Linux (QTermWidget) no se captura.
-- [x] **FTP** documentado como no soportado (solo SFTP), ver `README.md`.
+- [ ] **Unificar el emulador de terminal**: Windows usa `VtTerminalWidget`
+      (básico) y Linux usa `QTermWidget`. Inconsistencias: búsqueda global solo
+      Windows, log no captura la sesión local Linux, y `VtTerminalWidget` carece
+      de OSC 52 (clipboard), OSC 8 (links), sixel, etc.
+- [ ] **Eliminar la dependencia de QTermWidget (GPL)** moviendo Linux al mismo
+      emulador propio; simplifica la distribución (ver nota de licencia).
+- [ ] **Rendimiento de red**: `SshConnection` usa polling (`QTimer` 15 ms +
+      `select()`); migrar a socket notifier event-driven.
+- [ ] **Rendimiento de pintado**: `VtTerminalWidget` repinta toda la pantalla en
+      cada `update()`; usar dirty rects.
+- [ ] **Tests**: solo `test_session.cpp` (12 tests; `testMasterPasswordEncryption`
+      falla por `QSettings` sin org name). Falta: parser VT, SFTP, túnel,
+      host-key, import/export, VNC.
+- [ ] **UI de `known_hosts`**: listar/eliminar hosts guardados.
+- [ ] **UX de sesiones**: drag & drop para reordenar, clonar/duplicar sesión,
+      barra "QuickConnect".
 
-### P2 — Robustez y UX
+### P3 — Pulido y distribución
 
-- [x] Monitorización remota en hosts Windows: fallback a un comando PowerShell
-      cuando el sondeo `/proc` de Linux no produce resultados (`sshconnection.cpp`).
-- [x] Terminal Windows (`VtTerminalWidget`): bracketed paste (DECSET 2004) y
-      true-color ya presente; se añadió bracketed paste en el pegado.
-- [x] Auto-reconexión de sesiones: opción "Auto-reconnect on disconnect" en SSH
-      (`session.h` + `TerminalTab::maybeScheduleReconnect` + `MainWindow`).
-- [x] Macros de teclado: menú "Macros" con diálogo de gestión (nombre + texto).
-- [x] Búsqueda global entre sesiones: "Find in All Sessions" (Ctrl+Shift+F).
-      Solo funcional en Windows (el `QTermWidget` de Linux no expone búsqueda
-      programática; usa su propia barra de búsqueda por pestaña).
-- [x] SFTP: crear carpeta, renombrar, chmod y subida recursiva de carpetas.
+- [ ] Configuración ampliada: scrollback configurable (hoy fijo en 5000),
+      keep-alive, ciphers/algoritmos, fuente por sesión.
+- [ ] SFTP: barra de progreso, cola de descargas, drag & drop local↔remoto.
+- [ ] AppImage (Linux) y macOS.
+- [ ] Auto-updater y edición portable.
+- [ ] Icono `.ico` para el instalador NSIS.
+- [ ] Documentar las limitaciones vigentes (VNC sin mods complejos, monitor
+      Windows no probado contra un servidor real, etc.).
 
-Notas / limitaciones:
+## Notas / limitaciones conocidas
+
 - La monitorización Windows está implementada pero no probada contra un
   servidor SSH Windows real.
 - La sesión local de Linux (QTermWidget) no se captura en el log de sesión.
-
-### P3 — Distribución
-
-- [x] Licencia open source (MIT) — `LICENSE`, `README.md` y el "About" actualizados.
-- [x] Instaladores de Windows generados por GitHub Actions: NSIS + ZIP portable
-      (`.github/workflows/ci.yml` + `packaging/windows/installer.nsi`).
-- [ ] (Opcional) Paquete para Linux (AppImage) y macOS.
-- [ ] Icono `.ico` de la aplicación para el instalador NSIS.
-
-Nota: aunque el código propio es MIT, el binario enlaza QTermWidget (GPL-2.0),
-por lo que la distribución combinada queda sujeta a GPL. Ver
-`third-party-licenses.txt`.
+- VNC embebido: sin soporte de mods complejos (Ctrl+tecla) y encodings limitados
+  (Raw/Hextile/CopyRect; Tight/ZRLE deshabilitados al no enlazar zlib).
+- Aunque el código propio es MIT, el binario enlaza QTermWidget (GPL-2.0), por
+  lo que la distribución combinada queda sujeta a GPL. Ver
+  `third-party-licenses.txt`.
 
 ## Convención
 
 - Marcar con `[x]` los elementos completados.
-- Los elementos P0 bloquean cualquier release.
+- Los elementos P1 son los diferenciadores que faltan para competir de tú a tú
+  con MobaXterm; P2/P3 son robustez y pulido.
