@@ -4,6 +4,14 @@
 
 #include <QDebug>
 
+DWORD ConPty::exitCode() const {
+    if (!m_process)
+        return 0;
+    DWORD code = 0;
+    GetExitCodeProcess(m_process, &code);
+    return code;
+}
+
 ConPty::~ConPty() {
     close();
 }
@@ -36,6 +44,7 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
 
     HRESULT hr = CreatePseudoConsole(size, inRead, outWrite, 0, &m_hpc);
     if (FAILED(hr)) {
+        m_startError = static_cast<DWORD>(hr);
         CloseHandle(inRead);
         CloseHandle(inWrite);
         CloseHandle(outRead);
@@ -44,17 +53,28 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     }
 
     // Build the command line.
-    QString cmdLine = "\"" + program + "\"";
-    for (const QString& a : args) {
-        cmdLine += " \"" + a + "\"";
+    std::wstring wcmd;
+    if (program.contains(' ')) {
+        wcmd = L"\"" + program.toStdWString() + L"\"";
+    } else {
+        wcmd = program.toStdWString();
     }
-    QByteArray cmdLineUtf16;
-    cmdLineUtf16.resize((cmdLine.size() + 1) * 2);
-    wcscpy(reinterpret_cast<wchar_t*>(cmdLineUtf16.data()), reinterpret_cast<const wchar_t*>(cmdLine.utf16()));
+    for (const QString& a : args) {
+        wcmd += L" ";
+        if (a.contains(' ')) {
+            wcmd += L"\"" + a.toStdWString() + L"\"";
+        } else {
+            wcmd += a.toStdWString();
+        }
+    }
 
     STARTUPINFOEXW si;
     memset(&si, 0, sizeof(si));
     si.StartupInfo.cb = sizeof(si);
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdInput = nullptr;
+    si.StartupInfo.hStdOutput = nullptr;
+    si.StartupInfo.hStdError = nullptr;
 
     SIZE_T attrSize = 0;
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attrSize);
@@ -78,8 +98,9 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
         CloseHandle(outWrite);
         return false;
     }
-    if (!UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, m_hpc, sizeof(m_hpc),
-                                   nullptr, nullptr)) {
+    if (!UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+                                   m_hpc, sizeof(HPCON), nullptr, nullptr)) {
+        m_startError = GetLastError();
         DeleteProcThreadAttributeList(si.lpAttributeList);
         HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
         ClosePseudoConsole(m_hpc);
@@ -94,8 +115,9 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     PROCESS_INFORMATION pi;
     memset(&pi, 0, sizeof(pi));
 
-    BOOL ok = CreateProcessW(nullptr, reinterpret_cast<wchar_t*>(cmdLineUtf16.data()), nullptr, nullptr, FALSE,
+    BOOL ok = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE,
                              EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, &si.StartupInfo, &pi);
+
 
     DeleteProcThreadAttributeList(si.lpAttributeList);
     HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
@@ -103,6 +125,7 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     CloseHandle(outWrite);
 
     if (!ok) {
+        m_startError = GetLastError();
         ClosePseudoConsole(m_hpc);
         m_hpc = nullptr;
         CloseHandle(inWrite);

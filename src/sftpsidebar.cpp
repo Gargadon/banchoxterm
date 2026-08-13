@@ -56,7 +56,24 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     m_uploadBtn = new QPushButton(QIcon(":/icons/upload.svg"), tr("Upload"), this);
     toolsLayout->addWidget(m_uploadBtn);
 
+    m_uploadDirBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("Upload Folder"), this);
+    toolsLayout->addWidget(m_uploadDirBtn);
+
     mainLayout->addLayout(toolsLayout);
+
+    auto* fileOpsLayout = new QHBoxLayout();
+    fileOpsLayout->setSpacing(6);
+
+    m_newFolderBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("New Folder"), this);
+    fileOpsLayout->addWidget(m_newFolderBtn);
+
+    m_renameBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Rename"), this);
+    fileOpsLayout->addWidget(m_renameBtn);
+
+    m_chmodBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Permissions"), this);
+    fileOpsLayout->addWidget(m_chmodBtn);
+
+    mainLayout->addLayout(fileOpsLayout);
 
     m_treeWidget = new QTreeWidget(this);
     m_treeWidget->setHeaderLabels({tr("Name"), tr("Size"), tr("Modified")});
@@ -75,6 +92,10 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     m_pathEdit->setEnabled(false);
     m_refreshBtn->setEnabled(false);
     m_uploadBtn->setEnabled(false);
+    m_uploadDirBtn->setEnabled(false);
+    m_newFolderBtn->setEnabled(false);
+    m_renameBtn->setEnabled(false);
+    m_chmodBtn->setEnabled(false);
     m_treeWidget->setEnabled(false);
 
     m_fileWatcher = new QFileSystemWatcher(this);
@@ -83,6 +104,10 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     connect(m_upBtn, &QPushButton::clicked, this, &SftpSidebar::onParentDirClicked);
     connect(m_refreshBtn, &QPushButton::clicked, this, &SftpSidebar::onRefreshClicked);
     connect(m_uploadBtn, &QPushButton::clicked, this, &SftpSidebar::onUploadClicked);
+    connect(m_uploadDirBtn, &QPushButton::clicked, this, &SftpSidebar::onUploadFolderClicked);
+    connect(m_newFolderBtn, &QPushButton::clicked, this, &SftpSidebar::onNewFolderClicked);
+    connect(m_renameBtn, &QPushButton::clicked, this, &SftpSidebar::onRenameClicked);
+    connect(m_chmodBtn, &QPushButton::clicked, this, &SftpSidebar::onChmodClicked);
     connect(m_pathEdit, &QLineEdit::returnPressed, this, [this]() { emit requestList(m_pathEdit->text().trimmed()); });
     connect(m_treeWidget, &QTreeWidget::itemDoubleClicked, this, &SftpSidebar::onItemDoubleClicked);
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SftpSidebar::showContextMenu);
@@ -106,6 +131,10 @@ void SftpSidebar::setConnection(SshConnection* connection) {
     connect(this, &SftpSidebar::requestDownload, m_connection, &SshConnection::downloadFile);
     connect(this, &SftpSidebar::requestUpload, m_connection, &SshConnection::uploadFile);
     connect(this, &SftpSidebar::requestDelete, m_connection, &SshConnection::deleteFile);
+    connect(this, &SftpSidebar::requestCreateDir, m_connection, &SshConnection::createDirectory);
+    connect(this, &SftpSidebar::requestRename, m_connection, &SshConnection::renamePath);
+    connect(this, &SftpSidebar::requestChmod, m_connection, &SshConnection::chmodPath);
+    connect(this, &SftpSidebar::requestUploadDir, m_connection, &SshConnection::uploadDirectory);
     connect(this, &SftpSidebar::requestDisconnect, m_connection, &SshConnection::disconnectFromHost);
 
     connect(m_connection, &SshConnection::connectionSuccess, this, &SftpSidebar::onConnectionSuccess);
@@ -156,6 +185,10 @@ void SftpSidebar::stopSession() {
     m_pathEdit->setEnabled(false);
     m_refreshBtn->setEnabled(false);
     m_uploadBtn->setEnabled(false);
+    m_uploadDirBtn->setEnabled(false);
+    m_newFolderBtn->setEnabled(false);
+    m_renameBtn->setEnabled(false);
+    m_chmodBtn->setEnabled(false);
     m_treeWidget->setEnabled(false);
 
     for (const QString& path : m_watchedFiles.keys()) {
@@ -174,6 +207,10 @@ void SftpSidebar::onConnectionSuccess() {
     m_pathEdit->setEnabled(true);
     m_refreshBtn->setEnabled(true);
     m_uploadBtn->setEnabled(true);
+    m_uploadDirBtn->setEnabled(true);
+    m_newFolderBtn->setEnabled(true);
+    m_renameBtn->setEnabled(true);
+    m_chmodBtn->setEnabled(true);
     m_treeWidget->setEnabled(true);
 
     m_currentPath = ".";
@@ -367,6 +404,91 @@ void SftpSidebar::onUploadClicked() {
     }
 }
 
+void SftpSidebar::onUploadFolderClicked() {
+    if (!m_isConnected)
+        return;
+    QString path = QFileDialog::getExistingDirectory(this, tr("Select Folder to Upload"), QDir::homePath());
+    if (!path.isEmpty()) {
+        m_statusLabel->setText(tr("Uploading folder %1...").arg(QFileInfo(path).fileName()));
+        emit requestUploadDir(path, m_currentPath);
+    }
+}
+
+void SftpSidebar::onNewFolderClicked() {
+    if (!m_isConnected)
+        return;
+    bool ok = false;
+    QString name = QInputDialog::getText(this, tr("New Folder"), tr("Folder name:"), QLineEdit::Normal, "", &ok);
+    if (!ok || name.trimmed().isEmpty())
+        return;
+
+    QString remotePath = m_currentPath;
+    if (!remotePath.endsWith("/"))
+        remotePath += "/";
+    remotePath += name.trimmed();
+
+    m_statusLabel->setText(tr("Creating folder %1...").arg(name.trimmed()));
+    emit requestCreateDir(remotePath);
+}
+
+void SftpSidebar::onRenameClicked() {
+    if (!m_isConnected)
+        return;
+    auto* item = m_treeWidget->currentItem();
+    if (!item)
+        return;
+
+    QString special = item->data(0, Qt::UserRole + 1).toString();
+    if (special == "." || special == "..")
+        return;
+
+    QString oldName = item->text(0);
+    bool ok = false;
+    QString newName = QInputDialog::getText(this, tr("Rename"), tr("New name:"), QLineEdit::Normal, oldName, &ok);
+    if (!ok || newName.trimmed().isEmpty() || newName.trimmed() == oldName)
+        return;
+
+    QString base = m_currentPath;
+    if (!base.endsWith("/"))
+        base += "/";
+
+    m_statusLabel->setText(tr("Renaming %1...").arg(oldName));
+    emit requestRename(base + oldName, base + newName.trimmed());
+}
+
+void SftpSidebar::onChmodClicked() {
+    if (!m_isConnected)
+        return;
+    auto* item = m_treeWidget->currentItem();
+    if (!item)
+        return;
+
+    QString special = item->data(0, Qt::UserRole + 1).toString();
+    if (special == "." || special == "..")
+        return;
+
+    QString name = item->text(0);
+    bool ok = false;
+    QString modeStr = QInputDialog::getText(this, tr("Permissions"), tr("Mode (octal, e.g. 755):"),
+                                            QLineEdit::Normal, "755", &ok);
+    if (!ok)
+        return;
+
+    bool parseOk = false;
+    int mode = modeStr.trimmed().toInt(&parseOk, 8);
+    if (!parseOk || mode < 0 || mode > 07777) {
+        QMessageBox::warning(this, tr("Invalid Permissions"), tr("Please enter a valid octal mode (e.g. 755)."));
+        return;
+    }
+
+    QString base = m_currentPath;
+    if (!base.endsWith("/"))
+        base += "/";
+
+    m_statusLabel->setText(tr("Changing permissions of %1...").arg(name));
+    emit requestChmod(base + name, mode);
+}
+
 void SftpSidebar::onDownloadClicked() {
     auto* item = m_treeWidget->currentItem();
     if (!item)
@@ -469,7 +591,11 @@ void SftpSidebar::showContextMenu(const QPoint& pos) {
         editAct = menu.addAction(QIcon(":/icons/edit.svg"), tr("Edit"));
         downloadAct = menu.addAction(QIcon(":/icons/download.svg"), tr("Download"));
     }
+    auto* renameAct = menu.addAction(QIcon(":/icons/edit.svg"), tr("Rename"));
+    auto* chmodAct = menu.addAction(QIcon(":/icons/edit.svg"), tr("Permissions"));
     auto* deleteAct = menu.addAction(QIcon(":/icons/delete.svg"), tr("Delete"));
+    menu.addSeparator();
+    auto* newFolderAct = menu.addAction(QIcon(":/icons/folder.svg"), tr("New Folder"));
     auto* refreshAct = menu.addAction(QIcon(":/icons/refresh.svg"), tr("Refresh"));
 
     if (special == "." || special == "..") {
@@ -478,6 +604,8 @@ void SftpSidebar::showContextMenu(const QPoint& pos) {
         if (downloadAct)
             downloadAct->setEnabled(false);
         deleteAct->setEnabled(false);
+        renameAct->setEnabled(false);
+        chmodAct->setEnabled(false);
     }
 
     auto* selected = menu.exec(m_treeWidget->mapToGlobal(pos));
@@ -487,6 +615,12 @@ void SftpSidebar::showContextMenu(const QPoint& pos) {
         onDownloadClicked();
     } else if (selected == deleteAct) {
         onDeleteClicked();
+    } else if (selected == renameAct) {
+        onRenameClicked();
+    } else if (selected == chmodAct) {
+        onChmodClicked();
+    } else if (selected == newFolderAct) {
+        onNewFolderClicked();
     } else if (selected == refreshAct) {
         onRefreshClicked();
     }

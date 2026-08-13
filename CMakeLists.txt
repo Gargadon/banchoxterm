@@ -12,12 +12,44 @@ set(CMAKE_AUTORCC ON)
 # Find Qt6 components
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network Test LinguistTools)
 
-# Find QTermWidget6
-find_package(qtermwidget6 REQUIRED)
+include(FetchContent)
 
-# Find libssh2 using PkgConfig
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBSSH2 REQUIRED IMPORTED_TARGET libssh2)
+if(NOT WIN32)
+    # Fetch QTermWidget6 and its dependency lxqt-build-tools
+
+    FetchContent_Declare(
+        lxqt_build_tools
+        GIT_REPOSITORY https://github.com/lxqt/lxqt-build-tools.git
+        GIT_TAG        master
+    )
+    FetchContent_GetProperties(lxqt_build_tools)
+    if(NOT lxqt_build_tools_POPULATED)
+        FetchContent_Populate(lxqt_build_tools)
+        set(SAVED_CMAKE_PROJECT_NAME ${CMAKE_PROJECT_NAME})
+        set(CMAKE_PROJECT_NAME "lxqt2-build-tools")
+        add_subdirectory(${lxqt_build_tools_SOURCE_DIR} ${lxqt_build_tools_BINARY_DIR})
+        set(CMAKE_PROJECT_NAME ${SAVED_CMAKE_PROJECT_NAME})
+    endif()
+    set(lxqt2-build-tools_DIR "${CMAKE_BINARY_DIR}")
+
+    FetchContent_Declare(
+        qtermwidget
+        GIT_REPOSITORY https://github.com/lxqt/qtermwidget.git
+        GIT_TAG        master
+    )
+    FetchContent_MakeAvailable(qtermwidget)
+endif()
+
+# Fetch libssh2
+set(CRYPTO_BACKEND "WinCNG" CACHE STRING "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    libssh2
+    GIT_REPOSITORY https://github.com/libssh2/libssh2.git
+    GIT_TAG        master
+)
+FetchContent_MakeAvailable(libssh2)
 
 # Include directories
 include_directories(
@@ -68,11 +100,13 @@ target_link_libraries(banchoxterm
         Qt6::Widgets
         Qt6::Gui
         Qt6::Network
-        qtermwidget6
-        PkgConfig::LIBSSH2
+        libssh2
 )
 
-if(WIN32)
+if(NOT WIN32)
+    target_link_libraries(banchoxterm PRIVATE qtermwidget6)
+else()
+    target_compile_definitions(banchoxterm PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006)
     target_link_libraries(banchoxterm PRIVATE advapi32)
 endif()
 

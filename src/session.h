@@ -19,6 +19,7 @@ struct TunnelConfig {
 struct Session {
     QString id;
     QString name;
+    QString group;
     SessionType type;
 
     // SSH / Telnet / RDP / VNC
@@ -27,6 +28,7 @@ struct Session {
     int port = 22;
     QString keyPath;
     bool x11Forwarding = false;
+    bool autoReconnect = false;
 
     // Local
     QString shellPath;
@@ -46,6 +48,8 @@ class SessionManager {
 public:
     static QList<Session> loadSessions();
     static void saveSessions(const QList<Session>& sessions);
+    static bool exportSessions(const QList<Session>& sessions, const QString& path);
+    static QList<Session> importSessions(const QString& path, bool* ok = nullptr);
 
 private:
     static QString getFilePath();

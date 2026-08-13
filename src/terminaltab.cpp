@@ -1,7 +1,9 @@
 #include "terminaltab.h"
 #include "sshconnection.h"
 #include "vtterminalwidget.h"
+#ifndef Q_OS_WIN
 #include <qtermwidget.h>
+#endif
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QFont>
@@ -21,8 +23,14 @@
 #include <QCheckBox>
 #include <QKeyEvent>
 #include <QShortcut>
+#include <QFile>
+#include <QDateTime>
+#include <QDir>
+#include <QStandardPaths>
+#include <QRegularExpression>
 
 #ifdef Q_OS_WIN
+#include "conpty.h"
 #include <io.h>
 #else
 #include <unistd.h>
@@ -184,9 +192,12 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
     // Atajos de teclado utilizando QShortcut para interceptar eventos de forma limpia
     auto* searchShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_F), this);
     connect(searchShortcut, &QShortcut::activated, this, [this]() {
+#ifndef Q_OS_WIN
         if (m_terminal) {
             m_terminal->toggleShowSearchBar();
-        } else if (m_vtTerminal) {
+        } else
+#endif
+        if (m_vtTerminal) {
             showSearchFrame();
         }
     });
@@ -197,6 +208,8 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             hideSearchFrame();
         }
     });
+
+    startLogging();
 }
 
 TerminalTab::~TerminalTab() {
@@ -206,6 +219,12 @@ TerminalTab::~TerminalTab() {
         m_flushTimer->stop();
     }
     m_writeBuffer.clear();
+
+    if (m_logFile) {
+        m_logFile->close();
+        delete m_logFile;
+        m_logFile = nullptr;
+    }
 
 #ifdef Q_OS_WIN
     if (m_conptyPollTimer) {
@@ -239,6 +258,7 @@ TerminalTab::~TerminalTab() {
 
 void TerminalTab::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
+#ifndef Q_OS_WIN
     if (m_connection && m_terminal && m_session.type == SessionType::SSH) {
         int rows = m_terminal->screenLinesCount();
         int cols = m_terminal->screenColumnsCount();
@@ -247,6 +267,7 @@ void TerminalTab::resizeEvent(QResizeEvent* event) {
                                       Q_ARG(int, cols));
         }
     }
+#endif
 }
 
 #ifdef Q_OS_WIN
@@ -254,7 +275,10 @@ void TerminalTab::setupWindowsTerminal() {
     m_vtTerminal = new VtTerminalWidget(this);
     layout()->addWidget(m_vtTerminal);
 
+    QTimer::singleShot(0, this, &TerminalTab::updateFontFromSettings);
+
     connect(m_vtTerminal, &VtTerminalWidget::workingDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
+
     connect(m_vtTerminal, &VtTerminalWidget::titleChanged, this,
             [this](const QString& title) { emit titleChanged(title); });
     connect(m_vtTerminal, &VtTerminalWidget::finished, this, &TerminalTab::onTerminalFinished);
@@ -265,7 +289,7 @@ void TerminalTab::setupWindowsTerminal() {
                 QMetaObject::invokeMethod(m_connection, "sendToShell", Qt::QueuedConnection, Q_ARG(QByteArray, data));
             }
         });
-        connect(m_vtTerminal, &VtTerminalWidget::resized, this, [this](int rows, int cols) {
+        connect(m_vtTerminal, &VtTerminalWidget::resized, this, [this](int cols, int rows) {
             if (m_connection) {
                 QMetaObject::invokeMethod(m_connection, "resizePty", Qt::QueuedConnection, Q_ARG(int, rows),
                                           Q_ARG(int, cols));
@@ -280,18 +304,21 @@ void TerminalTab::setupWindowsTerminal() {
         connect(m_connection, &SshConnection::shellDataReceived, this, [this](const QByteArray& data) {
             if (m_vtTerminal)
                 m_vtTerminal->writeData(data);
+            logData(data);
         });
         connect(m_connection, &SshConnection::shellClosed, this, [this]() {
             m_isActive = false;
             if (m_vtTerminal)
                 m_vtTerminal->writeData(tr("\r\n[Connection closed]\r\n").toUtf8());
             emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+            maybeScheduleReconnect();
         });
         connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
             if (m_vtTerminal)
                 m_vtTerminal->writeData(tr("\r\n[Connection failed: %1]\r\n").arg(error).toUtf8());
             m_isActive = false;
             emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+            maybeScheduleReconnect();
         });
 
         if (m_session.x11Forwarding) {
@@ -306,11 +333,42 @@ void TerminalTab::setupWindowsTerminal() {
         m_isActive = false;
     } else {
         QString shell = m_session.shellPath;
+#ifdef Q_OS_WIN
+        // Ignore POSIX-style paths saved from Linux (e.g. /bin/bash) on Windows
+        if (shell.isEmpty() || shell.startsWith('/')) {
+            shell = qEnvironmentVariable("COMSPEC");
+            if (shell.isEmpty())
+                shell = "cmd.exe";
+        }
+#endif
         if (shell.isEmpty())
             shell = "cmd.exe";
-        m_conpty = new ConPty();
-        m_conpty->start(shell, {}, 80, 24);
-        startConPtyPolling();
+
+        // Defer ConPTY start until the widget has its real size.
+        // This avoids cmd.exe going through a resize/reinit cycle.
+        // The 'resized' signal fires from VtTerminalWidget::resizeEvent
+        // the first time it is laid out and shown.
+        auto* conn = new QMetaObject::Connection();
+        *conn = connect(m_vtTerminal, &VtTerminalWidget::resized, this,
+                        [this, shell, conn](int cols, int rows) {
+                            // Disconnect so this fires only once
+                            disconnect(*conn);
+                            delete conn;
+
+                            m_conpty = new ConPty();
+                            if (!m_conpty->start(shell, {}, cols, rows)) {
+                                DWORD err = m_conpty->startError();
+                                m_vtTerminal->writeData(
+                                    tr("\r\n[Failed to start '%1' (error 0x%2)]\r\n")
+                                        .arg(shell)
+                                        .arg(err, 8, 16, QChar('0'))
+                                        .toUtf8());
+                                m_isActive = false;
+                                emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+                                return;
+                            }
+                            startConPtyPolling();
+                        });
     }
 }
 
@@ -322,7 +380,7 @@ void TerminalTab::startConPtyPolling() {
         if (m_conpty)
             m_conpty->write(data);
     });
-    connect(m_vtTerminal, &VtTerminalWidget::resized, this, [this](int rows, int cols) {
+    connect(m_vtTerminal, &VtTerminalWidget::resized, this, [this](int cols, int rows) {
         if (m_conpty)
             m_conpty->resize(cols, rows);
     });
@@ -337,30 +395,36 @@ void TerminalTab::pollConPtyOutput() {
         return;
 
     QByteArray data = m_conpty->read();
-    if (!data.isEmpty())
+    if (!data.isEmpty()) {
         m_vtTerminal->writeData(data);
+        logData(data);
+    }
 
     if (!m_conpty->isRunning()) {
+        DWORD exitCode = m_conpty->exitCode();
         m_conptyPollTimer->stop();
         m_isActive = false;
+        m_vtTerminal->writeData(
+            tr("\r\n[Process exited with code %1]\r\n").arg(exitCode).toUtf8());
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     }
 }
+
 #endif
 
+#ifndef Q_OS_WIN
 void TerminalTab::setupSshTerminal() {
     m_terminal->startTerminalTeletype();
 
     // Make the pty slave fd non-blocking so a burst of remote output (btop,
     // git progress, etc.) never blocks the GUI thread. The emulator drains the
     // same pty on this thread, so a blocking write would deadlock it.
-#ifndef Q_OS_WIN
     int fd = m_terminal->getPtySlaveFd();
     if (fd >= 0) {
         int flags = fcntl(fd, F_GETFL, 0);
         fcntl(fd, F_SETFL, flags | O_NONBLOCK);
     }
-#endif
+
     m_flushTimer = new QTimer(this);
     connect(m_flushTimer, &QTimer::timeout, this, &TerminalTab::flushWriteBuffer);
 
@@ -372,22 +436,19 @@ void TerminalTab::setupSshTerminal() {
     m_connectionThread->start();
 
     connect(m_connection, &SshConnection::shellDataReceived, this, &TerminalTab::onShellDataReceived);
-    connect(m_connection, &SshConnection::shellClosed, this, &TerminalTab::onShellClosed);
-    connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
-        if (m_terminal) {
-            QString text = tr("\r\n[Connection failed: %1]\r\n").arg(error);
-            int fd = m_terminal->getPtySlaveFd();
-            if (fd >= 0) {
-#ifdef Q_OS_WIN
-                _write(fd, text.toUtf8().constData(), static_cast<unsigned int>(text.size()));
-#else
-                ::write(fd, text.toUtf8().constData(), static_cast<size_t>(text.size()));
-#endif
+        connect(m_connection, &SshConnection::shellClosed, this, &TerminalTab::onShellClosed);
+        connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
+            if (m_terminal) {
+                QString text = tr("\r\n[Connection failed: %1]\r\n").arg(error);
+                int fd = m_terminal->getPtySlaveFd();
+                if (fd >= 0) {
+                    ::write(fd, text.toUtf8().constData(), static_cast<size_t>(text.size()));
+                }
             }
-        }
-        m_isActive = false;
-        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
-    });
+            m_isActive = false;
+            emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+            maybeScheduleReconnect();
+        });
 
     // The connection itself is triggered by SftpSidebar::startSession(), which
     // shares this same SshConnection with the terminal.
@@ -407,6 +468,7 @@ void TerminalTab::onShellDataReceived(const QByteArray& data) {
     if (!m_terminal)
         return;
     m_writeBuffer.append(data);
+    logData(data);
     flushWriteBuffer();
     if (!m_writeBuffer.isEmpty() && m_flushTimer) {
         m_flushTimer->start(5);
@@ -421,11 +483,7 @@ void TerminalTab::flushWriteBuffer() {
         m_writeBuffer.clear();
         return;
     }
-#ifdef Q_OS_WIN
-    int written = _write(fd, m_writeBuffer.constData(), static_cast<unsigned int>(m_writeBuffer.size()));
-#else
     ssize_t written = ::write(fd, m_writeBuffer.constData(), static_cast<size_t>(m_writeBuffer.size()));
-#endif
     if (written > 0) {
         m_writeBuffer.remove(0, static_cast<int>(written));
     }
@@ -440,28 +498,16 @@ void TerminalTab::onShellClosed() {
         int fd = m_terminal->getPtySlaveFd();
         if (fd >= 0) {
             QString text = tr("\r\n[Connection closed]\r\n");
-#ifdef Q_OS_WIN
-            _write(fd, text.toUtf8().constData(), static_cast<unsigned int>(text.size()));
-#else
             ::write(fd, text.toUtf8().constData(), static_cast<size_t>(text.size()));
-#endif
         }
     }
     emit titleChanged(tr("[Closed] %1").arg(m_session.name));
-}
-
-void TerminalTab::onTerminalFinished() {
-    m_isActive = false;
-    emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+    maybeScheduleReconnect();
 }
 
 void TerminalTab::onTitleChanged() {
     if (m_terminal)
         emit titleChanged(m_terminal->title());
-}
-
-void TerminalTab::onRemoteDirChanged(const QString& dir) {
-    emit remoteDirChanged(dir);
 }
 
 void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
@@ -498,11 +544,19 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
         m_terminal->zoomOut();
     }
 }
+#endif
+
+void TerminalTab::onTerminalFinished() {
+    m_isActive = false;
+    emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+    maybeScheduleReconnect();
+}
+
+void TerminalTab::onRemoteDirChanged(const QString& dir) {
+    emit remoteDirChanged(dir);
+}
 
 void TerminalTab::updateFontFromSettings() {
-    if (!m_terminal)
-        return;
-
     QSettings settings;
 
     QFont font;
@@ -513,15 +567,67 @@ void TerminalTab::updateFontFromSettings() {
         font.setStyleHint(QFont::Monospace);
     }
     font.setFixedPitch(true);
-    m_terminal->setTerminalFont(font);
 
-    QString colorScheme = settings.value("terminal/colorScheme", "DarkPastels").toString();
-    QStringList schemes = QTermWidget::availableColorSchemes();
-    if (schemes.contains(colorScheme)) {
-        m_terminal->setColorScheme(colorScheme);
-    } else if (schemes.contains("DarkPastels")) {
-        m_terminal->setColorScheme("DarkPastels");
+#ifndef Q_OS_WIN
+    if (m_terminal) {
+        m_terminal->setTerminalFont(font);
+
+        QString colorScheme = settings.value("terminal/colorScheme", "DarkPastels").toString();
+        QStringList schemes = QTermWidget::availableColorSchemes();
+        if (schemes.contains(colorScheme)) {
+            m_terminal->setColorScheme(colorScheme);
+        } else if (schemes.contains("DarkPastels")) {
+            m_terminal->setColorScheme("DarkPastels");
+        }
     }
+#else
+    if (m_vtTerminal) {
+        m_vtTerminal->setTerminalFont(font);
+        QString colorScheme = settings.value("terminal/colorScheme", "DarkPastels").toString();
+        m_vtTerminal->setColorScheme(colorScheme);
+    }
+#endif
+}
+
+void TerminalTab::startLogging() {
+    if (m_session.type == SessionType::RDP || m_session.type == SessionType::VNC)
+        return;
+
+    QSettings settings;
+    if (!settings.value("terminal/loggingEnabled", false).toBool())
+        return;
+
+    QString dir = settings.value("terminal/logDirectory", "").toString().trimmed();
+    if (dir.isEmpty())
+        dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (!QDir().mkpath(dir))
+        return;
+
+    QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    QString safeName = m_session.name;
+    safeName.replace(QRegularExpression("[^A-Za-z0-9_-]"), "_");
+
+    QString path = dir + "/" + safeName + "_" + stamp + ".log";
+    m_logFile = new QFile(path);
+    if (!m_logFile->open(QIODevice::WriteOnly | QIODevice::Append)) {
+        delete m_logFile;
+        m_logFile = nullptr;
+    }
+}
+
+void TerminalTab::logData(const QByteArray& data) {
+    if (m_logFile && m_logFile->isOpen() && !data.isEmpty())
+        m_logFile->write(data);
+}
+
+void TerminalTab::maybeScheduleReconnect() {
+    if (!m_session.autoReconnect || m_reconnectTimer)
+        return;
+    m_reconnectTimer = new QTimer(this);
+    m_reconnectTimer->setSingleShot(true);
+    m_reconnectTimer->setInterval(3000);
+    connect(m_reconnectTimer, &QTimer::timeout, this, [this]() { emit reconnectRequested(m_session); });
+    m_reconnectTimer->start();
 }
 
 void TerminalTab::launchExternalClient() {
@@ -610,9 +716,12 @@ void TerminalTab::showSearchFrame() {
 void TerminalTab::hideSearchFrame() {
     if (m_searchFrame) {
         m_searchFrame->hide();
+#ifndef Q_OS_WIN
         if (m_terminal) {
             m_terminal->setFocus();
-        } else if (m_vtTerminal) {
+        } else
+#endif
+        if (m_vtTerminal) {
             m_vtTerminal->setFocus();
         }
     }
@@ -636,4 +745,75 @@ void TerminalTab::onSearchPrev() {
     if (m_vtTerminal) {
         m_vtTerminal->findText(text, false, cs);
     }
+}
+
+void TerminalTab::sendInputText(const QString& text) {
+#ifndef Q_OS_WIN
+    if (m_terminal) {
+        m_terminal->sendText(text + "\n");
+        return;
+    }
+#endif
+    if (m_vtTerminal) {
+        m_vtTerminal->writeData((text + "\n").toUtf8());
+    }
+}
+
+void TerminalTab::sendRaw(const QString& text) {
+#ifndef Q_OS_WIN
+    if (m_terminal) {
+        m_terminal->sendText(text);
+        return;
+    }
+#endif
+    if (m_vtTerminal) {
+        m_vtTerminal->writeData(text.toUtf8());
+    }
+}
+
+bool TerminalTab::searchText(const QString& str, bool next, bool caseSensitive) {
+    if (str.isEmpty())
+        return false;
+#ifdef Q_OS_WIN
+    if (m_vtTerminal)
+        return m_vtTerminal->findText(str, next, caseSensitive);
+#else
+    Q_UNUSED(str);
+    Q_UNUSED(next);
+    Q_UNUSED(caseSensitive);
+#endif
+    return false;
+}
+
+void TerminalTab::copySelection() {
+#ifndef Q_OS_WIN
+    if (m_terminal) {
+        m_terminal->copyClipboard();
+        return;
+    }
+#endif
+    if (m_vtTerminal) {
+        m_vtTerminal->copyClipboard();
+    }
+}
+
+void TerminalTab::pasteSelection() {
+#ifndef Q_OS_WIN
+    if (m_terminal) {
+        m_terminal->pasteClipboard();
+        return;
+    }
+#endif
+    if (m_vtTerminal) {
+        m_vtTerminal->pasteClipboard();
+    }
+}
+
+void TerminalTab::clearTerminal() {
+#ifndef Q_OS_WIN
+    if (m_terminal) {
+        m_terminal->clear();
+        return;
+    }
+#endif
 }

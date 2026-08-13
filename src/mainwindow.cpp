@@ -3,7 +3,6 @@
 #include "sessionssidebar.h"
 #include "sftpsidebar.h"
 #include "terminaltab.h"
-#include <qtermwidget.h>
 #include "sessiondialog.h"
 #include "settingsdialog.h"
 #include <QVBoxLayout>
@@ -18,6 +17,9 @@
 #include <QIcon>
 #include <QApplication>
 #include <QStyle>
+#include <QStyleFactory>
+#include <QStyleHints>
+#include <QGuiApplication>
 #include <QShortcut>
 #include <QToolBar>
 #include <QMenuBar>
@@ -29,13 +31,33 @@
 #include <QComboBox>
 #include <QCloseEvent>
 #include <QMessageBox>
+#include <QMenu>
+#include <QListWidget>
+#include <QPlainTextEdit>
+#include <QDialog>
+#include <QCheckBox>
+#include <QVBoxLayout>
+#include <QPushButton>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowIcon(QIcon(":/icons/logo.svg"));
     QSettings settings;
-    m_isDarkTheme = settings.value("theme/dark", true).toBool();
+    if (settings.contains("theme/mode")) {
+        m_themeMode = settings.value("theme/mode", "system").toString();
+    } else if (settings.contains("theme/dark")) {
+        m_themeMode = settings.value("theme/dark", true).toBool() ? "dark" : "light";
+    } else {
+        m_themeMode = "system";
+    }
     setupUi();
-    applyTheme(m_isDarkTheme);
+    applyThemeMode(m_themeMode);
+
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this]() {
+        if (m_themeMode == "system") {
+            applyThemeMode("system");
+        }
+    });
+
 
     // Restore window layout geometry & state
     if (settings.contains("window/geometry")) {
@@ -278,6 +300,10 @@ void MainWindow::onConnectSession(const Session& session) {
 
     m_tabWidget->setCurrentIndex(index);
 
+    // Auto-reconnect: when a session drops and asks to reconnect, swap this tab
+    // for a fresh one with the same session.
+    connect(tab, &TerminalTab::reconnectRequested, this, &MainWindow::onReconnectRequested);
+
     // Connect title updates
     connect(tab, &TerminalTab::titleChanged, this, [this, tab](const QString& title) {
         int idx = m_tabWidget->indexOf(tab);
@@ -343,20 +369,36 @@ void MainWindow::onNewLocalTerminal() {
     Session localSession;
     localSession.name = tr("Local Shell");
     localSession.type = SessionType::Local;
+#ifdef Q_OS_WIN
+    localSession.shellPath = qEnvironmentVariable("COMSPEC", "cmd.exe");
+#else
     localSession.shellPath = "/bin/bash";
+#endif
     onConnectSession(localSession);
 }
 
 void MainWindow::toggleTheme() {
-    m_isDarkTheme = !m_isDarkTheme;
-    applyTheme(m_isDarkTheme);
+    if (m_themeMode == "dark")
+        applyThemeMode("light");
+    else
+        applyThemeMode("dark");
 }
 
-void MainWindow::applyTheme(bool dark) {
-    if (dark) {
-        qApp->setStyleSheet(Theme::getDarkTheme());
-    } else {
+void MainWindow::applyThemeMode(const QString& mode) {
+    m_themeMode = mode;
+    if (mode == "system") {
+        qApp->setStyleSheet("");
+#ifdef Q_OS_WIN
+        QStyle* nativeStyle = QStyleFactory::create("windowsvista");
+        if (!nativeStyle)
+            nativeStyle = QStyleFactory::create("windows11");
+        if (nativeStyle)
+            qApp->setStyle(nativeStyle);
+#endif
+    } else if (mode == "light") {
         qApp->setStyleSheet(Theme::getLightTheme());
+    } else { // "dark"
+        qApp->setStyleSheet(Theme::getDarkTheme());
     }
 }
 
@@ -364,10 +406,8 @@ void MainWindow::onOpenSettings() {
     SettingsDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
         // 1. Theme Configuration
-        QSettings settings;
-        bool darkTheme = settings.value("theme/dark", true).toBool();
-        if (darkTheme != m_isDarkTheme) {
-            toggleTheme();
+        if (dialog.themeMode() != m_themeMode) {
+            applyThemeMode(dialog.themeMode());
         }
 
         // 2. Typography Configuration
@@ -379,6 +419,7 @@ void MainWindow::onOpenSettings() {
         }
     }
 }
+
 
 void MainWindow::toggleMultiInputBar() {
     bool visible = !m_multiInputBar->isVisible();
@@ -399,8 +440,8 @@ void MainWindow::onSendMultiInput() {
     // Send to all tabs
     for (int i = 0; i < m_tabWidget->count(); ++i) {
         auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(i));
-        if (tab && tab->getTerminalWidget()) {
-            tab->getTerminalWidget()->sendText(text + "\n");
+        if (tab) {
+            tab->sendInputText(text);
         }
     }
 
@@ -418,6 +459,22 @@ void MainWindow::onSendMultiInput() {
     m_multiInputEdit->addItems(history);
     m_multiInputEdit->setCurrentIndex(-1);
     m_multiInputEdit->lineEdit()->clear();
+}
+
+void MainWindow::onReconnectRequested(const Session& session) {
+    auto* tab = qobject_cast<TerminalTab*>(sender());
+    if (tab) {
+        int idx = m_tabWidget->indexOf(tab);
+        if (idx != -1) {
+            if (tab->isSsh() && m_sftpSidebar->connection() == tab->connection()) {
+                m_sftpSidebar->detachConnection();
+                m_sftpSidebar->stopSession();
+            }
+            m_tabWidget->removeTab(idx);
+            tab->deleteLater();
+        }
+    }
+    onConnectSession(session);
 }
 
 void MainWindow::onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs) {
@@ -477,14 +534,23 @@ void MainWindow::setupMenuBar() {
     auto* clearAction = editMenu->addAction(tr("Clear Scrollback"));
     connect(clearAction, &QAction::triggered, this, [this]() {
         auto* tab = currentTerminalTab();
-        if (tab && tab->getTerminalWidget()) {
-            tab->getTerminalWidget()->clear();
+        if (tab) {
+            tab->clearTerminal();
         }
     });
+
+    editMenu->addSeparator();
+
+    auto* globalSearchAction = editMenu->addAction(tr("Find in &All Sessions..."));
+    globalSearchAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
+    connect(globalSearchAction, &QAction::triggered, this, &MainWindow::onGlobalSearch);
 
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
     auto* aboutAction = helpMenu->addAction(tr("&About BanchoXterm"));
     connect(aboutAction, &QAction::triggered, this, &MainWindow::showAbout);
+
+    m_macrosMenu = menuBar()->addMenu(tr("&Macros"));
+    rebuildMacrosMenu();
 }
 
 void MainWindow::showAbout() {
@@ -496,7 +562,7 @@ void MainWindow::showAbout() {
                       .arg(tr("Version %1").arg(QStringLiteral("0.1.0")))
                       .arg(tr("A multi-protocol terminal emulator and remote session manager designed for command-line rebels."))
                       .arg(tr("Supports SSH, SFTP, Telnet, Serial, RDP, VNC, and local terminals."))
-                      .arg(tr("Copyright &copy; 2026 BanchoXterm. All rights reserved."));
+                      .arg(tr("Copyright &copy; 2026 BanchoXterm contributors. Licensed under the MIT License."));
 
     QMessageBox::about(this, tr("About BanchoXterm"), content);
 }
@@ -510,14 +576,174 @@ TerminalTab* MainWindow::currentTerminalTab() const {
 
 void MainWindow::onCopy() {
     auto* tab = currentTerminalTab();
-    if (tab && tab->getTerminalWidget()) {
-        tab->getTerminalWidget()->copyClipboard();
+    if (tab) {
+        tab->copySelection();
     }
 }
 
 void MainWindow::onPaste() {
     auto* tab = currentTerminalTab();
-    if (tab && tab->getTerminalWidget()) {
-        tab->getTerminalWidget()->pasteClipboard();
+    if (tab) {
+        tab->pasteSelection();
     }
+}
+
+void MainWindow::rebuildMacrosMenu() {
+    if (!m_macrosMenu)
+        return;
+    m_macrosMenu->clear();
+
+    QSettings settings;
+    QStringList names = settings.value("macros/names").toStringList();
+    QStringList texts = settings.value("macros/texts").toStringList();
+
+    if (names.isEmpty()) {
+        auto* empty = m_macrosMenu->addAction(tr("(no macros defined)"));
+        empty->setEnabled(false);
+    } else {
+        for (int i = 0; i < names.size() && i < texts.size(); ++i) {
+            QAction* act = m_macrosMenu->addAction(names[i]);
+            connect(act, &QAction::triggered, this, [this, texts, i]() {
+                auto* tab = currentTerminalTab();
+                if (tab)
+                    tab->sendRaw(texts[i]);
+            });
+        }
+    }
+
+    m_macrosMenu->addSeparator();
+    auto* manageAct = m_macrosMenu->addAction(tr("Manage Macros..."));
+    connect(manageAct, &QAction::triggered, this, &MainWindow::onManageMacros);
+}
+
+void MainWindow::onManageMacros() {
+    QSettings settings;
+    QStringList names = settings.value("macros/names").toStringList();
+    QStringList texts = settings.value("macros/texts").toStringList();
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Manage Macros"));
+    dlg.setMinimumWidth(440);
+    auto* lay = new QVBoxLayout(&dlg);
+
+    auto* list = new QListWidget(&dlg);
+    list->addItems(names);
+    lay->addWidget(list);
+
+    auto* nameEdit = new QLineEdit(&dlg);
+    nameEdit->setPlaceholderText(tr("Macro name"));
+    lay->addWidget(nameEdit);
+
+    auto* textEdit = new QPlainTextEdit(&dlg);
+    textEdit->setPlaceholderText(tr("Text to send (\\n for newline)"));
+    lay->addWidget(textEdit);
+
+    auto* btnRow = new QHBoxLayout();
+    auto* addBtn = new QPushButton(tr("Add / Update"), &dlg);
+    auto* delBtn = new QPushButton(tr("Delete"), &dlg);
+    btnRow->addWidget(addBtn);
+    btnRow->addWidget(delBtn);
+    lay->addLayout(btnRow);
+
+    auto* closeBtn = new QPushButton(tr("Close"), &dlg);
+    lay->addWidget(closeBtn);
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    connect(list, &QListWidget::currentRowChanged, &dlg, [&](int row) {
+        if (row >= 0 && row < names.size()) {
+            nameEdit->setText(names[row]);
+            textEdit->setPlainText(texts[row]);
+        }
+    });
+
+    connect(addBtn, &QPushButton::clicked, &dlg, [&]() {
+        QString name = nameEdit->text().trimmed();
+        if (name.isEmpty())
+            return;
+        int idx = names.indexOf(name);
+        if (idx >= 0) {
+            texts[idx] = textEdit->toPlainText();
+        } else {
+            names.append(name);
+            texts.append(textEdit->toPlainText());
+        }
+        list->clear();
+        list->addItems(names);
+    });
+
+    connect(delBtn, &QPushButton::clicked, &dlg, [&]() {
+        int row = list->currentRow();
+        if (row >= 0 && row < names.size()) {
+            names.removeAt(row);
+            texts.removeAt(row);
+            list->clear();
+            list->addItems(names);
+        }
+    });
+
+    dlg.exec();
+
+    settings.setValue("macros/names", names);
+    settings.setValue("macros/texts", texts);
+    rebuildMacrosMenu();
+}
+
+void MainWindow::onGlobalSearch() {
+    int count = m_tabWidget->count();
+    if (count == 0)
+        return;
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Find in All Sessions"));
+    auto* lay = new QVBoxLayout(&dlg);
+
+    auto* searchEdit = new QLineEdit(&dlg);
+    searchEdit->setPlaceholderText(tr("Search text..."));
+    lay->addWidget(searchEdit);
+
+    auto* caseCheck = new QCheckBox(tr("Case Sensitive"), &dlg);
+    lay->addWidget(caseCheck);
+
+    auto* statusLabel = new QLabel(&dlg);
+    lay->addWidget(statusLabel);
+
+    auto* btnRow = new QHBoxLayout();
+    auto* nextBtn = new QPushButton(tr("Find Next"), &dlg);
+    auto* prevBtn = new QPushButton(tr("Find Previous"), &dlg);
+    auto* closeBtn = new QPushButton(tr("Close"), &dlg);
+    btnRow->addWidget(nextBtn);
+    btnRow->addWidget(prevBtn);
+    btnRow->addWidget(closeBtn);
+    lay->addLayout(btnRow);
+
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+    auto doSearch = [this, count, searchEdit, caseCheck, statusLabel](bool next) {
+        QString str = searchEdit->text();
+        if (str.isEmpty())
+            return;
+
+        int start = m_tabWidget->currentIndex();
+        int dir = next ? 1 : -1;
+
+        for (int step = 0; step < count; ++step) {
+            int idx = (start + dir * step + count) % count;
+            auto* tab = qobject_cast<TerminalTab*>(m_tabWidget->widget(idx));
+            if (!tab)
+                continue;
+            bool found = tab->searchText(str, next, caseCheck->isChecked());
+            if (found) {
+                m_tabWidget->setCurrentIndex(idx);
+                statusLabel->setText(tr("Match found in session: %1").arg(m_tabWidget->tabText(idx)));
+                return;
+            }
+        }
+        statusLabel->setText(tr("No match found."));
+    };
+
+    connect(nextBtn, &QPushButton::clicked, &dlg, [&]() { doSearch(true); });
+    connect(prevBtn, &QPushButton::clicked, &dlg, [&]() { doSearch(false); });
+    connect(searchEdit, &QLineEdit::returnPressed, &dlg, [&]() { doSearch(true); });
+
+    dlg.exec();
 }

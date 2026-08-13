@@ -3,11 +3,20 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
-#include <QListWidget>
+#include <QTreeWidget>
 #include <QMenu>
 #include <QMessageBox>
 #include <QLabel>
 #include <QIcon>
+#include <QFileDialog>
+#include <QHeaderView>
+#include <QDateTime>
+#include <QDir>
+
+namespace {
+constexpr int kSessionIdRole = Qt::UserRole;
+constexpr int kIsGroupRole = Qt::UserRole + 1;
+} // namespace
 
 SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
@@ -29,62 +38,124 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
 
     layout->addLayout(actionsLayout);
 
-    m_listWidget = new QListWidget(this);
-    m_listWidget->setContextMenuPolicy(Qt::CustomContextMenu);
-    layout->addWidget(m_listWidget);
+    auto* ioLayout = new QHBoxLayout();
+    auto* importBtn = new QPushButton(QIcon(":/icons/upload.svg"), tr("Import"), this);
+    auto* exportBtn = new QPushButton(QIcon(":/icons/download.svg"), tr("Export"), this);
+    ioLayout->addWidget(importBtn);
+    ioLayout->addWidget(exportBtn);
+    layout->addLayout(ioLayout);
+
+    m_treeWidget = new QTreeWidget(this);
+    m_treeWidget->setHeaderHidden(true);
+    m_treeWidget->setRootIsDecorated(true);
+    m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    layout->addWidget(m_treeWidget);
 
     connect(newRemoteBtn, &QPushButton::clicked, this, &SessionsSidebar::onNewSession);
     connect(newLocalBtn, &QPushButton::clicked, this, &SessionsSidebar::newLocalSessionRequested);
-    connect(m_listWidget, &QListWidget::itemDoubleClicked, this, &SessionsSidebar::onItemDoubleClicked);
-    connect(m_listWidget, &QListWidget::customContextMenuRequested, this, &SessionsSidebar::showContextMenu);
+    connect(importBtn, &QPushButton::clicked, this, &SessionsSidebar::onImportSessions);
+    connect(exportBtn, &QPushButton::clicked, this, &SessionsSidebar::onExportSessions);
+    connect(m_treeWidget, &QTreeWidget::itemDoubleClicked, this, &SessionsSidebar::onItemDoubleClicked);
+    connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SessionsSidebar::showContextMenu);
 
     loadSessions();
 }
 
 void SessionsSidebar::loadSessions() {
-    m_listWidget->clear();
+    m_treeWidget->clear();
     m_sessions = SessionManager::loadSessions();
 
+    // Map group -> tree item, preserving first-seen order.
+    QMap<QString, QTreeWidgetItem*> groupItems;
+
     for (const Session& session : m_sessions) {
-        auto* item = new QListWidgetItem(m_listWidget);
-        item->setText(session.name);
-        item->setData(Qt::UserRole, session.id);
+        QTreeWidgetItem* parent = nullptr;
+        if (!session.group.isEmpty()) {
+            auto it = groupItems.find(session.group);
+            if (it == groupItems.end()) {
+                auto* groupItem = new QTreeWidgetItem();
+                groupItem->setText(0, session.group);
+                groupItem->setIcon(0, QIcon(":/icons/folder.svg"));
+                groupItem->setData(0, kIsGroupRole, true);
+                groupItem->setData(0, kSessionIdRole, QString());
+                groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                m_treeWidget->addTopLevelItem(groupItem);
+                groupItems.insert(session.group, groupItem);
+                parent = groupItem;
+            } else {
+                parent = it.value();
+            }
+        }
+
+        auto* item = new QTreeWidgetItem();
+        item->setText(0, session.name);
+        item->setData(0, kSessionIdRole, session.id);
+        item->setData(0, kIsGroupRole, false);
 
         switch (session.type) {
         case SessionType::SSH:
-            item->setIcon(QIcon(":/icons/server.svg"));
-            item->setToolTip(QString("%1@%2:%3").arg(session.user, session.host).arg(session.port));
+            item->setIcon(0, QIcon(":/icons/server.svg"));
+            item->setToolTip(0, QString("%1@%2:%3").arg(session.user, session.host).arg(session.port));
             break;
         case SessionType::Telnet:
-            item->setIcon(QIcon(":/icons/telnet.svg"));
-            item->setToolTip(QString("telnet://%1:%2").arg(session.host).arg(session.port));
+            item->setIcon(0, QIcon(":/icons/telnet.svg"));
+            item->setToolTip(0, QString("telnet://%1:%2").arg(session.host).arg(session.port));
             break;
         case SessionType::RDP:
-            item->setIcon(QIcon(":/icons/rdp.svg"));
-            item->setToolTip(QString("rdp://%1:%2").arg(session.host).arg(session.port));
+            item->setIcon(0, QIcon(":/icons/rdp.svg"));
+            item->setToolTip(0, QString("rdp://%1:%2").arg(session.host).arg(session.port));
             break;
         case SessionType::VNC:
-            item->setIcon(QIcon(":/icons/vnc.svg"));
-            item->setToolTip(QString("vnc://%1:%2").arg(session.host).arg(session.port));
+            item->setIcon(0, QIcon(":/icons/vnc.svg"));
+            item->setToolTip(0, QString("vnc://%1:%2").arg(session.host).arg(session.port));
             break;
         case SessionType::Serial:
-            item->setIcon(QIcon(":/icons/serial.svg"));
-            item->setToolTip(tr("serial://%1 (%2 baud via %3)")
-                                 .arg(session.serialPort)
-                                 .arg(session.baudRate)
-                                 .arg(session.serialCmd));
+            item->setIcon(0, QIcon(":/icons/serial.svg"));
+            item->setToolTip(0, tr("serial://%1 (%2 baud via %3)")
+                                   .arg(session.serialPort)
+                                   .arg(session.baudRate)
+                                   .arg(session.serialCmd));
             break;
         default:
-            item->setIcon(QIcon(":/icons/terminal.svg"));
-            item->setToolTip(session.shellPath);
+            item->setIcon(0, QIcon(":/icons/terminal.svg"));
+            item->setToolTip(0, session.shellPath);
             break;
         }
-        m_listWidget->addItem(item);
+
+        if (parent) {
+            parent->addChild(item);
+        } else {
+            m_treeWidget->addTopLevelItem(item);
+        }
     }
+
+    m_treeWidget->expandAll();
 }
 
 void SessionsSidebar::saveSessions() {
     SessionManager::saveSessions(m_sessions);
+}
+
+QTreeWidgetItem* SessionsSidebar::findSessionItem(const QString& id) const {
+    const int top = m_treeWidget->topLevelItemCount();
+    for (int i = 0; i < top; ++i) {
+        QTreeWidgetItem* item = m_treeWidget->topLevelItem(i);
+        if (!item->data(0, kIsGroupRole).toBool() && item->data(0, kSessionIdRole).toString() == id)
+            return item;
+        const int childCount = item->childCount();
+        for (int j = 0; j < childCount; ++j) {
+            QTreeWidgetItem* child = item->child(j);
+            if (child->data(0, kSessionIdRole).toString() == id)
+                return child;
+        }
+    }
+    return nullptr;
+}
+
+QString SessionsSidebar::sessionIdForItem(QTreeWidgetItem* item) const {
+    if (!item || item->data(0, kIsGroupRole).toBool())
+        return QString();
+    return item->data(0, kSessionIdRole).toString();
 }
 
 void SessionsSidebar::onNewSession() {
@@ -98,11 +169,11 @@ void SessionsSidebar::onNewSession() {
 }
 
 void SessionsSidebar::onEditSession() {
-    auto* item = m_listWidget->currentItem();
-    if (!item)
+    auto* item = m_treeWidget->currentItem();
+    QString id = sessionIdForItem(item);
+    if (id.isEmpty())
         return;
 
-    QString id = item->data(Qt::UserRole).toString();
     for (int i = 0; i < m_sessions.size(); ++i) {
         if (m_sessions[i].id == id) {
             SessionDialog dialog(m_sessions[i], this);
@@ -117,11 +188,11 @@ void SessionsSidebar::onEditSession() {
 }
 
 void SessionsSidebar::onDeleteSession() {
-    auto* item = m_listWidget->currentItem();
-    if (!item)
+    auto* item = m_treeWidget->currentItem();
+    QString id = sessionIdForItem(item);
+    if (id.isEmpty())
         return;
 
-    QString id = item->data(Qt::UserRole).toString();
     auto result = QMessageBox::question(this, tr("Delete Session"), tr("Are you sure you want to delete this session?"),
                                         QMessageBox::Yes | QMessageBox::No);
     if (result == QMessageBox::Yes) {
@@ -136,10 +207,64 @@ void SessionsSidebar::onDeleteSession() {
     }
 }
 
-void SessionsSidebar::onItemDoubleClicked(QListWidgetItem* item) {
-    if (!item)
+void SessionsSidebar::onImportSessions() {
+    QString path = QFileDialog::getOpenFileName(this, tr("Import Sessions"), QDir::homePath(),
+                                                tr("BanchoXterm Sessions (*.json);;All Files (*)"));
+    if (path.isEmpty())
         return;
-    QString id = item->data(Qt::UserRole).toString();
+
+    bool ok = false;
+    QList<Session> imported = SessionManager::importSessions(path, &ok);
+    if (!ok) {
+        QMessageBox::critical(this, tr("Import Failed"), tr("Could not read sessions from the selected file."));
+        return;
+    }
+
+    int added = 0;
+    for (const Session& s : imported) {
+        bool exists = false;
+        for (const Session& existing : m_sessions) {
+            if (existing.id == s.id) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            m_sessions.append(s);
+            ++added;
+        }
+    }
+
+    saveSessions();
+    loadSessions();
+    QMessageBox::information(this, tr("Import Complete"),
+                             tr("Imported %1 session(s) (%2 skipped as duplicates).")
+                                 .arg(added)
+                                 .arg(imported.size() - added));
+}
+
+void SessionsSidebar::onExportSessions() {
+    QString defaultName = QString("banchoxterm_sessions_%1.json")
+                              .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+    QString path = QFileDialog::getSaveFileName(this, tr("Export Sessions"), QDir::homePath() + "/" + defaultName,
+                                                tr("BanchoXterm Sessions (*.json)"));
+    if (path.isEmpty())
+        return;
+
+    if (SessionManager::exportSessions(m_sessions, path)) {
+        QMessageBox::information(this, tr("Export Complete"),
+                                 tr("Exported %1 session(s).").arg(m_sessions.size()));
+    } else {
+        QMessageBox::critical(this, tr("Export Failed"), tr("Could not write sessions to the selected file."));
+    }
+}
+
+void SessionsSidebar::onItemDoubleClicked(QTreeWidgetItem* item, int column) {
+    Q_UNUSED(column);
+    QString id = sessionIdForItem(item);
+    if (id.isEmpty())
+        return;
+
     for (const Session& session : m_sessions) {
         if (session.id == id) {
             emit connectSession(session);
@@ -149,8 +274,9 @@ void SessionsSidebar::onItemDoubleClicked(QListWidgetItem* item) {
 }
 
 void SessionsSidebar::showContextMenu(const QPoint& pos) {
-    auto* item = m_listWidget->itemAt(pos);
-    if (!item)
+    auto* item = m_treeWidget->itemAt(pos);
+    QString id = sessionIdForItem(item);
+    if (id.isEmpty())
         return;
 
     QMenu menu(this);
@@ -159,9 +285,9 @@ void SessionsSidebar::showContextMenu(const QPoint& pos) {
     auto* editAction = menu.addAction(QIcon(":/icons/edit.svg"), tr("Edit"));
     auto* deleteAction = menu.addAction(QIcon(":/icons/delete.svg"), tr("Delete"));
 
-    auto* selectedAction = menu.exec(m_listWidget->mapToGlobal(pos));
+    auto* selectedAction = menu.exec(m_treeWidget->mapToGlobal(pos));
     if (selectedAction == connectAction) {
-        onItemDoubleClicked(item);
+        onItemDoubleClicked(item, 0);
     } else if (selectedAction == editAction) {
         onEditSession();
     } else if (selectedAction == deleteAction) {

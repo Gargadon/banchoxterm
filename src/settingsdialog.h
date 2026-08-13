@@ -16,8 +16,8 @@ public:
     QFont selectedFont() const {
         return m_font;
     }
-    bool isDarkTheme() const {
-        return m_darkTheme;
+    QString themeMode() const {
+        return m_themeMode;
     }
     bool useCustomEditor() const {
         return m_useCustomEditor;
@@ -46,12 +46,15 @@ private:
     void updateFontLabel();
 
     QFont m_font;
-    bool m_darkTheme = true;
+    QString m_themeMode = "system";
+
     bool m_useCustomEditor = false;
     QString m_customEditorPath;
     QString m_colorScheme;
     QString m_lang;
     bool m_enableShellIntegration = true;
+    bool m_loggingEnabled = false;
+    QString m_logDir;
 
     QLabel* m_fontPreviewLabel = nullptr;
     QComboBox* m_themeCombo = nullptr;
@@ -61,5 +64,7 @@ private:
     QRadioButton* m_customRadio = nullptr;
     QLineEdit* m_editorPathEdit = nullptr;
     QCheckBox* m_shellIntegrationCheck = nullptr;
+    QCheckBox* m_loggingCheck = nullptr;
+    QLineEdit* m_logDirEdit = nullptr;
     QCheckBox* m_masterPasswordCheck = nullptr;
 };

@@ -48,6 +48,10 @@ public slots:
     void downloadFile(const QString& remotePath, const QString& localPath);
     void uploadFile(const QString& localPath, const QString& remotePath);
     void deleteFile(const QString& remotePath, bool isDir);
+    void createDirectory(const QString& path);
+    void renamePath(const QString& oldPath, const QString& newPath);
+    void chmodPath(const QString& path, int mode);
+    void uploadDirectory(const QString& localPath, const QString& remoteBasePath);
 
 signals:
     void connectionSuccess();
@@ -89,10 +93,18 @@ private:
     static void x11OpenCallback(LIBSSH2_SESSION* session, LIBSSH2_CHANNEL* channel, const char* shost, int sport,
                                 void** abstract);
 
+    bool uploadOneFile(const QString& localPath, const QString& remotePath);
+    bool uploadDirRecursive(const QString& localDir, const QString& remoteDir);
+
     void startStats();
     void pollStats();
     void finishStats();
     void closeStats();
+
+    bool verifyHostKey();
+    bool promptHostKey(const QString& host, const QString& fingerprint, const QString& keyType, bool changed);
+    QString hostKeyFingerprint(const QByteArray& key) const;
+    QString knownHostsPath() const;
 
     int m_sock = -1;
     LIBSSH2_SESSION* m_session = nullptr;
@@ -116,6 +128,7 @@ private:
     StatsState m_statsState = StatsState::Idle;
     LIBSSH2_CHANNEL* m_statsChannel = nullptr;
     QByteArray m_statsBuffer;
+    bool m_remoteIsWindows = false;
 
     // X11 forwarding
     bool m_x11Forwarding = false;

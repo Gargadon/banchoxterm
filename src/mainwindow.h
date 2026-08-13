@@ -11,6 +11,7 @@ class QSplitter;
 class QComboBox;
 class QLabel;
 class QAction;
+class QMenu;
 class SessionsSidebar;
 class SftpSidebar;
 class TerminalTab;
@@ -35,18 +36,24 @@ private slots:
     void toggleMultiInputBar();
     void onSendMultiInput();
     void onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
+    void onReconnectRequested(const Session& session);
 
     void onCopy();
     void onPaste();
     void showAbout();
+    void onManageMacros();
+    void onGlobalSearch();
 
 private:
     void setupUi();
     void setupMenuBar();
-    void applyTheme(bool dark);
+    void applyThemeMode(const QString& mode);
+    void rebuildMacrosMenu();
     TerminalTab* currentTerminalTab() const;
 
+    QString m_themeMode = "system";
     QSplitter* m_mainSplitter;
+
     QFrame* m_sidebarContainer;
     QStackedWidget* m_sidebarStacked;
     SessionsSidebar* m_sessionsSidebar;
@@ -64,6 +71,7 @@ private:
 
     QAction* m_copyAction;
     QAction* m_pasteAction;
+    QMenu* m_macrosMenu = nullptr;
 
     bool m_isDarkTheme = true;
 };

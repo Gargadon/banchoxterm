@@ -4,10 +4,17 @@
 #include <QSettings>
 #include <QIcon>
 #include <iostream>
+#ifdef Q_OS_WIN
+#include <winsock2.h>
+#endif
 #include "mainwindow.h"
 #include "keyring.h"
 
 int main(int argc, char* argv[]) {
+#ifdef Q_OS_WIN
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
     if (qEnvironmentVariableIsSet("BANCHOXTERM_ASKPASS_ID")) {
         QCoreApplication app(argc, argv);
         QString sessionId = qEnvironmentVariable("BANCHOXTERM_ASKPASS_ID");

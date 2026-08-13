@@ -3,8 +3,8 @@
 #include <QList>
 #include "session.h"
 
-class QListWidget;
-class QListWidgetItem;
+class QTreeWidget;
+class QTreeWidgetItem;
 
 class SessionsSidebar : public QWidget {
     Q_OBJECT
@@ -21,13 +21,17 @@ public slots:
 private slots:
     void onEditSession();
     void onDeleteSession();
-    void onItemDoubleClicked(QListWidgetItem* item);
+    void onImportSessions();
+    void onExportSessions();
+    void onItemDoubleClicked(QTreeWidgetItem* item, int column);
     void showContextMenu(const QPoint& pos);
 
 private:
     void loadSessions();
     void saveSessions();
+    QTreeWidgetItem* findSessionItem(const QString& id) const;
+    QString sessionIdForItem(QTreeWidgetItem* item) const;
 
-    QListWidget* m_listWidget;
+    QTreeWidget* m_treeWidget;
     QList<Session> m_sessions;
 };

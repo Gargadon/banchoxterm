@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
   release:
@@ -43,7 +44,6 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload binary
-        if: github.event_name == 'release'
         uses: actions/upload-artifact@v4
         with:
           name: banchoxterm-linux-x64
@@ -51,7 +51,6 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
-    continue-on-error: true
 
     defaults:
       run:
@@ -68,9 +67,9 @@ jobs:
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-qt6-base
-            mingw-w64-ucrt-x86_64-qtermwidget6
             mingw-w64-ucrt-x86_64-libssh2
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-nsis
 
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -81,9 +80,52 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
-      - name: Upload binary
-        if: github.event_name == 'release'
+      - name: Stage package (windeployqt + libssh2)
+        run: |
+          mkdir -p pkg/banchoxterm
+          cp build/banchoxterm.exe pkg/banchoxterm/
+          cp build/_deps/libssh2-build/src/libssh2.dll pkg/banchoxterm/
+          windeployqt --release --compiler-runtime pkg/banchoxterm/banchoxterm.exe
+
+      - name: Build NSIS installer
+        run: |
+          DIST_DIR="$(cygpath -w "$PWD/pkg/banchoxterm")"
+          makensis -DDIST_DIR="$DIST_DIR" packaging/windows/installer.nsi
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\pkg\banchoxterm\*" -DestinationPath "$env:GITHUB_WORKSPACE\BanchoXterm-windows-x64.zip"
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: banchoxterm-windows-x64
-          path: build/banchoxterm.exe
+          name: banchoxterm-windows-installer
+          path: BanchoXterm-Setup.exe
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: banchoxterm-windows-portable
+          path: BanchoXterm-windows-x64.zip
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/banchoxterm
+            artifacts/BanchoXterm-Setup.exe
+            artifacts/BanchoXterm-windows-x64.zip

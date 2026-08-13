@@ -1,131 +1,21 @@
-END USER LICENSE AGREEMENT
+MIT License
 
-Copyright (c) 2025 BanchoXterm. All rights reserved.
+Copyright (c) 2026 BanchoXterm contributors
 
-IMPORTANT — READ CAREFULLY: This End User License Agreement ("EULA") is a
-legal agreement between you (either an individual or a single entity) and
-BanchoXterm ("Licensor") for the BanchoXterm software product identified
-above, which includes computer software and may include associated media,
-printed materials, and "online" or electronic documentation ("Software").
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-By installing, copying, or otherwise using the Software, you agree to be
-bound by the terms of this EULA. If you do not agree to the terms of this
-EULA, do not install or use the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
----
-1. GRANT OF LICENSE
----
-
-Licensor grants you a non-exclusive, non-transferable, revocable license to
-install and use the Software on any number of devices that you own or
-control, subject to the terms of this EULA.
-
-1.1 Free Edition
-
-The Free Edition of the Software is provided at no cost. It includes a
-limited set of features as described in the Software documentation. The
-Free Edition may display advertisements or promotional content within the
-Software interface.
-
-1.2 Pro Edition
-
-The Pro Edition is available upon payment of the applicable license fee.
-The Pro Edition unlocks all features of the Software and removes all
-advertisements. A Pro license is associated with a single user and may
-be used across multiple devices owned by that user.
-
----
-2. RESTRICTIONS
----
-
-You may NOT:
-  (a) Distribute, sell, lease, rent, lend, or sublicense the Software
-      to any third party.
-  (b) Reverse engineer, decompile, disassemble, or attempt to derive the
-      source code of the Software, except as expressly permitted by
-      applicable law.
-  (c) Modify, adapt, or create derivative works of the Software.
-  (d) Remove, alter, or obscure any proprietary notices or labels on
-      the Software.
-  (e) Use the Software to provide services to third parties (SaaS,
-      hosting, or service bureau).
-  (f) Circumvent or disable any license key validation, feature
-      restrictions, or advertisement mechanisms in the Software.
-
----
-3. OWNERSHIP
----
-
-The Software is licensed, not sold. Licensor retains all right, title,
-and interest in and to the Software, including all intellectual property
-rights. This EULA does not grant you any rights to trademarks, service
-marks, or trade names of Licensor.
-
----
-4. THIRD-PARTY COMPONENTS
----
-
-The Software incorporates open-source components licensed under separate
-terms. A list of these components and their respective licenses is
-provided in the file "third-party-licenses.txt" distributed with the
-Software. Your use of these components is governed by their respective
-licenses, and nothing in this EULA limits your rights under those
-open-source licenses.
-
----
-5. TERMINATION
----
-
-This EULA is effective until terminated. It will terminate automatically
-without notice from Licensor if you fail to comply with any of its terms.
-Upon termination, you must cease all use of the Software and destroy all
-copies.
-
----
-6. DISCLAIMER OF WARRANTY
----
-
-THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE IMPLIED WARRANTIES
-OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
-NON-INFRINGEMENT. LICENSOR DOES NOT WARRANT THAT THE SOFTWARE WILL MEET
-YOUR REQUIREMENTS OR THAT ITS OPERATION WILL BE UNINTERRUPTED OR
-ERROR-FREE.
-
----
-7. LIMITATION OF LIABILITY
----
-
-TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL
-LICENSOR BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR
-CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION,
-DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF
-DATA, OR ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR
-INABILITY TO USE THE SOFTWARE, EVEN IF LICENSOR HAS BEEN ADVISED OF
-THE POSSIBILITY OF SUCH DAMAGES. IN NO EVENT SHALL LICENSOR'S TOTAL
-LIABILITY EXCEED THE AMOUNT YOU PAID FOR THE SOFTWARE.
-
----
-8. REFUND POLICY
----
-
-Pro Edition purchases may be refunded within 14 days of purchase if you
-are not satisfied with the Software. To request a refund, contact
-Licensor at the support address provided with your purchase.
-
----
-9. GOVERNING LAW
----
-
-This EULA shall be governed by and construed in accordance with the
-laws of the jurisdiction in which Licensor is established, without
-regard to its conflict of law principles.
-
----
-10. GENERAL
----
-
-If any provision of this EULA is held to be invalid or unenforceable,
-the remaining provisions shall continue in full force and effect. This
-EULA constitutes the entire agreement between you and Licensor
-regarding the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

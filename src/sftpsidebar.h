@@ -43,6 +43,10 @@ private slots:
     void onDownloadClicked();
     void onDeleteClicked();
     void onEditClicked();
+    void onNewFolderClicked();
+    void onRenameClicked();
+    void onChmodClicked();
+    void onUploadFolderClicked();
     void onItemDoubleClicked(QTreeWidgetItem* item, int column);
     void showContextMenu(const QPoint& pos);
     void onWatchedFileChanged(const QString& path);
@@ -54,6 +58,10 @@ signals:
     void requestDownload(const QString& remotePath, const QString& localPath);
     void requestUpload(const QString& localPath, const QString& remotePath);
     void requestDelete(const QString& remotePath, bool isDir);
+    void requestCreateDir(const QString& path);
+    void requestRename(const QString& oldPath, const QString& newPath);
+    void requestChmod(const QString& path, int mode);
+    void requestUploadDir(const QString& localPath, const QString& remoteBasePath);
     void requestDisconnect();
     void remoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
 
@@ -64,6 +72,10 @@ private:
     QPushButton* m_upBtn;
     QPushButton* m_refreshBtn;
     QPushButton* m_uploadBtn;
+    QPushButton* m_uploadDirBtn;
+    QPushButton* m_newFolderBtn;
+    QPushButton* m_renameBtn;
+    QPushButton* m_chmodBtn;
     QTreeWidget* m_treeWidget;
     QLabel* m_statusLabel;
 

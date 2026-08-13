@@ -1,12 +1,18 @@
 #include "sshconnection.h"
 #include <QFile>
 #include <QFileInfo>
+#include <QDir>
 #include <QThread>
 #include <QProcess>
 #include <QRegularExpression>
 #include <cstring>
 #include <QSettings>
 #include <mutex>
+#include <QStandardPaths>
+#include <QDir>
+#include <QCryptographicHash>
+#include <QApplication>
+#include <QMessageBox>
 
 #ifdef Q_OS_WIN
 #include <winsock2.h>
@@ -68,6 +74,25 @@ void setNonBlocking(int sock) {
     int flags = fcntl(sock, F_GETFL, 0);
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 #endif
+}
+
+QString hostKeyTypeName(int type) {
+    switch (type) {
+    case LIBSSH2_HOSTKEY_TYPE_RSA:
+        return QStringLiteral("ssh-rsa");
+    case LIBSSH2_HOSTKEY_TYPE_DSS:
+        return QStringLiteral("ssh-dss");
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:
+        return QStringLiteral("ecdsa-sha2-nistp256");
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_384:
+        return QStringLiteral("ecdsa-sha2-nistp384");
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_521:
+        return QStringLiteral("ecdsa-sha2-nistp521");
+    case LIBSSH2_HOSTKEY_TYPE_ED25519:
+        return QStringLiteral("ssh-ed25519");
+    default:
+        return QStringLiteral("ssh-unknown");
+    }
 }
 
 } // namespace
@@ -190,6 +215,108 @@ int SshConnection::retry(const std::function<int()>& fn) {
     return rc;
 }
 
+QString SshConnection::knownHostsPath() const {
+    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/known_hosts");
+}
+
+QString SshConnection::hostKeyFingerprint(const QByteArray& key) const {
+    QByteArray hash = QCryptographicHash::hash(key, QCryptographicHash::Sha256);
+    QString b64 = QString::fromLatin1(hash.toBase64());
+    b64.remove('=');
+    return QStringLiteral("SHA256:") + b64;
+}
+
+bool SshConnection::promptHostKey(const QString& host, const QString& fingerprint, const QString& keyType,
+                                  bool changed) {
+    bool accept = false;
+
+    auto showDialog = [&]() {
+        QString text;
+        if (changed) {
+            text = tr("WARNING: The host key for '%1' has CHANGED!\n\n"
+                      "This could mean someone is intercepting your connection (man-in-the-middle attack)\n"
+                      "or that the server administrator changed the key.\n\n"
+                      "New key fingerprint (%2):\n%3\n\n"
+                      "Continue connecting anyway?")
+                       .arg(host, keyType, fingerprint);
+        } else {
+            text = tr("The authenticity of host '%1' can't be established.\n\n"
+                      "%2 key fingerprint:\n%3\n\n"
+                      "Are you sure you want to continue connecting and remember this key?")
+                       .arg(host, keyType, fingerprint);
+        }
+
+        QMessageBox box;
+        box.setIcon(changed ? QMessageBox::Warning : QMessageBox::Question);
+        box.setWindowTitle(tr("Host Key Verification"));
+        box.setText(text);
+        box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+        box.setDefaultButton(QMessageBox::No);
+        accept = (box.exec() == QMessageBox::Yes);
+    };
+
+    if (QThread::currentThread() == qApp->thread()) {
+        showDialog();
+    } else {
+        QMetaObject::invokeMethod(qApp, showDialog, Qt::BlockingQueuedConnection);
+    }
+    return accept;
+}
+
+bool SshConnection::verifyHostKey() {
+    size_t keyLen = 0;
+    int keyType = LIBSSH2_HOSTKEY_TYPE_UNKNOWN;
+    const char* key = libssh2_session_hostkey(m_session, &keyLen, &keyType);
+    if (!key || keyLen == 0)
+        return true;
+
+    const int typemask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW;
+
+    LIBSSH2_KNOWNHOSTS* hosts = libssh2_knownhost_init(m_session);
+    if (!hosts)
+        return true;
+
+    QString path = knownHostsPath();
+    if (QFile::exists(path)) {
+        libssh2_knownhost_readfile(hosts, path.toUtf8().constData(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+    }
+
+    struct libssh2_knownhost* store = nullptr;
+    int rc = libssh2_knownhost_checkp(hosts, m_host.toUtf8().constData(), m_port, key, keyLen, typemask, &store);
+
+    bool ok = true;
+    bool modified = false;
+
+    if (rc == LIBSSH2_KNOWNHOST_CHECK_MATCH) {
+        ok = true;
+    } else if (rc == LIBSSH2_KNOWNHOST_CHECK_MISMATCH) {
+        ok = promptHostKey(m_host, hostKeyFingerprint(QByteArray(key, static_cast<int>(keyLen))),
+                           hostKeyTypeName(keyType), true);
+        if (ok && store) {
+            libssh2_knownhost_del(hosts, store);
+            modified = true;
+        }
+    } else {
+        // NOTFOUND or FAILURE: prompt for first-time trust.
+        ok = promptHostKey(m_host, hostKeyFingerprint(QByteArray(key, static_cast<int>(keyLen))),
+                           hostKeyTypeName(keyType), false);
+        if (ok)
+            modified = true;
+    }
+
+    if (ok && modified) {
+        struct libssh2_knownhost* added = nullptr;
+        if (libssh2_knownhost_addc(hosts, m_host.toUtf8().constData(), nullptr, key, keyLen, nullptr, 0, typemask,
+                                   &added) == 0) {
+            QDir().mkpath(QFileInfo(path).absolutePath());
+            libssh2_knownhost_writefile(hosts, path.toUtf8().constData(), LIBSSH2_KNOWNHOST_FILE_OPENSSH);
+        }
+    }
+
+    libssh2_knownhost_free(hosts);
+    return ok;
+}
+
 void SshConnection::connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
                                   const QString& password, const QList<TunnelConfig>& tunnels) {
     m_host = host;
@@ -224,6 +351,12 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     int rc = retry([this]() { return libssh2_session_handshake(m_session, m_sock); });
     if (rc != 0) {
         emit connectionFailed(QString("SSH handshake failed: %1").arg(rc));
+        disconnectFromHost();
+        return;
+    }
+
+    if (!verifyHostKey()) {
+        emit connectionFailed("Host key verification failed");
         disconnectFromHost();
         return;
     }
@@ -595,6 +728,139 @@ void SshConnection::deleteFile(const QString& remotePath, bool isDir) {
     }
 }
 
+void SshConnection::createDirectory(const QString& path) {
+    if (!m_sftp) {
+        emit operationFinished(false, "SFTP session not active");
+        return;
+    }
+    int rc = retry([this, &path]() { return libssh2_sftp_mkdir(m_sftp, path.toUtf8().constData(), 0755); });
+    if (rc == 0) {
+        emit operationFinished(true, "Folder created successfully");
+    } else {
+        emit operationFinished(false, QString("Failed to create folder (Error code %1)").arg(rc));
+    }
+}
+
+void SshConnection::renamePath(const QString& oldPath, const QString& newPath) {
+    if (!m_sftp) {
+        emit operationFinished(false, "SFTP session not active");
+        return;
+    }
+    int rc = retry([this, &oldPath, &newPath]() {
+        return libssh2_sftp_rename(m_sftp, oldPath.toUtf8().constData(), newPath.toUtf8().constData());
+    });
+    if (rc == 0) {
+        emit operationFinished(true, "Renamed successfully");
+    } else {
+        emit operationFinished(false, QString("Rename failed (Error code %1)").arg(rc));
+    }
+}
+
+void SshConnection::chmodPath(const QString& path, int mode) {
+    if (!m_sftp) {
+        emit operationFinished(false, "SFTP session not active");
+        return;
+    }
+    LIBSSH2_SFTP_ATTRIBUTES attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    attrs.flags = LIBSSH2_SFTP_ATTR_PERMISSIONS;
+    attrs.permissions = static_cast<unsigned long>(mode);
+    int rc = retry([this, &path, &attrs]() { return libssh2_sftp_setstat(m_sftp, path.toUtf8().constData(), &attrs); });
+    if (rc == 0) {
+        emit operationFinished(true, "Permissions updated successfully");
+    } else {
+        emit operationFinished(false, QString("chmod failed (Error code %1)").arg(rc));
+    }
+}
+
+bool SshConnection::uploadOneFile(const QString& localPath, const QString& remotePath) {
+    QFile f(localPath);
+    if (!f.open(QIODevice::ReadOnly))
+        return false;
+
+    LIBSSH2_SFTP_HANDLE* handle = retryPtr([this, &remotePath]() {
+        return libssh2_sftp_open(m_sftp, remotePath.toUtf8().constData(),
+                                 LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
+                                 LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR | LIBSSH2_SFTP_S_IRGRP | LIBSSH2_SFTP_S_IROTH);
+    });
+    if (!handle) {
+        f.close();
+        return false;
+    }
+
+    char buffer[32768];
+    bool ok = true;
+    while (true) {
+        qint64 n = f.read(buffer, sizeof(buffer));
+        if (n <= 0)
+            break;
+        char* p = buffer;
+        qint64 remaining = n;
+        while (remaining > 0) {
+            int w = retry([this, &handle, &p, &remaining]() { return libssh2_sftp_write(handle, p, remaining); });
+            if (w < 0) {
+                ok = false;
+                break;
+            }
+            p += w;
+            remaining -= w;
+        }
+        if (!ok)
+            break;
+    }
+
+    f.close();
+    libssh2_sftp_close(handle);
+    return ok;
+}
+
+bool SshConnection::uploadDirRecursive(const QString& localDir, const QString& remoteDir) {
+    // mkdir; ignore "already exists" errors (best effort).
+    retry([this, &remoteDir]() { return libssh2_sftp_mkdir(m_sftp, remoteDir.toUtf8().constData(), 0755); });
+
+    QDir dir(localDir);
+    const QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden);
+    for (const QFileInfo& info : entries) {
+        QString remotePath = remoteDir;
+        if (!remotePath.endsWith('/'))
+            remotePath += '/';
+        remotePath += info.fileName();
+
+        if (info.isDir()) {
+            if (!uploadDirRecursive(info.absoluteFilePath(), remotePath))
+                return false;
+        } else {
+            if (!uploadOneFile(info.absoluteFilePath(), remotePath))
+                return false;
+        }
+    }
+    return true;
+}
+
+void SshConnection::uploadDirectory(const QString& localPath, const QString& remoteBasePath) {
+    if (!m_sftp) {
+        emit operationFinished(false, "SFTP session not active");
+        return;
+    }
+
+    QFileInfo li(localPath);
+    if (!li.isDir()) {
+        emit operationFinished(false, "Not a directory: " + localPath);
+        return;
+    }
+
+    QString remoteRoot = remoteBasePath;
+    if (!remoteRoot.endsWith('/'))
+        remoteRoot += '/';
+    remoteRoot += li.fileName();
+
+    if (uploadDirRecursive(localPath, remoteRoot)) {
+        emit operationFinished(true, "Folder uploaded successfully");
+    } else {
+        emit operationFinished(false, "Folder upload failed");
+    }
+}
+
 void SshConnection::startStats() {
     if (!m_session || m_statsState != StatsState::Idle)
         return;
@@ -615,17 +881,19 @@ void SshConnection::pollStats() {
         }
         break;
     case StatsState::Execing: {
-        static const char* cmd = "read cpu u n s id iw irq soft steal rest < /proc/stat; previdle=$((id + iw)); "
-                                 "prevtotal=$((u + n + s + id + iw + irq + soft + steal)); sleep 0.2; "
-                                 "read cpu u2 n2 s2 id2 iw2 irq2 soft2 steal2 rest < /proc/stat; idle=$((id2 + iw2)); "
-                                 "total=$((u2 + n2 + s2 + id2 + iw2 + irq2 + soft2 + steal2)); "
-                                 "diffidle=$((idle - previdle)); difftotal=$((total - prevtotal)); "
-                                 "if [ $difftotal -eq 0 ]; then echo 0; else echo \"$((100 * (difftotal - diffidle) / "
-                                 "difftotal))\"; fi; "
-                                 "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f\\n\", 100*(t-a)/t}' "
-                                 "/proc/meminfo; "
-                                 "df / | tail -n 1 | awk '{print $5}' | sed 's/%//'; "
-                                 "cat /proc/uptime | awk '{print $1}'";
+        static const char* linuxCmd = "read cpu u n s id iw irq soft steal rest < /proc/stat; previdle=$((id + iw)); "
+                                      "prevtotal=$((u + n + s + id + iw + irq + soft + steal)); sleep 0.2; "
+                                      "read cpu u2 n2 s2 id2 iw2 irq2 soft2 steal2 rest < /proc/stat; idle=$((id2 + iw2)); "
+                                      "total=$((u2 + n2 + s2 + id2 + iw2 + irq2 + soft2 + steal2)); "
+                                      "diffidle=$((idle - previdle)); difftotal=$((total - prevtotal)); "
+                                      "if [ $difftotal -eq 0 ]; then echo 0; else echo \"$((100 * (difftotal - diffidle) / "
+                                      "difftotal))\"; fi; "
+                                      "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f\\n\", 100*(t-a)/t}' "
+                                      "/proc/meminfo; "
+                                      "df / | tail -n 1 | awk '{print $5}' | sed 's/%//'; "
+                                      "cat /proc/uptime | awk '{print $1}'";
+        static const char* winCmd = R"(powershell -NoProfile -Command "$cpu=(Get-CimInstance Win32_Processor).LoadPercentage; $os=Get-CimInstance Win32_OperatingSystem; $mem=[math]::round(100*($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/$os.TotalVisibleMemorySize); $d=Get-CimInstance Win32_LogicalDisk -Filter 'DeviceID=''C:'''; $disk=[math]::round(100*($d.Size-$d.FreeSpace)/$d.Size); $up=((Get-Date)-$os.LastBootUpTime).TotalSeconds; Write-Output $cpu; Write-Output $mem; Write-Output $disk; Write-Output $up")";
+        const char* cmd = m_remoteIsWindows ? winCmd : linuxCmd;
         int rc = libssh2_channel_exec(m_statsChannel, cmd);
         if (rc == 0) {
             m_statsState = StatsState::Reading;
@@ -661,6 +929,10 @@ void SshConnection::finishStats() {
         double disk = lines[2].toDouble();
         double uptimeSecs = lines[3].toDouble();
         emit remoteStatsUpdated(cpu, mem, disk, uptimeSecs);
+    } else if (!m_remoteIsWindows) {
+        // The Linux /proc command failed: the remote host is probably Windows.
+        // Switch to the PowerShell probe for subsequent polls.
+        m_remoteIsWindows = true;
     }
     closeStats();
 }

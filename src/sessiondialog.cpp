@@ -115,6 +115,14 @@ void SessionDialog::setupUi() {
     nameLayout->addWidget(m_nameEdit);
     mainLayout->addLayout(nameLayout);
 
+    auto* groupLayout = new QHBoxLayout();
+    auto* groupLabel = new QLabel(tr("Group:"), this);
+    m_groupEdit = new QLineEdit(this);
+    m_groupEdit->setPlaceholderText(tr("Optional (e.g. Production)"));
+    groupLayout->addWidget(groupLabel);
+    groupLayout->addWidget(m_groupEdit);
+    mainLayout->addLayout(groupLayout);
+
     m_stackedWidget = new QStackedWidget(this);
 
     // ── SSH page ──
@@ -154,8 +162,13 @@ void SessionDialog::setupUi() {
     m_savePasswordCheck = new QCheckBox(tr("Save securely in system keyring"), connTab);
     sshForm->addRow("", m_savePasswordCheck);
 
+#ifndef Q_OS_WIN
     m_x11ForwardCheck = new QCheckBox(tr("Enable X11 Forwarding (-Y)"), connTab);
     sshForm->addRow("", m_x11ForwardCheck);
+#endif
+
+    m_autoReconnectCheck = new QCheckBox(tr("Auto-reconnect on disconnect"), connTab);
+    sshForm->addRow("", m_autoReconnectCheck);
 
     auto* keyLayout = new QHBoxLayout();
     m_keyEdit = new QLineEdit(connTab);
@@ -339,6 +352,7 @@ void SessionDialog::setupUi() {
 
 void SessionDialog::loadSession(const Session& session) {
     m_nameEdit->setText(session.name);
+    m_groupEdit->setText(session.group);
 
     switch (session.type) {
     case SessionType::SSH:
@@ -347,7 +361,10 @@ void SessionDialog::loadSession(const Session& session) {
         m_portSpin->setValue(session.port);
         m_userEdit->setText(session.user);
         m_keyEdit->setText(session.keyPath);
-        m_x11ForwardCheck->setChecked(session.x11Forwarding);
+        if (m_x11ForwardCheck)
+            m_x11ForwardCheck->setChecked(session.x11Forwarding);
+        if (m_autoReconnectCheck)
+            m_autoReconnectCheck->setChecked(session.autoReconnect);
 
         m_tunnels = session.tunnels;
         m_tunnelsTable->setRowCount(0);
@@ -404,6 +421,7 @@ Session SessionDialog::getSession() const {
     Session s;
     s.id = m_id;
     s.name = m_nameEdit->text().trimmed();
+    s.group = m_groupEdit->text().trimmed();
 
     int index = m_typeCombo->currentIndex();
     if (s.name.isEmpty()) {
@@ -436,7 +454,8 @@ Session SessionDialog::getSession() const {
         s.port = m_portSpin->value();
         s.user = m_userEdit->text().trimmed();
         s.keyPath = m_keyEdit->text().trimmed();
-        s.x11Forwarding = m_x11ForwardCheck->isChecked();
+        s.x11Forwarding = m_x11ForwardCheck ? m_x11ForwardCheck->isChecked() : false;
+        s.autoReconnect = m_autoReconnectCheck ? m_autoReconnectCheck->isChecked() : false;
         s.tunnels = m_tunnels;
         break;
     case 1:

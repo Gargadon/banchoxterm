@@ -13,7 +13,10 @@
 #include <QSettings>
 #include <QDialogButtonBox>
 #include <QMessageBox>
+#include <QDir>
+#ifndef Q_OS_WIN
 #include <qtermwidget.h>
+#endif
 #include <QInputDialog>
 #include "masterpasswordmanager.h"
 
@@ -39,9 +42,15 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto* themeLayout = new QHBoxLayout();
     auto* themeLabel = new QLabel(tr("Interface Theme:"), appearanceTab);
     m_themeCombo = new QComboBox(appearanceTab);
-    m_themeCombo->addItem(tr("Tokyo Night (Dark)"), true);
-    m_themeCombo->addItem(tr("Classic (Light)"), false);
-    m_themeCombo->setCurrentIndex(m_darkTheme ? 0 : 1);
+    m_themeCombo->addItem(tr("System Native (Auto)"), "system");
+    m_themeCombo->addItem(tr("Tokyo Night (Dark)"), "dark");
+    m_themeCombo->addItem(tr("Classic (Light)"), "light");
+    int themeIdx = m_themeCombo->findData(m_themeMode);
+    if (themeIdx != -1)
+        m_themeCombo->setCurrentIndex(themeIdx);
+    else
+        m_themeCombo->setCurrentIndex(0);
+
     themeLayout->addWidget(themeLabel);
     themeLayout->addWidget(m_themeCombo);
     appLayout->addLayout(themeLayout);
@@ -67,7 +76,14 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto* colorSchemeLayout = new QHBoxLayout();
     auto* colorSchemeLabel = new QLabel(tr("Terminal Color Scheme:"), appearanceTab);
     m_colorSchemeCombo = new QComboBox(appearanceTab);
-    QStringList schemes = QTermWidget::availableColorSchemes();
+    QStringList schemes;
+#ifndef Q_OS_WIN
+    schemes = QTermWidget::availableColorSchemes();
+#else
+    schemes = {"BlackOnLightYellow", "BlackOnRandomLight", "BlackOnWhite", "Breeze", "BreezeModified",
+               "DarkPastels", "Falcon", "GreenOnBlack", "Linux", "Nord", "Solarized", "SolarizedLight",
+               "Tango", "Ubuntu", "WhiteOnBlack"};
+#endif
     m_colorSchemeCombo->addItems(schemes);
     int schemeIdx = schemes.indexOf(m_colorScheme);
     if (schemeIdx != -1)
@@ -99,6 +115,39 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_shellIntegrationCheck = new QCheckBox(tr("Enable remote shell integration (directory tracking)"), appearanceTab);
     m_shellIntegrationCheck->setChecked(m_enableShellIntegration);
     appLayout->addWidget(m_shellIntegrationCheck);
+
+    m_loggingCheck = new QCheckBox(tr("Log session output to file"), appearanceTab);
+    m_loggingCheck->setChecked(m_loggingEnabled);
+    appLayout->addWidget(m_loggingCheck);
+
+    auto* logDirWidget = new QWidget(appearanceTab);
+    auto* logDirLayout = new QHBoxLayout(logDirWidget);
+    logDirLayout->setContentsMargins(20, 0, 0, 0);
+    logDirLayout->setSpacing(8);
+
+    auto* logDirLabel = new QLabel(tr("Log directory:"), logDirWidget);
+    m_logDirEdit = new QLineEdit(m_logDir, logDirWidget);
+    m_logDirEdit->setPlaceholderText(tr("Default: Documents"));
+    m_logDirEdit->setEnabled(m_loggingEnabled);
+    auto* logDirBrowseBtn = new QPushButton(tr("Browse..."), logDirWidget);
+    logDirBrowseBtn->setEnabled(m_loggingEnabled);
+
+    logDirLayout->addWidget(logDirLabel);
+    logDirLayout->addWidget(m_logDirEdit, 1);
+    logDirLayout->addWidget(logDirBrowseBtn);
+    appLayout->addWidget(logDirWidget);
+
+    connect(logDirBrowseBtn, &QPushButton::clicked, this, [this]() {
+        QString dir = QFileDialog::getExistingDirectory(this, tr("Select Log Directory"),
+                                                        m_logDirEdit->text().isEmpty() ? QDir::homePath()
+                                                                                       : m_logDirEdit->text());
+        if (!dir.isEmpty())
+            m_logDirEdit->setText(dir);
+    });
+    connect(m_loggingCheck, &QCheckBox::toggled, this, [this, logDirBrowseBtn](bool checked) {
+        m_logDirEdit->setEnabled(checked);
+        logDirBrowseBtn->setEnabled(checked);
+    });
 
     appLayout->addStretch();
     tabWidget->addTab(appearanceTab, tr("Appearance"));
@@ -218,7 +267,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 void SettingsDialog::loadSettings() {
     QSettings settings;
     // Theme
-    m_darkTheme = settings.value("theme/dark", true).toBool();
+    if (settings.contains("theme/mode")) {
+        m_themeMode = settings.value("theme/mode", "system").toString();
+    } else if (settings.contains("theme/dark")) {
+        m_themeMode = settings.value("theme/dark", true).toBool() ? "dark" : "light";
+    } else {
+        m_themeMode = "system";
+    }
 
     // Font
     if (settings.contains("terminal/font")) {
@@ -241,11 +296,15 @@ void SettingsDialog::loadSettings() {
 
     // Shell Integration
     m_enableShellIntegration = settings.value("terminal/shellIntegration", true).toBool();
+
+    // Logging
+    m_loggingEnabled = settings.value("terminal/loggingEnabled", false).toBool();
+    m_logDir = settings.value("terminal/logDirectory", "").toString();
 }
 
 void SettingsDialog::saveSettings() {
     QSettings settings;
-    m_darkTheme = m_themeCombo->currentData().toBool();
+    m_themeMode = m_themeCombo->currentData().toString();
     m_useCustomEditor = m_customRadio->isChecked();
     m_customEditorPath = m_editorPathEdit->text().trimmed();
 
@@ -253,13 +312,18 @@ void SettingsDialog::saveSettings() {
     m_colorScheme = m_colorSchemeCombo->currentText();
 
     m_enableShellIntegration = m_shellIntegrationCheck->isChecked();
+    m_loggingEnabled = m_loggingCheck->isChecked();
+    m_logDir = m_logDirEdit->text().trimmed();
 
-    settings.setValue("theme/dark", m_darkTheme);
+    settings.setValue("theme/mode", m_themeMode);
+    settings.setValue("theme/dark", (m_themeMode == "dark"));
     settings.setValue("terminal/font", m_font.toString());
     settings.setValue("editor/useCustom", m_useCustomEditor);
     settings.setValue("editor/customPath", m_customEditorPath);
     settings.setValue("terminal/colorScheme", m_colorScheme);
     settings.setValue("terminal/shellIntegration", m_enableShellIntegration);
+    settings.setValue("terminal/loggingEnabled", m_loggingEnabled);
+    settings.setValue("terminal/logDirectory", m_logDir);
 
     if (newLang != m_lang) {
         settings.setValue("locale/lang", newLang);

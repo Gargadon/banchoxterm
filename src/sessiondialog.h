@@ -24,6 +24,7 @@ private:
     void loadSession(const Session& session);
 
     QLineEdit* m_nameEdit;
+    QLineEdit* m_groupEdit;
     QComboBox* m_typeCombo;
     QStackedWidget* m_stackedWidget;
 
@@ -33,7 +34,8 @@ private:
     QLineEdit* m_userEdit;
     QLineEdit* m_passwordEdit;
     QCheckBox* m_savePasswordCheck;
-    QCheckBox* m_x11ForwardCheck;
+    QCheckBox* m_x11ForwardCheck = nullptr;
+    QCheckBox* m_autoReconnectCheck = nullptr;
     QLineEdit* m_keyEdit;
 
     // Local

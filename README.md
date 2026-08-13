@@ -2,10 +2,12 @@
 
 A multi-protocol terminal emulator and remote session manager for Linux and Windows.
 
+[![CI](https://github.com/Gargadon/banchoxterm/actions/workflows/ci.yml/badge.svg)](https://github.com/Gargadon/banchoxterm/actions/workflows/ci.yml)
+
 ## Features
 
 - **Multi-tab terminal** — run multiple sessions side by side
-- **SSH client** — connect to remote servers with key-based auth, password auth, SSH agent, and X11 forwarding
+- **SSH client** — connect with key-based auth, password auth, SSH agent, and X11 forwarding
 - **SFTP sidebar** — browse, upload, download, delete, and edit remote files directly
 - **Telnet client** — connect to telnet hosts
 - **Serial console** — supports picocom, screen, and minicom
@@ -13,22 +15,17 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Multi-input** — send commands to all open terminals simultaneously
 - **Remote monitoring** — CPU, RAM, disk, and uptime stats in the status bar
 - **Session manager** — save, organize, and quickly reconnect to your sessions
+- **SSH tunnels** — local, remote, and dynamic (SOCKS5) port forwarding
+- **Session logging** — record terminal output to a file
 - **Dark & Light themes** — Tokyo Night (dark) and Classic (light) styles
 - **Internationalization** — English, Spanish, and Portuguese
 
-## Free vs Pro
+## Install
 
-| Feature | Free | Pro |
-|---|---|---|
-| Local terminal | Unlimited | Unlimited |
-| SSH sessions | Up to 3 saved | Unlimited |
-| SFTP file browser | — | Included |
-| Multi-input bar | — | Included |
-| Telnet / Serial | — | Included |
-| Custom color schemes | — | Included |
-| Session import/export | — | Included |
+Pre-built binaries are published on the [Releases](https://github.com/Gargadon/banchoxterm/releases) page:
 
-**Pro license**: one-time payment of $5–10 USD, lifetime access, use on all your devices.
+- **Windows**: NSIS installer (`BanchoXterm-Setup.exe`) or a portable ZIP.
+- **Linux**: a standalone binary (requires Qt 6 and QTermWidget installed).
 
 ## Build from source
 
@@ -37,7 +34,7 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - CMake 3.16+
 - C++17 compiler (GCC, Clang, or MSVC)
 - Qt 6.6+ (Core, Widgets, Gui, Network)
-- [QTermWidget6](https://github.com/lxqt/qtermwidget)
+- [QTermWidget6](https://github.com/lxqt/qtermwidget) (Linux only)
 - [libssh2](https://www.libssh2.org)
 
 ### Linux
@@ -70,8 +67,12 @@ cmake -B build -G Ninja
 cmake --build build
 ```
 
+## Limitations
+
+- **FTP is not supported** — file transfer uses SFTP only (over SSH).
+- **X11 forwarding** is available on Linux only.
+- **RDP/VNC** sessions rely on an external client (`mstsc`, `xfreerdp`, `vncviewer`) installed on the system.
+
 ## License
 
-BanchoXterm is proprietary software. See [LICENSE](LICENSE) for terms.
-
-This product includes open-source components. See [third-party-licenses.txt](third-party-licenses.txt) for details.
+Released under the [MIT License](LICENSE). See [third-party-licenses.txt](third-party-licenses.txt) for the licenses of bundled/third-party components.

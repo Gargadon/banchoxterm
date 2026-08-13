@@ -79,12 +79,14 @@ QJsonObject Session::toJson() const {
     QJsonObject json;
     json["id"] = id;
     json["name"] = name;
+    json["group"] = group;
     json["type"] = sessionTypeToString(type);
     json["host"] = host;
     json["user"] = user;
     json["port"] = port;
     json["keyPath"] = keyPath;
     json["x11Forwarding"] = x11Forwarding;
+    json["autoReconnect"] = autoReconnect;
     json["shellPath"] = shellPath;
     json["serialPort"] = serialPort;
     json["baudRate"] = baudRate;
@@ -106,12 +108,14 @@ Session Session::fromJson(const QJsonObject& json) {
         s.id = QUuid::createUuid().toString();
     }
     s.name = json["name"].toString();
+    s.group = json["group"].toString();
     s.type = sessionTypeFromString(json["type"].toString());
     s.host = json["host"].toString();
     s.user = json["user"].toString();
     s.port = json["port"].toInt(22);
     s.keyPath = json["keyPath"].toString();
     s.x11Forwarding = json["x11Forwarding"].toBool(false);
+    s.autoReconnect = json["autoReconnect"].toBool(false);
     s.shellPath = json["shellPath"].toString();
     s.serialPort = json["serialPort"].toString();
     s.baudRate = json["baudRate"].toInt(115200);
@@ -173,4 +177,38 @@ void SessionManager::saveSessions(const QList<Session>& sessions) {
         QJsonDocument doc(arr);
         file.write(doc.toJson());
     }
+}
+
+bool SessionManager::exportSessions(const QList<Session>& sessions, const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly))
+        return false;
+    QJsonArray arr;
+    for (const Session& s : sessions) {
+        arr.append(s.toJson());
+    }
+    QJsonDocument doc(arr);
+    file.write(doc.toJson());
+    return true;
+}
+
+QList<Session> SessionManager::importSessions(const QString& path, bool* ok) {
+    QList<Session> sessions;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (ok)
+            *ok = false;
+        return sessions;
+    }
+    QByteArray data = file.readAll();
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (doc.isArray()) {
+        const QJsonArray arr = doc.array();
+        for (const QJsonValue& val : arr) {
+            sessions.append(Session::fromJson(val.toObject()));
+        }
+    }
+    if (ok)
+        *ok = true;
+    return sessions;
 }
