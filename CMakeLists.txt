@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(banchoxterm VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -32,16 +33,20 @@ if(NOT WIN32)
     endif()
     set(lxqt2-build-tools_DIR "${CMAKE_BINARY_DIR}")
 
-    FetchContent_Declare(
-        qtermwidget
-        GIT_REPOSITORY https://github.com/lxqt/qtermwidget.git
-        GIT_TAG        master
-    )
-    FetchContent_MakeAvailable(qtermwidget)
+    # Use the vendored QTermWidget fork (git submodule) instead of upstream
+    # master: the fork keeps the app-dir color-schemes fallback enabled on
+    # Linux (upstream guards it with #ifdef Q_OS_MAC), so the color scheme
+    # list in the configuration dialog is populated.
+    add_subdirectory(third_party/qtermwidget)
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib/color-schemes" DESTINATION "${CMAKE_BINARY_DIR}")
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib/kb-layouts" DESTINATION "${CMAKE_BINARY_DIR}")
+    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib/translations" DESTINATION "${CMAKE_BINARY_DIR}")
 endif()
 
 # Fetch libssh2
-set(CRYPTO_BACKEND "WinCNG" CACHE STRING "" FORCE)
+if(WIN32)
+    set(CRYPTO_BACKEND "WinCNG" CACHE STRING "" FORCE)
+endif()
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
@@ -58,8 +63,6 @@ FetchContent_MakeAvailable(libssh2)
 set(SOURCES
     src/apppaths.cpp
     src/apppaths.h
-    src/conpty.cpp
-    src/conpty.h
     src/keyring.cpp
     src/keyring.h
     src/main.cpp
@@ -183,6 +186,8 @@ if(WIN32)
 
     # The MIT app embeds the term host via SetParent + a local pipe.
     target_sources(banchoxterm PRIVATE
+        src/conpty.cpp
+        src/conpty.h
         src/terminalhostclient.cpp
         src/terminalhostclient.h
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/banchoxterm.rc

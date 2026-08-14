@@ -6,6 +6,8 @@
 #include <iostream>
 #ifdef Q_OS_WIN
 #include <winsock2.h>
+#else
+#include <qtermwidget.h>
 #endif
 #include "mainwindow.h"
 #include "keyring.h"
@@ -31,6 +33,13 @@ int main(int argc, char* argv[]) {
     app.setWindowIcon(QIcon(":/icons/logo.svg"));
 
     AppPaths::applyPortableSettings();
+
+#ifndef Q_OS_WIN
+    // Safety net: make sure the color-schemes folder that CMake copies next
+    // to the app binary is always considered, no matter which qtermwidget
+    // build is linked (the vendored fork also falls back to it on Linux).
+    QTermWidget::addCustomColorSchemeDir(QCoreApplication::applicationDirPath() + QLatin1String("/color-schemes/"));
+#endif
 
     QSettings settings;
     QString lang = settings.value("locale/lang", "en").toString();
