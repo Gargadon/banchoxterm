@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(banchoxterm VERSION 1.0.0 LANGUAGES CXX)
+project(banchoxterm VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,9 +24,61 @@ set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     libssh2
     GIT_REPOSITORY https://github.com/libssh2/libssh2.git
-    GIT_TAG        master
+    GIT_TAG        libssh2-1.11.1
 )
 FetchContent_MakeAvailable(libssh2)
+
+# Standard password-based encryption primitives used by the credential vault.
+# The version is pinned so clean builds remain reproducible.
+set(SODIUM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SODIUM_DISABLE_TESTS ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    libsodium
+    GIT_REPOSITORY https://github.com/jedisct1/libsodium.git
+    GIT_TAG        1.0.20-RELEASE
+)
+FetchContent_MakeAvailable(libsodium)
+
+# libsodium's CMake build generates version.h in a platform-specific location,
+# while sodium.h includes it as sodium/version.h. Normalize that layout for all
+# consumers of the library.
+set(BANCHO_SODIUM_GENERATED_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/generated-sodium")
+file(MAKE_DIRECTORY "${BANCHO_SODIUM_GENERATED_INCLUDE}/sodium")
+if(WIN32)
+configure_file(
+        "${libsodium_SOURCE_DIR}/builds/msvc/version.h"
+        "${BANCHO_SODIUM_GENERATED_INCLUDE}/sodium/version.h"
+        COPYONLY
+    )
+else()
+    configure_file(
+        "${libsodium_BINARY_DIR}/src/libsodium/include/sodium/version.h"
+        "${BANCHO_SODIUM_GENERATED_INCLUDE}/sodium/version.h"
+        COPYONLY
+    )
+endif()
+configure_file(
+    "${libsodium_SOURCE_DIR}/src/libsodium/include/sodium/export.h"
+    "${BANCHO_SODIUM_GENERATED_INCLUDE}/sodium/export.h"
+    COPYONLY
+)
+
+file(GLOB_RECURSE BANCHO_SODIUM_SOURCES CONFIGURE_DEPENDS
+    "${libsodium_SOURCE_DIR}/src/libsodium/*.c"
+)
+add_library(sodium STATIC ${BANCHO_SODIUM_SOURCES})
+target_include_directories(sodium PUBLIC
+    ${libsodium_SOURCE_DIR}/src/libsodium/include
+    ${BANCHO_SODIUM_GENERATED_INCLUDE}
+)
+target_include_directories(sodium PRIVATE ${libsodium_SOURCE_DIR}/src/libsodium)
+target_include_directories(sodium PRIVATE ${libsodium_SOURCE_DIR}/src/libsodium/include/sodium)
+if(WIN32)
+    target_include_directories(sodium PRIVATE ${libsodium_SOURCE_DIR}/builds/msvc)
+endif()
+if(WIN32)
+    target_compile_definitions(sodium PRIVATE SODIUM_STATIC)
+endif()
 
 # Include directories (target-scoped so third-party targets don't see src/)
 # include_directories removed: use target_include_directories below.
@@ -84,6 +136,11 @@ endif()
 add_executable(banchoxterm ${SOURCES})
 
 target_include_directories(banchoxterm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(banchoxterm PRIVATE
+    ${libsodium_SOURCE_DIR}/src/libsodium/include
+    ${BANCHO_SODIUM_GENERATED_INCLUDE}
+)
+target_compile_definitions(banchoxterm PRIVATE SODIUM_STATIC)
 
 set(BANCHO_VERSION "${PROJECT_VERSION}")
 target_compile_definitions(banchoxterm PRIVATE BANCHO_VERSION="${BANCHO_VERSION}")
@@ -115,6 +172,7 @@ target_link_libraries(banchoxterm
         Qt6::Gui
         Qt6::Network
         libssh2
+        sodium
 )
 
 # Vendored QTermWidget fork (Gargadon/qtermwidget), built directly from the
@@ -310,6 +368,12 @@ target_link_libraries(banchoxterm_tests
 )
 
 target_include_directories(banchoxterm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(banchoxterm_tests PRIVATE
+    ${libsodium_SOURCE_DIR}/src/libsodium/include
+    ${BANCHO_SODIUM_GENERATED_INCLUDE}
+)
+target_compile_definitions(banchoxterm_tests PRIVATE SODIUM_STATIC)
+target_link_libraries(banchoxterm_tests PRIVATE sodium)
 
 add_test(NAME SessionTests COMMAND banchoxterm_tests)
 

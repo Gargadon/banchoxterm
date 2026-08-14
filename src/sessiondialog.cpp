@@ -393,6 +393,10 @@ void SessionDialog::setupUi() {
     m_ftpPasswordEdit->setPlaceholderText(tr("Optional (stored in Keyring)"));
     ftpForm->addRow(tr("Password:"), m_ftpPasswordEdit);
 
+    m_ftpTlsCheck = new QCheckBox(tr("Use explicit FTPS (TLS certificate validation)"), ftpWidget);
+    m_ftpTlsCheck->setChecked(true);
+    ftpForm->addRow(QString(), m_ftpTlsCheck);
+
     m_stackedWidget->addWidget(ftpWidget); // index 6
 
     mainLayout->addWidget(m_stackedWidget);
@@ -536,6 +540,7 @@ void SessionDialog::loadSession(const Session& session) {
         m_ftpHostEdit->setText(session.host);
         m_ftpPortSpin->setValue(session.port > 0 ? session.port : 21);
         m_ftpUserEdit->setText(session.user);
+        m_ftpTlsCheck->setChecked(session.ftpTls);
         {
             QString password = Keyring::lookupPassword(session.id);
             if (m_ftpPasswordEdit && !password.isEmpty())
@@ -640,6 +645,7 @@ Session SessionDialog::getSession() const {
         s.host = m_ftpHostEdit->text().trimmed();
         s.port = m_ftpPortSpin->value();
         s.user = m_ftpUserEdit->text().trimmed();
+        s.ftpTls = m_ftpTlsCheck && m_ftpTlsCheck->isChecked();
         break;
     }
 

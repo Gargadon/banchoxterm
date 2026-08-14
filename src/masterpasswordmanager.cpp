@@ -6,6 +6,18 @@
 #include <QApplication>
 #include <QThread>
 #include <QMutexLocker>
+#include <sodium.h>
+
+namespace {
+constexpr int kKeyBytes = crypto_aead_xchacha20poly1305_ietf_KEYBYTES;
+constexpr int kSaltBytes = crypto_pwhash_SALTBYTES;
+constexpr int kNonceBytes = crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+constexpr auto kFormat = "BANCHO2";
+
+bool sodiumReady() {
+    return sodium_init() >= 0;
+}
+}
 
 MasterPasswordManager::MasterPasswordManager() {}
 
@@ -32,14 +44,32 @@ void MasterPasswordManager::lock() {
     QMutexLocker locker(&m_mutex);
     m_isUnlocked = false;
     m_sessionKey.clear();
+    m_legacyKey = false;
 }
 
 QByteArray MasterPasswordManager::deriveKey(const QString& password, const QByteArray& salt) {
-    QByteArray input = salt + password.toUtf8();
-    return QCryptographicHash::hash(input, QCryptographicHash::Sha256);
+    if (!sodiumReady() || salt.size() != kSaltBytes)
+        return {};
+    QByteArray key(kKeyBytes, Qt::Uninitialized);
+    const QByteArray pass = password.toUtf8();
+    if (crypto_pwhash(reinterpret_cast<unsigned char*>(key.data()), key.size(), pass.constData(), pass.size(),
+                      reinterpret_cast<const unsigned char*>(salt.constData()),
+                      crypto_pwhash_OPSLIMIT_INTERACTIVE, crypto_pwhash_MEMLIMIT_INTERACTIVE,
+                      crypto_pwhash_ALG_ARGON2ID13) != 0)
+        return {};
+    return key;
+}
+
+QByteArray MasterPasswordManager::legacyDeriveKey(const QString& password, const QByteArray& salt) {
+    return QCryptographicHash::hash(salt + password.toUtf8(), QCryptographicHash::Sha256);
 }
 
 QByteArray MasterPasswordManager::generateRandomBytes(int size) {
+    if (sodiumReady()) {
+        QByteArray bytes(size, Qt::Uninitialized);
+        randombytes_buf(bytes.data(), static_cast<size_t>(size));
+        return bytes;
+    }
     QByteArray bytes;
     bytes.reserve(size);
     while (bytes.size() < size) {
@@ -47,26 +77,6 @@ QByteArray MasterPasswordManager::generateRandomBytes(int size) {
         bytes.append(reinterpret_cast<const char*>(&val), qMin<int>(4, size - bytes.size()));
     }
     return bytes;
-}
-
-QByteArray MasterPasswordManager::cryptStream(const QByteArray& data, const QByteArray& key, const QByteArray& iv) {
-    QByteArray result;
-    result.reserve(data.size());
-
-    QByteArray hashInput = key + iv;
-    QByteArray keystreamBlock = QCryptographicHash::hash(hashInput, QCryptographicHash::Sha256);
-    int keystreamOffset = 0;
-
-    for (int i = 0; i < data.size(); ++i) {
-        if (keystreamOffset >= 32) {
-            hashInput = key + keystreamBlock;
-            keystreamBlock = QCryptographicHash::hash(hashInput, QCryptographicHash::Sha256);
-            keystreamOffset = 0;
-        }
-        char keystreamByte = keystreamBlock.at(keystreamOffset++);
-        result.append(data.at(i) ^ keystreamByte);
-    }
-    return result;
 }
 
 bool MasterPasswordManager::unlock(const QString& password) {
@@ -78,9 +88,11 @@ bool MasterPasswordManager::unlock(const QString& password) {
     if (salt.isEmpty() || storedVerifier.isEmpty())
         return false;
 
-    QByteArray calculatedVerifier = deriveKey(password, salt);
+    const bool legacy = settings.value("security/master_password_version", 1).toInt() < 2;
+    QByteArray calculatedVerifier = legacy ? legacyDeriveKey(password, salt) : deriveKey(password, salt);
     if (calculatedVerifier == storedVerifier) {
         m_sessionKey = calculatedVerifier;
+        m_legacyKey = legacy;
         m_isUnlocked = true;
         return true;
     }
@@ -88,16 +100,20 @@ bool MasterPasswordManager::unlock(const QString& password) {
 }
 
 bool MasterPasswordManager::setMasterPassword(const QString& password) {
+    if (password.isEmpty() || !sodiumReady())
+        return false;
     QByteArray salt = generateRandomBytes(16);
     QByteArray verifier = deriveKey(password, salt);
 
     QSettings settings;
     settings.setValue("security/master_password_enabled", true);
+    settings.setValue("security/master_password_version", 2);
     settings.setValue("security/salt", salt.toBase64());
     settings.setValue("security/verifier", verifier.toBase64());
 
     QMutexLocker locker(&m_mutex);
     m_sessionKey = verifier;
+    m_legacyKey = false;
     m_isUnlocked = true;
     return true;
 }
@@ -110,6 +126,7 @@ bool MasterPasswordManager::disableMasterPassword(const QString& currentPassword
     settings.setValue("security/master_password_enabled", false);
     settings.remove("security/salt");
     settings.remove("security/verifier");
+    settings.remove("security/master_password_version");
 
     lock();
     return true;
@@ -120,21 +137,29 @@ QString MasterPasswordManager::encryptPassword(const QString& plaintext) {
         return "";
 
     QMutexLocker locker(&m_mutex);
-    if (!m_isUnlocked) {
-        return plaintext; // Fallback
-    }
+    if (!m_isUnlocked)
+        return {}; // Never silently persist a plaintext secret.
 
-    QByteArray iv = generateRandomBytes(16);
-    QByteArray cipher = cryptStream(plaintext.toUtf8(), m_sessionKey, iv);
+    QByteArray nonce = generateRandomBytes(kNonceBytes);
+    QByteArray plain = plaintext.toUtf8();
+    QByteArray cipher(plain.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES, Qt::Uninitialized);
+    unsigned long long cipherLen = 0;
+    if (crypto_aead_xchacha20poly1305_ietf_encrypt(
+            reinterpret_cast<unsigned char*>(cipher.data()), &cipherLen,
+            reinterpret_cast<const unsigned char*>(plain.constData()), static_cast<unsigned long long>(plain.size()),
+            nullptr, 0, nullptr, reinterpret_cast<const unsigned char*>(nonce.constData()),
+            reinterpret_cast<const unsigned char*>(m_sessionKey.constData())) != 0)
+        return {};
+    cipher.resize(static_cast<int>(cipherLen));
 
-    return QString("BANCHO:%1:%2").arg(QString(iv.toBase64()), QString(cipher.toBase64()));
+    return QString("%1:%2:%3").arg(kFormat, QString(nonce.toBase64()), QString(cipher.toBase64()));
 }
 
 QString MasterPasswordManager::decryptPassword(const QString& ciphertext) {
     if (ciphertext.isEmpty())
         return "";
 
-    if (!ciphertext.startsWith("BANCHO:")) {
+    if (!ciphertext.startsWith("BANCHO:") && !ciphertext.startsWith("BANCHO2:")) {
         return ciphertext; // Contraseña heredada no cifrada
     }
 
@@ -170,12 +195,48 @@ QString MasterPasswordManager::decryptPassword(const QString& ciphertext) {
     }
 
     QStringList parts = ciphertext.split(":");
-    if (parts.size() < 3)
+    if (parts.size() != 3)
         return "";
 
-    QByteArray iv = QByteArray::fromBase64(parts[1].toUtf8());
+    QByteArray nonce = QByteArray::fromBase64(parts[1].toUtf8());
     QByteArray cipher = QByteArray::fromBase64(parts[2].toUtf8());
-
-    QByteArray plain = cryptStream(cipher, m_sessionKey, iv);
+    if (parts[0] == "BANCHO")
+        return decryptLegacy(ciphertext, m_sessionKey);
+    if (nonce.size() != kNonceBytes || cipher.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES)
+        return "";
+    QByteArray plain(cipher.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES, Qt::Uninitialized);
+    unsigned long long plainLen = 0;
+    if (crypto_aead_xchacha20poly1305_ietf_decrypt(
+            reinterpret_cast<unsigned char*>(plain.data()), &plainLen, nullptr,
+            reinterpret_cast<const unsigned char*>(cipher.constData()), static_cast<unsigned long long>(cipher.size()),
+            nullptr, 0, reinterpret_cast<const unsigned char*>(nonce.constData()),
+            reinterpret_cast<const unsigned char*>(m_sessionKey.constData())) != 0)
+        return "";
+    plain.resize(static_cast<int>(plainLen));
     return QString::fromUtf8(plain);
+}
+
+QString MasterPasswordManager::decryptLegacy(const QString& ciphertext, const QByteArray& key) {
+    const QStringList parts = ciphertext.split(":");
+    if (parts.size() != 3)
+        return {};
+    const QByteArray iv = QByteArray::fromBase64(parts[1].toUtf8());
+    const QByteArray cipher = QByteArray::fromBase64(parts[2].toUtf8());
+    if (iv.isEmpty() || key.isEmpty())
+        return {};
+
+    QByteArray result;
+    result.reserve(cipher.size());
+    QByteArray hashInput = key + iv;
+    QByteArray block = QCryptographicHash::hash(hashInput, QCryptographicHash::Sha256);
+    int offset = 0;
+    for (char byte : cipher) {
+        if (offset == block.size()) {
+            hashInput = key + block;
+            block = QCryptographicHash::hash(hashInput, QCryptographicHash::Sha256);
+            offset = 0;
+        }
+        result.append(byte ^ block.at(offset++));
+    }
+    return QString::fromUtf8(result);
 }

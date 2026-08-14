@@ -80,6 +80,7 @@ private:
     QSpinBox* m_ftpPortSpin = nullptr;
     QLineEdit* m_ftpUserEdit = nullptr;
     QLineEdit* m_ftpPasswordEdit = nullptr;
+    QCheckBox* m_ftpTlsCheck = nullptr;
 
     // Tunnels
     QTableWidget* m_tunnelsTable;

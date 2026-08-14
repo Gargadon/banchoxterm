@@ -22,6 +22,24 @@ QString getDarkTheme() {
             background-color: #16161e;
             border-top: 1px solid #24283b;
         }
+        #remoteMonitorWidget {
+            background-color: #16161e;
+            border: 1px solid #24283b;
+            border-radius: 5px;
+        }
+        #remoteStatsCard {
+            background-color: #24283b;
+            border: 1px solid #414868;
+            border-radius: 4px;
+        }
+        #remoteStatsValue {
+            color: #c0caf5;
+            font-weight: bold;
+        }
+        #remoteStatsCaption {
+            color: #a9b1d6;
+            font-size: 10px;
+        }
 
         /* Sidebar Container */
         QFrame#sidebarContainer {
@@ -378,6 +396,24 @@ QString getLightTheme() {
         #multiInputBar {
             background-color: #eaedf3;
             border-top: 1px solid #d0d7de;
+        }
+        #remoteMonitorWidget {
+            background-color: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 5px;
+        }
+        #remoteStatsCard {
+            background-color: #ffffff;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+        }
+        #remoteStatsValue {
+            color: #1f2937;
+            font-weight: bold;
+        }
+        #remoteStatsCaption {
+            color: #475569;
+            font-size: 10px;
         }
 
         /* Sidebar Container */

@@ -26,7 +26,7 @@ signals:
     void operationFinished(bool success, const QString& message);
 
 public slots:
-    void connectToHost(const QString& host, int port, const QString& user, const QString& password);
+    void connectToHost(const QString& host, int port, const QString& user, const QString& password, bool tls = true);
     void disconnectFromHost();
     void listDirectory(const QString& path);
     void downloadFile(const QString& remotePath, const QString& localPath);
@@ -53,4 +53,5 @@ private:
     bool m_connected = false;
     QString m_host;
     int m_port = 21;
+    bool m_tls = true;
 };

@@ -74,7 +74,11 @@ private:
 
     QWidget* m_multiInputBar;
     QComboBox* m_multiInputEdit;
-    QLabel* m_remoteMonitorLabel;
+    QFrame* m_remoteMonitorWidget = nullptr;
+    QLabel* m_remoteCpuValue = nullptr;
+    QLabel* m_remoteMemValue = nullptr;
+    QLabel* m_remoteDiskValue = nullptr;
+    QLabel* m_remoteUptimeValue = nullptr;
 
     QAction* m_copyAction;
     QAction* m_pasteAction;

@@ -2,6 +2,7 @@
 #include "apppaths.h"
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QUuid>
@@ -102,6 +103,7 @@ QJsonObject Session::toJson() const {
     json["cryptCipher"] = cryptCipher;
     json["kexAlgo"] = kexAlgo;
     json["macAlgo"] = macAlgo;
+    json["ftpTls"] = ftpTls;
 
     QJsonArray tunnelArray;
     for (const auto& t : tunnels) {
@@ -138,6 +140,7 @@ Session Session::fromJson(const QJsonObject& json) {
     s.cryptCipher = json["cryptCipher"].toString();
     s.kexAlgo = json["kexAlgo"].toString();
     s.macAlgo = json["macAlgo"].toString();
+    s.ftpTls = json.contains("ftpTls") ? json["ftpTls"].toBool(true) : true;
 
     if (json.contains("tunnels") && json["tunnels"].isArray()) {
         QJsonArray tunnelArray = json["tunnels"].toArray();
@@ -186,19 +189,19 @@ QList<Session> SessionManager::loadSessions() {
 
 void SessionManager::saveSessions(const QList<Session>& sessions) {
     QString path = getFilePath();
-    QFile file(path);
-    if (file.open(QIODevice::WriteOnly)) {
-        QJsonArray arr;
-        for (const Session& s : sessions) {
-            arr.append(s.toJson());
-        }
-        QJsonDocument doc(arr);
-        file.write(doc.toJson());
-    }
+    QJsonArray arr;
+    for (const Session& s : sessions)
+        arr.append(s.toJson());
+
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+    file.write(QJsonDocument(arr).toJson());
+    file.commit();
 }
 
 bool SessionManager::exportSessions(const QList<Session>& sessions, const QString& path) {
-    QFile file(path);
+    QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly))
         return false;
     QJsonArray arr;
@@ -206,8 +209,9 @@ bool SessionManager::exportSessions(const QList<Session>& sessions, const QStrin
         arr.append(s.toJson());
     }
     QJsonDocument doc(arr);
-    file.write(doc.toJson());
-    return true;
+    if (file.write(doc.toJson()) < 0)
+        return false;
+    return file.commit();
 }
 
 QList<Session> SessionManager::importSessions(const QString& path, bool* ok) {
@@ -220,11 +224,20 @@ QList<Session> SessionManager::importSessions(const QString& path, bool* ok) {
     }
     QByteArray data = file.readAll();
     QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (doc.isArray()) {
-        const QJsonArray arr = doc.array();
-        for (const QJsonValue& val : arr) {
-            sessions.append(Session::fromJson(val.toObject()));
+    if (!doc.isArray()) {
+        if (ok)
+            *ok = false;
+        return sessions;
+    }
+    const QJsonArray arr = doc.array();
+    for (const QJsonValue& val : arr) {
+        if (!val.isObject()) {
+            if (ok)
+                *ok = false;
+            sessions.clear();
+            return sessions;
         }
+        sessions.append(Session::fromJson(val.toObject()));
     }
     if (ok)
         *ok = true;

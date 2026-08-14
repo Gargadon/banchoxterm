@@ -25,6 +25,10 @@
     <file>icons/chevron-down.svg</file>
     <file>icons/chevron-up.svg</file>
     <file>icons/close.svg</file>
+    <file>icons/cpu.svg</file>
+    <file>icons/memory.svg</file>
+    <file>icons/disk.svg</file>
+    <file>icons/uptime.svg</file>
     <file>translations/banchoxterm_es.qm</file>
     <file>translations/banchoxterm_pt.qm</file>
 </qresource>

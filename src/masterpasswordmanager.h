@@ -33,10 +33,12 @@ private:
     ~MasterPasswordManager();
 
     QByteArray deriveKey(const QString& password, const QByteArray& salt);
+    QByteArray legacyDeriveKey(const QString& password, const QByteArray& salt);
     QByteArray generateRandomBytes(int size);
-    QByteArray cryptStream(const QByteArray& data, const QByteArray& key, const QByteArray& iv);
+    QString decryptLegacy(const QString& ciphertext, const QByteArray& key);
 
     mutable QMutex m_mutex;
     QByteArray m_sessionKey;
     bool m_isUnlocked = false;
+    bool m_legacyKey = false;
 };

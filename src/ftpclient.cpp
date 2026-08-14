@@ -1,5 +1,6 @@
 #include "ftpclient.h"
 #include <QTcpSocket>
+#include <QSslSocket>
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
@@ -11,14 +12,22 @@ FtpClient::~FtpClient() {
     disconnectFromHost();
 }
 
-void FtpClient::connectToHost(const QString& host, int port, const QString& user, const QString& password) {
+void FtpClient::connectToHost(const QString& host, int port, const QString& user, const QString& password, bool tls) {
     disconnectFromHost();
 
     m_host = host;
     m_port = port;
+    m_tls = tls;
 
-    m_control = new QTcpSocket(this);
-    connect(m_control, &QTcpSocket::readyRead, this, [this]() {
+    if (m_tls) {
+        auto* ssl = new QSslSocket(this);
+        ssl->setPeerVerifyMode(QSslSocket::VerifyPeer);
+        ssl->setPeerVerifyName(host);
+        m_control = ssl;
+    } else {
+        m_control = new QTcpSocket(this);
+    }
+    connect(m_control, &QIODevice::readyRead, this, [this]() {
         m_replyBuffer += m_control->readAll();
         while (true) {
             int nl = m_replyBuffer.indexOf('\n');
@@ -51,34 +60,73 @@ void FtpClient::connectToHost(const QString& host, int port, const QString& user
             }
         }
     });
-    connect(m_control, &QTcpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
+    connect(m_control, &QAbstractSocket::errorOccurred, this, [this](QAbstractSocket::SocketError) {
         if (!m_connected) {
             emit connectionFailed(tr("FTP connection failed: %1").arg(m_control->errorString()));
         }
     });
 
-    // Greeting (220) -> USER -> PASS -> TYPE I
-    sendCommand("", [this, user, password](const Reply&) {
-        sendCommand("USER " + user, [this, user, password](const Reply& r) {
-            if (r.code == 331) {
-                sendCommand("PASS " + password, [this](const Reply& r2) {
-                    if (r2.code == 230 || r2.code == 202) {
-                        sendCommand("TYPE I", [this](const Reply&) {
-                            m_connected = true;
-                            emit connectionSuccess();
-                        });
-                    } else {
-                        emit connectionFailed(tr("FTP login failed"));
-                    }
-                });
-            } else if (r.code == 230) {
-                sendCommand("TYPE I", [this](const Reply&) {
+    // Greeting (220) -> AUTH TLS (optional) -> USER -> PASS -> TYPE I.
+    auto finishLogin = [this](const Reply& r) {
+        if (r.code == 230 || r.code == 202) {
+            auto finishType = [this](const Reply&) {
+                auto markConnected = [this](const Reply&) {
                     m_connected = true;
                     emit connectionSuccess();
+                };
+                if (!m_tls) {
+                    markConnected(Reply{});
+                    return;
+                }
+                sendCommand("PBSZ 0", [this, markConnected](const Reply& pbsz) {
+                    if (pbsz.code < 200 || pbsz.code >= 300) {
+                        emit connectionFailed(tr("FTPS PBSZ negotiation failed"));
+                        return;
+                    }
+                    sendCommand("PROT P", [this, markConnected](const Reply& prot) {
+                        if (prot.code < 200 || prot.code >= 300) {
+                            emit connectionFailed(tr("FTPS data protection negotiation failed"));
+                            return;
+                        }
+                        markConnected(Reply{});
+                    });
                 });
+            };
+            sendCommand("TYPE I", finishType);
+        } else {
+            emit connectionFailed(tr("FTP login failed"));
+        }
+    };
+
+    auto startLogin = [this, user, password, finishLogin]() {
+        sendCommand("USER " + user, [this, user, password, finishLogin](const Reply& r) {
+            if (r.code == 331) {
+                sendCommand("PASS " + password, finishLogin);
+            } else if (r.code == 230) {
+                finishLogin(r);
             } else {
                 emit connectionFailed(tr("FTP login failed (code %1)").arg(r.code));
             }
+        });
+    };
+
+    sendCommand("", [this, startLogin](const Reply&) {
+        if (!m_tls) {
+            startLogin();
+            return;
+        }
+        sendCommand("AUTH TLS", [this, startLogin](const Reply& r) {
+            if (r.code != 234 && r.code != 334) {
+                emit connectionFailed(tr("Server does not support explicit FTPS"));
+                return;
+            }
+            auto* ssl = qobject_cast<QSslSocket*>(m_control);
+            if (!ssl) {
+                emit connectionFailed(tr("FTPS socket initialization failed"));
+                return;
+            }
+            connect(ssl, &QSslSocket::encrypted, this, startLogin, Qt::SingleShotConnection);
+            ssl->startClientEncryption();
         });
     });
 
@@ -125,8 +173,19 @@ void FtpClient::openDataConnection(std::function<void(QTcpSocket*)> onConnected)
         const QString host = QString("%1.%2.%3.%4").arg(m.captured(1), m.captured(2), m.captured(3), m.captured(4));
         const int port = m.captured(5).toInt() * 256 + m.captured(6).toInt();
 
-        QTcpSocket* data = new QTcpSocket(this);
-        connect(data, &QTcpSocket::connected, this, [onConnected, data]() { onConnected(data); });
+        QTcpSocket* data = nullptr;
+        if (m_tls) {
+            auto* ssl = new QSslSocket(this);
+            ssl->setPeerVerifyMode(QSslSocket::VerifyPeer);
+            ssl->setPeerVerifyName(m_host);
+            data = ssl;
+            connect(ssl, &QTcpSocket::connected, ssl, &QSslSocket::startClientEncryption);
+            connect(ssl, &QSslSocket::encrypted, this, [onConnected, data]() { onConnected(data); },
+                    Qt::SingleShotConnection);
+        } else {
+            data = new QTcpSocket(this);
+            connect(data, &QTcpSocket::connected, this, [onConnected, data]() { onConnected(data); });
+        }
         connect(data, &QTcpSocket::errorOccurred, this, [this, data](QAbstractSocket::SocketError) {
             emit operationFinished(false, tr("FTP data connection failed"));
             data->deleteLater();

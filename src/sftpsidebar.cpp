@@ -298,7 +298,7 @@ void SftpSidebar::startSession(const Session& session) {
         if (!m_ftp)
             setFtpClient(new FtpClient(this));
         const QString password = Keyring::lookupPassword(session.id);
-        emit requestFtpConnect(session.host, session.port, session.user, password);
+        emit requestFtpConnect(session.host, session.port, session.user, password, session.ftpTls);
         return;
     }
     if (session.type != SessionType::SSH) {

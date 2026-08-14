@@ -273,11 +273,46 @@ void MainWindow::setupUi() {
         }
     });
 
-    // Status bar remote stats label
-    m_remoteMonitorLabel = new QLabel(this);
-    m_remoteMonitorLabel->setStyleSheet("padding: 0px 15px; font-weight: bold; color: #7aa2f7;");
-    m_remoteMonitorLabel->setVisible(false);
-    statusBar()->addPermanentWidget(m_remoteMonitorLabel);
+    // Status bar remote stats: compact metric cards instead of a single text line.
+    m_remoteMonitorWidget = new QFrame(this);
+    m_remoteMonitorWidget->setObjectName("remoteMonitorWidget");
+    auto* statsLayout = new QHBoxLayout(m_remoteMonitorWidget);
+    statsLayout->setContentsMargins(8, 2, 8, 2);
+    statsLayout->setSpacing(5);
+
+    auto addStatCard = [this, statsLayout](const QString& iconPath, const QString& caption,
+                                            QLabel*& valueLabel) {
+        auto* card = new QFrame(m_remoteMonitorWidget);
+        card->setObjectName("remoteStatsCard");
+        auto* cardLayout = new QHBoxLayout(card);
+        cardLayout->setContentsMargins(6, 2, 8, 2);
+        cardLayout->setSpacing(5);
+
+        auto* icon = new QLabel(card);
+        icon->setPixmap(QIcon(iconPath).pixmap(QSize(16, 16)));
+        icon->setFixedSize(16, 16);
+        cardLayout->addWidget(icon);
+
+        auto* textLayout = new QVBoxLayout();
+        textLayout->setContentsMargins(0, 0, 0, 0);
+        textLayout->setSpacing(0);
+        valueLabel = new QLabel("--", card);
+        valueLabel->setObjectName("remoteStatsValue");
+        valueLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        auto* captionLabel = new QLabel(caption, card);
+        captionLabel->setObjectName("remoteStatsCaption");
+        textLayout->addWidget(valueLabel);
+        textLayout->addWidget(captionLabel);
+        cardLayout->addLayout(textLayout);
+        statsLayout->addWidget(card);
+    };
+
+    addStatCard(":/icons/cpu.svg", tr("CPU"), m_remoteCpuValue);
+    addStatCard(":/icons/memory.svg", tr("RAM"), m_remoteMemValue);
+    addStatCard(":/icons/disk.svg", tr("Disk"), m_remoteDiskValue);
+    addStatCard(":/icons/uptime.svg", tr("Uptime"), m_remoteUptimeValue);
+    m_remoteMonitorWidget->setVisible(false);
+    statusBar()->addPermanentWidget(m_remoteMonitorWidget);
 
     // Open an initial local terminal tab
     onNewLocalTerminal();
@@ -382,7 +417,7 @@ void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
         }
         m_sftpSidebar->stopSession();
         m_sftpTabBtn->setEnabled(false);
-        m_remoteMonitorLabel->setVisible(false);
+        m_remoteMonitorWidget->setVisible(false);
         setWindowTitle("BanchoXterm");
         switchSidebarTab(0);
         return;
@@ -399,7 +434,7 @@ void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
     } else {
         m_sftpSidebar->stopSession();
         m_sftpTabBtn->setEnabled(false);
-        m_remoteMonitorLabel->setVisible(false);
+        m_remoteMonitorWidget->setVisible(false);
         if (m_sidebarStacked->currentIndex() == 1) {
             switchSidebarTab(0);
         }
@@ -542,14 +577,11 @@ void MainWindow::onRemoteStatsUpdated(double cpu, double mem, double disk, doubl
         uptimeStr = QString("%1m").arg(mins);
     }
 
-    QString statsText = QString("  [Remote System Stats]   CPU: %1%  |  RAM: %2%  |  Disk: %3%  |  Uptime: %4  ")
-                            .arg(cpu, 0, 'f', 0)
-                            .arg(mem, 0, 'f', 0)
-                            .arg(disk, 0, 'f', 0)
-                            .arg(uptimeStr);
-
-    m_remoteMonitorLabel->setText(statsText);
-    m_remoteMonitorLabel->setVisible(true);
+    m_remoteCpuValue->setText(QString("%1%").arg(cpu, 0, 'f', 0));
+    m_remoteMemValue->setText(QString("%1%").arg(mem, 0, 'f', 0));
+    m_remoteDiskValue->setText(QString("%1%").arg(disk, 0, 'f', 0));
+    m_remoteUptimeValue->setText(uptimeStr);
+    m_remoteMonitorWidget->setVisible(true);
 }
 
 void MainWindow::setupMenuBar() {

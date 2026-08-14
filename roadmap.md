@@ -24,18 +24,20 @@ Ya implementado:
 
 ### P1 — Diferenciadores clave frente a MobaXterm
 
-- [x] **Split-view / multi-terminal en rejilla**: dos paneles de pestañas
+- [ ] **Split-view / multi-terminal en rejilla**: dos paneles de pestañas
       (`QSplitter` con dos `QTabWidget`), menú "View → Toggle Split View" y
-      "Move Tab to Other Pane".
+      "Move Tab to Other Pane". Pendiente: rejilla 2x2, pestañas desmontables
+      y restauración del layout.
 - [ ] **SSH gateway / jump host (ProxyJump)**: campo `jumpHost` en `Session`,
       conexión en dos saltos en `SshConnection` (direct-tcpip sobre el bastión).
 - [x] **Keyboard-interactive / 2FA**: `libssh2_userauth_keyboard_interactive`
       con diálogo de prompts (OTP/MFA) en `SshConnection`.
-- [x] **X server en Windows**: X11 forwarding habilitado en Windows usando un
-      servidor X local en `127.0.0.1:6000` (VcXsrv/X410/Xming); se sondea el
-      servidor antes de activarlo y se usa auth vacía.
-- [x] **FTP**: cliente FTP pasivo básico (`FtpClient` con QTcpSocket):
-      navegar, subir, bajar, borrar, crear carpeta y renombrar. Sin TLS/chmod.
+- [ ] **X server en Windows**: X11 forwarding permite conectar con un servidor
+      X externo en `127.0.0.1:6000` (VcXsrv/X410/Xming); pendiente empaquetar o
+      integrar una opción open-source de X server en la distribución.
+- [x] **FTP/FTPS**: cliente pasivo con navegación, subida, descarga, borrado,
+      creación y renombrado; FTPS explícito con validación de certificado es el
+      modo predeterminado y FTP plano queda como compatibilidad opt-in.
 
 ### P2 — Calidad y robustez
 
@@ -88,8 +90,9 @@ Ya implementado:
       16/16 en verde.
 - [x] **UI de `known_hosts`**: diálogo "Manage Known Hosts" en Ajustes →
       Seguridad (listar y eliminar).
-- [x] **UX de sesiones**: clonar/duplicar sesión (menú contextual) y reordenar
-      con drag & drop (persistido). Falta barra "QuickConnect".
+- [x] **UX de sesiones**: clonar/duplicar sesión, reordenar con drag & drop
+      (persistido) y barra "QuickConnect" (`usuario@host[:puerto]` o búsqueda
+      por sesión guardada).
 
 ### P3 — Pulido y distribución
 
@@ -127,10 +130,65 @@ Ya implementado:
       `tar.exe` en portable, datos portables no compartidos con la instalación,
       logging que no captura sesiones locales Linux).
 
+## Inversión 3 — capa de producto y experiencia operativa
+
+Esta inversión no es una sola función: es la capa que convierte un cliente SSH
+con varios protocolos en una herramienta diaria de trabajo. MobaXterm combina
+sesiones guardadas, pestañas, paneles, ejecución múltiple, utilidades y
+distribución portable; BanchoXterm debe alcanzar una experiencia equivalente
+con componentes libres y una arquitectura mantenible.
+
+### Fase 3.1 — llegar al host en segundos
+
+- [x] QuickConnect: `usuario@host[:puerto]`, Enter para conectar y búsqueda por
+  nombre o endpoint guardado.
+- [ ] Historial de conexiones recientes y favoritos, sin guardar secretos en
+  texto plano.
+- [ ] Paleta global (`Ctrl+K`) para abrir sesión, cambiar panel, ejecutar macro,
+  buscar en sesiones y activar acciones.
+
+### Fase 3.2 — organizar trabajo paralelo
+
+- [ ] Rejilla 2x2 con cuatro grupos de pestañas independientes.
+- [ ] Desmontar una pestaña en ventana propia y volver a acoplarla.
+- [ ] Guardar/restaurar el layout al iniciar, incluyendo sesión, panel y
+  directorio remoto.
+- [ ] MultiExec con confirmación visible, lista de destinos y exclusiones; la
+  ejecución masiva debe ser explícita para evitar comandos accidentales.
+
+### Fase 3.3 — sesiones como activo portable
+
+- [ ] Variables por perfil (`${USER}`, `${HOST}`, `${ENV}`) y plantillas para
+  crear muchas sesiones sin duplicar configuración.
+- [ ] Importadores desde OpenSSH `config`, PuTTY y formatos comunes, con vista
+  previa y mapeo de campos.
+- [ ] Exportación/importación de grupos, permisos de archivo documentados y
+  separación clara entre configuración y secretos del keyring.
+- [ ] Sesiones compartidas opcionales mediante archivos versionables, sin
+  exportar contraseñas ni claves privadas por accidente.
+
+### Fase 3.4 — distribución confiable
+
+- [x] ZIP portable e instalador NSIS; el updater verifica el SHA-256 publicado
+  antes de ejecutar el artefacto descargado.
+- [ ] Firmar instalador y ejecutables, publicar checksums y generar SBOM por
+  release.
+- [ ] Paquete de herramientas opcionales (por ejemplo, X server) separado del
+  núcleo para no mezclar licencias ni elevar el tamaño de la instalación.
+- [ ] Actualizaciones con rollback y canal estable/preview.
+
+### Criterio de salida de la inversión 3
+
+Un usuario debe poder importar o crear una sesión, encontrarla desde QuickConnect,
+abrir cuatro destinos, ejecutar una acción controlada en varios paneles, cerrar
+la aplicación y recuperar el mismo layout; todo ello desde un ZIP verificable y
+sin que los secretos aparezcan en los archivos compartidos.
+
 ## Notas / limitaciones conocidas
 
-- FTP: solo pasivo, sin TLS/chmod, sin subida de carpetas ni progreso por byte
-  (el progreso por byte y las colas son de SFTP).
+- FTP/FTPS: solo pasivo, sin chmod, sin subida de carpetas ni progreso por byte
+  (el progreso por byte y las colas son de SFTP). FTPS requiere certificados
+  válidos cuando se mantiene activada la verificación.
 - El drag & drop SFTP funciona solo dentro de la app: soltar archivos locales
   sube; arrastrar remotos descarga a una carpeta elegida. No se puede arrastrar
   a otra aplicación (Explorer).

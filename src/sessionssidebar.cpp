@@ -15,6 +15,7 @@
 #include <QUuid>
 #include <QSet>
 #include <QAbstractItemModel>
+#include <QLineEdit>
 
 namespace {
 constexpr int kSessionIdRole = Qt::UserRole;
@@ -30,6 +31,12 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     titleLabel->setStyleSheet(
         "font-weight: bold; color: #787c99; font-size: 11px; letter-spacing: 1px; margin-bottom: 4px;");
     layout->addWidget(titleLabel);
+
+    m_quickConnectEdit = new QLineEdit(this);
+    m_quickConnectEdit->setPlaceholderText(tr("QuickConnect: user@host[:port] or saved session"));
+    m_quickConnectEdit->setClearButtonEnabled(true);
+    m_quickConnectEdit->setToolTip(tr("Press Enter to connect directly or open a saved session."));
+    layout->addWidget(m_quickConnectEdit);
 
     auto* actionsLayout = new QHBoxLayout();
     auto* newRemoteBtn = new QPushButton(QIcon(":/icons/add.svg"), tr("New Remote Session"), this);
@@ -66,8 +73,52 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SessionsSidebar::showContextMenu);
     connect(m_treeWidget->model(), &QAbstractItemModel::rowsMoved, this,
             [this](const QModelIndex&, int, int, const QModelIndex&, int) { onSessionsReordered(); });
+    connect(m_quickConnectEdit, &QLineEdit::returnPressed, this, &SessionsSidebar::onQuickConnect);
 
     loadSessions();
+}
+
+void SessionsSidebar::onQuickConnect() {
+    const QString input = m_quickConnectEdit->text().trimmed();
+    if (input.isEmpty())
+        return;
+
+    for (const Session& session : m_sessions) {
+        if (session.name.compare(input, Qt::CaseInsensitive) == 0 ||
+            QStringLiteral("%1@%2").arg(session.user, session.host).compare(input, Qt::CaseInsensitive) == 0) {
+            emit connectSession(session);
+            return;
+        }
+    }
+
+    Session session;
+    session.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    session.name = input;
+    session.type = SessionType::SSH;
+    session.port = 22;
+
+    QString endpoint = input;
+    const int at = endpoint.lastIndexOf('@');
+    if (at >= 0) {
+        session.user = endpoint.left(at).trimmed();
+        endpoint = endpoint.mid(at + 1).trimmed();
+    }
+
+    const int colon = endpoint.lastIndexOf(':');
+    if (colon > 0) {
+        bool ok = false;
+        const int port = endpoint.mid(colon + 1).toInt(&ok);
+        if (ok && port > 0 && port <= 65535) {
+            session.port = port;
+            endpoint = endpoint.left(colon);
+        }
+    }
+    session.host = endpoint;
+    if (session.host.isEmpty())
+        return;
+
+    emit connectSession(session);
+    m_quickConnectEdit->clear();
 }
 
 void SessionsSidebar::loadSessions() {

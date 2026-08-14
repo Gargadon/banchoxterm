@@ -16,10 +16,10 @@ struct SftpFile {
 
 struct TunnelConfig {
     enum class Type { Local, Remote, Dynamic };
-    Type type;
-    int localPort;
+    Type type = Type::Local;
+    int localPort = 0;
     QString remoteHost;
-    int remotePort;
+    int remotePort = 0;
 
     QJsonObject toJson() const;
     static TunnelConfig fromJson(const QJsonObject& json);
@@ -29,7 +29,7 @@ struct Session {
     QString id;
     QString name;
     QString group;
-    SessionType type;
+    SessionType type = SessionType::Local;
 
     // SSH / Telnet / RDP / VNC
     QString host;
@@ -57,6 +57,9 @@ struct Session {
     QString cryptCipher;      // comma-separated, empty = libssh2 default
     QString kexAlgo;          // empty = libssh2 default
     QString macAlgo;          // empty = libssh2 default
+
+    // FTP
+    bool ftpTls = true;       // explicit FTPS by default
 
     QList<TunnelConfig> tunnels;
 

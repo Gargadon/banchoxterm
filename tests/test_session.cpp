@@ -6,12 +6,18 @@
 #include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSettings>
 #include "session.h"
 #include "masterpasswordmanager.h"
 #include "vtterminalwidget.h"
 
 class TestSession : public QObject {
     Q_OBJECT
+
+private:
+    static QString settingsPath() {
+        return QDir(QDir::tempPath()).filePath("banchoxterm-test-settings");
+    }
 
 private slots:
     void initTestCase() {
@@ -20,6 +26,11 @@ private slots:
         // use a valid settings path.
         QCoreApplication::setOrganizationName(QStringLiteral("BanchoXterm"));
         QCoreApplication::setApplicationName(QStringLiteral("BanchoXterm"));
+        // Keep tests independent of the developer's registry/home settings.
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                           QDir(QDir::tempPath()).filePath("banchoxterm-test-settings"));
+        QDir(settingsPath()).removeRecursively();
     }
 
     void testSshSessionRoundtrip() {
@@ -213,7 +224,7 @@ private slots:
         
         QString plaintext = "MySshSecretPassword";
         QString encrypted = mpm.encryptPassword(plaintext);
-        QVERIFY(encrypted.startsWith("BANCHO:"));
+        QVERIFY(encrypted.startsWith("BANCHO2:"));
         QVERIFY(encrypted != plaintext);
         
         QString decrypted = mpm.decryptPassword(encrypted);
@@ -225,6 +236,9 @@ private slots:
         QVERIFY(mpm.unlock("SuperSecure123!"));
         QVERIFY(mpm.isUnlocked());
         QCOMPARE(mpm.decryptPassword(encrypted), plaintext);
+        QString tampered = encrypted;
+        tampered[tampered.size() - 1] = tampered.at(tampered.size() - 1) == QChar('A') ? QChar('B') : QChar('A');
+        QVERIFY(mpm.decryptPassword(tampered).isEmpty());
         
         QVERIFY(mpm.disableMasterPassword("SuperSecure123!"));
         QVERIFY(!mpm.isEnabled());

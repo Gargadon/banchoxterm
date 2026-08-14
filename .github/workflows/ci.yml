@@ -22,7 +22,6 @@ jobs:
         run: cmake -B build -G Ninja && cmake --build build --target format-check
 
   build-windows:
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
     strategy:
       matrix:

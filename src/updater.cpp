@@ -17,6 +17,7 @@
 #include <QUrl>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QCryptographicHash>
 
 #ifndef BANCHO_VERSION
 #define BANCHO_VERSION "1.0.0"
@@ -53,6 +54,15 @@ QString findAssetUrl(const QJsonArray& assets, const QString& name) {
             return obj.value("browser_download_url").toString();
     }
     return QString();
+}
+
+QString findAssetDigest(const QJsonArray& assets, const QString& name) {
+    for (const QJsonValue& val : assets) {
+        const QJsonObject obj = val.toObject();
+        if (obj.value("name").toString() == name)
+            return obj.value("digest").toString();
+    }
+    return {};
 }
 
 // Portable update: writes a small PowerShell script that waits for the app to
@@ -168,6 +178,7 @@ void Updater::checkForUpdates(QWidget* parent) {
         const bool portable = AppPaths::isPortable();
         const QString assetName = portable ? "BanchoXterm-windows-x64.zip" : "BanchoXterm-Setup.exe";
         const QString url = findAssetUrl(obj.value("assets").toArray(), assetName);
+        const QString expectedDigest = findAssetDigest(obj.value("assets").toArray(), assetName);
         if (url.isEmpty()) {
             QMessageBox::warning(parent, tr("Update"), tr("The release does not include the asset %1.").arg(assetName));
             return;
@@ -205,6 +216,16 @@ void Updater::checkForUpdates(QWidget* parent) {
             }
 
             const QString destPath = QDir::temp().filePath(assetName);
+            const QByteArray payload = dreply->readAll();
+            const QString actualDigest = QStringLiteral("sha256:") +
+                                         QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex());
+            if (expectedDigest.isEmpty() || expectedDigest.compare(actualDigest, Qt::CaseInsensitive) != 0) {
+                QMessageBox::warning(parent, tr("Update Failed"),
+                                     tr("The downloaded update failed its integrity check."));
+                dreply->deleteLater();
+                downloadNam->deleteLater();
+                return;
+            }
             QFile out(destPath);
             if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
                 QMessageBox::warning(parent, tr("Update Failed"), tr("Could not write %1.").arg(destPath));
@@ -212,7 +233,7 @@ void Updater::checkForUpdates(QWidget* parent) {
                 downloadNam->deleteLater();
                 return;
             }
-            out.write(dreply->readAll());
+            out.write(payload);
             out.close();
             dreply->deleteLater();
             downloadNam->deleteLater();

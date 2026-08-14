@@ -5,6 +5,7 @@
 
 class QTreeWidget;
 class QTreeWidgetItem;
+class QLineEdit;
 
 class SessionsSidebar : public QWidget {
     Q_OBJECT
@@ -19,6 +20,7 @@ public slots:
     void onNewSession();
 
 private slots:
+    void onQuickConnect();
     void onEditSession();
     void onDeleteSession();
     void onDuplicateSession();
@@ -35,5 +37,6 @@ private:
     QString sessionIdForItem(QTreeWidgetItem* item) const;
 
     QTreeWidget* m_treeWidget;
+    QLineEdit* m_quickConnectEdit = nullptr;
     QList<Session> m_sessions;
 };

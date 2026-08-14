@@ -580,7 +580,10 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
 
     m_statsTimer = new QTimer(this);
     connect(m_statsTimer, &QTimer::timeout, this, &SshConnection::startStats);
-    m_statsTimer->start(8000);
+    // Stats are lightweight and should feel live in the status bar. Keep a
+    // short interval without polling aggressively while a previous probe is
+    // still running (startStats guards against overlapping channels).
+    m_statsTimer->start(3000);
     QTimer::singleShot(500, this, &SshConnection::startStats);
 
     if (m_keepAliveSeconds > 0) {
