@@ -7,6 +7,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSocketNotifier>
+#include <QTimer>
 #include <cstring>
 #include <cstdlib>
 #include <QSettings>
@@ -474,7 +475,9 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
 
     int rc = retry([this]() { return libssh2_session_handshake(m_session, m_sock); });
     if (rc != 0) {
-        emit connectionFailed(QString("SSH handshake failed: %1").arg(rc));
+        char* errmsg = nullptr;
+        libssh2_session_last_error(m_session, &errmsg, nullptr, 0);
+        emit connectionFailed(QString("SSH handshake failed: %1 (%2)").arg(rc).arg(errmsg ? errmsg : "?"));
         disconnectFromHost();
         return;
     }
@@ -692,6 +695,17 @@ void SshConnection::onSocketActivity() {
         t->poll();
     }
     armNotifiers();
+
+    // libssh2 can buffer data internally and return LIBSSH2_ERROR_EAGAIN even
+    // though there is nothing pending on the OS socket (block_directions == 0).
+    // In that case no socket notifier will ever fire, so the non-blocking state
+    // machines (stats, tunnels) would stall forever. Kick them again on the next
+    // event-loop turn so buffered data is processed.
+    if (m_connected && m_session &&
+        libssh2_session_block_directions(m_session) == 0 &&
+        m_statsState != StatsState::Idle) {
+        QTimer::singleShot(0, this, &SshConnection::onSocketActivity);
+    }
 }
 
 void SshConnection::armNotifiers() {

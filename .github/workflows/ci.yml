@@ -21,39 +21,18 @@ jobs:
       - name: Check formatting
         run: cmake -B build -G Ninja && cmake --build build --target format-check
 
-  build-linux:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake ninja-build \
-            qt6-base-dev libqt6network6 \
-            libssh2-1-dev
-
-      - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        run: cmake --build build
-
-      - name: Run tests
-        run: ctest --test-dir build --output-on-failure
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: banchoxterm-linux-x64
-          path: build/banchoxterm
-
   build-windows:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: windows-latest
+    strategy:
+      matrix:
+        arch:
+          - name: x64
+            qt_arch: win64_msvc2022_64
+            cmake_arch: x64
+          - name: arm64
+            qt_arch: win64_msvc2022_arm64
+            cmake_arch: arm64
 
     steps:
       - uses: actions/checkout@v4
@@ -64,13 +43,11 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.7.*'
-          arch: 'win64_msvc2022_64'
+          arch: ${{ matrix.arch.qt_arch }}
           cache: true
 
       - name: Configure
-        run: |
-          $ver = if ($env:GITHUB_REF_NAME -match '^v') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.1.0' }
-          cmake -B build -A x64 -DBANCHO_ENABLE_VNC=ON -DBANCHO_VERSION=$ver
+        run: cmake -B build -A ${{ matrix.arch.cmake_arch }} -DBANCHO_ENABLE_VNC=ON
 
       - name: Build
         run: cmake --build build --config Release
@@ -95,30 +72,31 @@ jobs:
       - name: Build NSIS installer
         run: |
           $dist = (Resolve-Path "pkg\banchoxterm").Path
-          $ver = if ($env:GITHUB_REF_NAME -match '^v') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.1.0' }
-          makensis -DVERSION="$ver" -DDIST_DIR="$dist" packaging\windows\installer.nsi
+          $nsh = Join-Path (Resolve-Path "build") "version.nsh"
+          makensis -DVERSION_NSH="$nsh" -DDIST_DIR="$dist" packaging\windows\installer.nsi
+          Copy-Item BanchoXterm-Setup.exe BanchoXterm-Setup-${{ matrix.arch.name }}.exe
 
       - name: Create portable ZIP
         run: |
           # The portable edition stores settings next to the exe (portable.ini marker).
           New-Item -ItemType File -Path pkg\banchoxterm\portable.ini -Force
-          Compress-Archive -Path "$env:GITHUB_WORKSPACE\pkg\banchoxterm\*" -DestinationPath "$env:GITHUB_WORKSPACE\BanchoXterm-windows-x64.zip"
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\pkg\banchoxterm\*" -DestinationPath "$env:GITHUB_WORKSPACE\BanchoXterm-windows-${{ matrix.arch.name }}.zip"
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: banchoxterm-windows-installer
-          path: BanchoXterm-Setup.exe
+          name: banchoxterm-windows-${{ matrix.arch.name }}-installer
+          path: BanchoXterm-Setup-${{ matrix.arch.name }}.exe
 
       - name: Upload portable ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: banchoxterm-windows-portable
-          path: BanchoXterm-windows-x64.zip
+          name: banchoxterm-windows-${{ matrix.arch.name }}-portable
+          path: BanchoXterm-windows-${{ matrix.arch.name }}.zip
 
   publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-linux, build-windows]
+    needs: [build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -133,6 +111,7 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            artifacts/banchoxterm
-            artifacts/BanchoXterm-Setup.exe
+            artifacts/BanchoXterm-Setup-x64.exe
+            artifacts/BanchoXterm-Setup-arm64.exe
             artifacts/BanchoXterm-windows-x64.zip
+            artifacts/BanchoXterm-windows-arm64.zip

@@ -19,7 +19,7 @@
 #include <QDateTime>
 
 #ifndef BANCHO_VERSION
-#define BANCHO_VERSION "0.1.0"
+#define BANCHO_VERSION "1.0.0"
 #endif
 
 namespace {

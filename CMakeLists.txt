@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(banchoxterm VERSION 0.1.0 LANGUAGES CXX)
+project(banchoxterm VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -85,8 +85,16 @@ add_executable(banchoxterm ${SOURCES})
 
 target_include_directories(banchoxterm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-set(BANCHO_VERSION "${PROJECT_VERSION}" CACHE STRING "App version string (passed from CI for tagged builds)")
+set(BANCHO_VERSION "${PROJECT_VERSION}")
 target_compile_definitions(banchoxterm PRIVATE BANCHO_VERSION="${BANCHO_VERSION}")
+
+# Generate the version file consumed by the NSIS installer so the installer,
+# the About dialog and the updater all derive the version from project(VERSION).
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/version.nsh.in
+    ${CMAKE_CURRENT_BINARY_DIR}/version.nsh
+    @ONLY
+)
 
 target_link_libraries(banchoxterm
     PRIVATE
