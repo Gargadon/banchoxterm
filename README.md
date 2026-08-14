@@ -45,9 +45,9 @@ git submodule update --init --recursive
 - Qt 6.6+ (Core, Widgets, Gui, Network, Test, LinguistTools)
 - [libssh2](https://www.libssh2.org) — fetched automatically by CMake (FetchContent)
 
-> QTermWidget is handled per-platform: on **Linux** it is fetched from upstream
-> via FetchContent; on **Windows** it is compiled from the vendored
-> `third_party/qtermwidget` submodule.
+> QTermWidget is compiled directly from the vendored `third_party/qtermwidget`
+> submodule on every platform (same fork, same emulator code on Linux and
+> Windows), instead of relying on a distro/system package.
 
 ### Linux
 
@@ -87,8 +87,9 @@ cmake -B build -G Ninja
 cmake --build build
 ```
 
-The build produces `banchoxterm.exe` plus `banchoxterm-term.exe` (the GPL
-terminal host that embeds QTermWidget, launched by the main app over IPC).
+The build produces a single `banchoxterm` executable (QTermWidget is linked
+directly in-process on every platform; on Windows the vendored fork runs
+without KPty, so local shells are bridged through ConPTY).
 
 ## Limitations
 
@@ -118,4 +119,5 @@ terminal host that embeds QTermWidget, launched by the main app over IPC).
 
 ## License
 
-Released under the [MIT License](LICENSE). See [third-party-licenses.txt](third-party-licenses.txt) for the licenses of bundled/third-party components.
+Released under the [GNU General Public License v2 or later](LICENSE) (GPL-2.0-or-later).
+See [third-party-licenses.txt](third-party-licenses.txt) for the licenses of bundled/third-party components.

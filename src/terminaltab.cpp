@@ -1,12 +1,7 @@
 #include "terminaltab.h"
 #include "sshconnection.h"
 #include "keyring.h"
-#ifndef Q_OS_WIN
 #include <qtermwidget.h>
-#endif
-#ifdef Q_OS_WIN
-#include "terminalhostclient.h"
-#endif
 #include <QVBoxLayout>
 #include <QLabel>
 #include <QFont>
@@ -34,10 +29,6 @@
 
 #ifdef Q_OS_WIN
 #include "conpty.h"
-#include <io.h>
-#else
-#include <unistd.h>
-#include <fcntl.h>
 #endif
 
 #ifdef BANCHO_HAVE_RDP_AX
@@ -76,7 +67,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         } else
 #endif
 #ifdef BANCHO_HAVE_VNC
-        if (session.type == SessionType::VNC) {
+            if (session.type == SessionType::VNC) {
             QTimer::singleShot(100, this, &TerminalTab::setupEmbeddedVnc);
         } else
 #endif
@@ -84,9 +75,6 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             QTimer::singleShot(100, this, &TerminalTab::launchExternalClient);
         }
     } else {
-#ifdef Q_OS_WIN
-        setupWindowsTerminal();
-#else
         m_terminal = new QTermWidget(0, this);
 
         QTimer::singleShot(0, this, &TerminalTab::updateFontFromSettings);
@@ -106,6 +94,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         m_terminal->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(m_terminal, &QWidget::customContextMenuRequested, this, &TerminalTab::showTerminalContextMenu);
         connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
+        connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
 
         layout->addWidget(m_terminal);
 
@@ -116,20 +105,19 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             setupSshTerminal();
         } else if (m_session.type == SessionType::Telnet) {
 #ifdef Q_OS_WIN
-            m_terminal->setShellProgram("telnet");
+            // Windows has no native PTY for telnet; run it under ConPTY.
+            setupWindowsConPty("telnet", {m_session.host, QString::number(m_session.port)});
 #else
             m_terminal->setShellProgram("/usr/bin/telnet");
-#endif
             QStringList args;
             args << m_session.host << QString::number(m_session.port);
             m_terminal->setArgs(args);
             m_terminal->startShellProgram();
+#endif
         } else if (m_session.type == SessionType::Serial) {
 #ifdef Q_OS_WIN
-            m_terminal->setShellProgram("cmd.exe");
-            QStringList args;
-            args << "/c" << "echo" << tr("Serial connections are not supported on Windows.");
-            m_terminal->setArgs(args);
+            feedTerminalData(tr("Serial connections are not supported on Windows.\r\n").toUtf8());
+            m_isActive = false;
 #else
             QString tool = m_session.serialCmd;
             if (tool.isEmpty())
@@ -146,26 +134,11 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                 args << "-D" << m_session.serialPort << "-b" << QString::number(m_session.baudRate);
             }
             m_terminal->setArgs(args);
-#endif
             m_terminal->startShellProgram();
+#endif
         } else {
-            QString shell = m_session.shellPath;
-            if (shell.isEmpty()) {
-#ifdef Q_OS_WIN
-                shell = qEnvironmentVariable("COMSPEC");
-                if (shell.isEmpty())
-                    shell = "cmd.exe";
-#else
-                shell = qgetenv("SHELL");
-                if (shell.isEmpty()) {
-                    shell = "/bin/bash";
-                }
-#endif
-            }
-            m_terminal->setShellProgram(shell);
-            m_terminal->startShellProgram();
+            setupLocalTerminal();
         }
-#endif
     }
 
     // Construir la barra de búsqueda (Ctrl+F)
@@ -182,14 +155,19 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
     searchLabel->setStyleSheet("color: #a9b1d6; font-weight: bold;");
 
     m_searchEdit = new QLineEdit(m_searchFrame);
-    m_searchEdit->setStyleSheet("QLineEdit { background-color: #16161e; color: #c0caf5; border: 1px solid #414868; padding: 4px; border-radius: 4px; }");
+    m_searchEdit->setStyleSheet("QLineEdit { background-color: #16161e; color: #c0caf5; border: 1px solid #414868; "
+                                "padding: 4px; border-radius: 4px; }");
     m_searchEdit->setPlaceholderText(tr("Find text..."));
 
     m_btnPrev = new QPushButton(tr("Previous"), m_searchFrame);
-    m_btnPrev->setStyleSheet("QPushButton { background-color: #24283b; color: #a9b1d6; border: 1px solid #414868; padding: 4px 8px; border-radius: 4px; } QPushButton:hover { background-color: #414868; }");
+    m_btnPrev->setStyleSheet(
+        "QPushButton { background-color: #24283b; color: #a9b1d6; border: 1px solid #414868; padding: 4px 8px; "
+        "border-radius: 4px; } QPushButton:hover { background-color: #414868; }");
 
     m_btnNext = new QPushButton(tr("Next"), m_searchFrame);
-    m_btnNext->setStyleSheet("QPushButton { background-color: #24283b; color: #a9b1d6; border: 1px solid #414868; padding: 4px 8px; border-radius: 4px; } QPushButton:hover { background-color: #414868; }");
+    m_btnNext->setStyleSheet(
+        "QPushButton { background-color: #24283b; color: #a9b1d6; border: 1px solid #414868; padding: 4px 8px; "
+        "border-radius: 4px; } QPushButton:hover { background-color: #414868; }");
 
     m_caseSensitiveCheck = new QCheckBox(tr("Case Sensitive"), m_searchFrame);
     m_caseSensitiveCheck->setStyleSheet("QCheckBox { color: #a9b1d6; }");
@@ -214,9 +192,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 
     // Atajos de teclado utilizando QShortcut para interceptar eventos de forma limpia
     auto* searchShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_F), this);
-    connect(searchShortcut, &QShortcut::activated, this, [this]() {
-        doToggleSearchBar();
-    });
+    connect(searchShortcut, &QShortcut::activated, this, [this]() { doToggleSearchBar(); });
 
     auto* closeSearchShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
     connect(closeSearchShortcut, &QShortcut::activated, this, [this]() {
@@ -230,11 +206,6 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 
 TerminalTab::~TerminalTab() {
     closeExternalProcess();
-
-    if (m_flushTimer) {
-        m_flushTimer->stop();
-    }
-    m_writeBuffer.clear();
 
     if (m_logFile) {
         m_logFile->close();
@@ -289,16 +260,6 @@ void TerminalTab::resizeEvent(QResizeEvent* event) {
 }
 
 void TerminalTab::syncTerminalSize() {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        // The term host owns the emulator; pixel size is applied natively via
-        // MoveWindow() and the host reports the resulting rows/cols back over
-        // IPC (see onHostSizeChanged()).
-        m_terminalHost->repositionChild();
-        return;
-    }
-#endif
-#ifndef Q_OS_WIN
     if (!m_terminal)
         return;
 
@@ -308,7 +269,6 @@ void TerminalTab::syncTerminalSize() {
         return;
 
     applyTerminalSize(rows, cols);
-#endif
 }
 
 void TerminalTab::applyTerminalSize(int rows, int cols) {
@@ -328,11 +288,10 @@ void TerminalTab::applyTerminalSize(int rows, int cols) {
         m_conpty = new ConPty();
         if (!m_conpty->start(m_pendingShell, {}, cols, rows)) {
             DWORD err = m_conpty->startError();
-            feedTerminalData(
-                tr("\r\n[Failed to start '%1' (error 0x%2)]\r\n")
-                    .arg(m_pendingShell)
-                    .arg(err, 8, 16, QChar('0'))
-                    .toUtf8());
+            feedTerminalData(tr("\r\n[Failed to start '%1' (error 0x%2)]\r\n")
+                                 .arg(m_pendingShell)
+                                 .arg(err, 8, 16, QChar('0'))
+                                 .toUtf8());
             m_isActive = false;
             emit titleChanged(tr("[Closed] %1").arg(m_session.name));
             return;
@@ -342,90 +301,24 @@ void TerminalTab::applyTerminalSize(int rows, int cols) {
 #endif
 }
 
-void TerminalTab::onHostSizeChanged(int rows, int cols) {
-    applyTerminalSize(rows, cols);
-}
-
 #ifdef Q_OS_WIN
-void TerminalTab::setupWindowsTerminal() {
-    // The terminal emulator runs in the separate GPL process (banchoxterm-term)
-    // and is embedded here; ConPTY/SSH stay in this (MIT) process.
-    m_terminalHost = new TerminalHostClient(this);
-    layout()->addWidget(m_terminalHost->widget());
+void TerminalTab::setupWindowsConPty(const QString& program, const QStringList& args) {
+    // The vendored QTermWidget fork has no PTY support on Windows, so it runs
+    // in "external" mode: keystrokes come out via sendData() and remote/conpty
+    // output is fed in via feedData(). ConPTY provides the actual terminal.
+    m_terminal->startExternal();
 
-    QTimer::singleShot(0, this, &TerminalTab::updateFontFromSettings);
-
-    connect(m_terminalHost, &TerminalHostClient::inputReceived, this, [this](const QByteArray& data) {
-        if (m_connection && m_session.type == SessionType::SSH) {
-            QMetaObject::invokeMethod(m_connection, "sendToShell", Qt::QueuedConnection,
-                                      Q_ARG(QByteArray, data));
-        } else if (m_conpty) {
-            m_conpty->write(data);
-        }
-    });
-    connect(m_terminalHost, &TerminalHostClient::sizeChanged, this, &TerminalTab::onHostSizeChanged);
-    connect(m_terminalHost, &TerminalHostClient::titleChanged, this, [this](const QString& title) {
-        emit titleChanged(title);
-    });
-    connect(m_terminalHost, &TerminalHostClient::cwdChanged, this, &TerminalTab::onRemoteDirChanged);
-    connect(m_terminalHost, &TerminalHostClient::finished, this, &TerminalTab::onTerminalFinished);
-    connect(m_terminalHost, &TerminalHostClient::contextMenuRequested, this, &TerminalTab::showTerminalContextMenu);
-    connect(m_terminalHost, &TerminalHostClient::closeRequested, this, &TerminalTab::closeRequested);
-
-    m_terminalHost->setHistorySize(m_session.scrollback > 0 ? m_session.scrollback : 5000);
-
-    if (m_session.type == SessionType::SSH) {
-        m_connection = new SshConnection();
-        m_connectionThread = new QThread(this);
-        m_connection->moveToThread(m_connectionThread);
-        m_connectionThread->start();
-
-        connect(m_connection, &SshConnection::shellDataReceived, this, [this](const QByteArray& data) {
-            if (m_terminalHost)
-                m_terminalHost->feedData(data);
-            logData(data);
-        });
-        connect(m_connection, &SshConnection::shellClosed, this, [this]() {
-            m_isActive = false;
-            if (m_terminalHost)
-                m_terminalHost->feedData(tr("\r\n[Connection closed]\r\n").toUtf8());
-            emit titleChanged(tr("[Closed] %1").arg(m_session.name));
-            maybeScheduleReconnect();
-        });
-        connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
-            if (m_terminalHost)
-                m_terminalHost->feedData(tr("\r\n[Connection failed: %1]\r\n").arg(error).toUtf8());
-            m_isActive = false;
-            emit titleChanged(tr("[Closed] %1").arg(m_session.name));
-            maybeScheduleReconnect();
-        });
-
-        if (m_session.x11Forwarding) {
-            QMetaObject::invokeMethod(m_connection, "setX11Forwarding", Qt::QueuedConnection, Q_ARG(bool, true));
-        }
-        applySshOptions();
-    } else if (m_session.type == SessionType::Telnet) {
-        m_conpty = new ConPty();
-        m_conpty->start("telnet", {m_session.host, QString::number(m_session.port)}, 80, 24);
-        m_conptyStarted = true;
-        startConPtyPolling();
-    } else if (m_session.type == SessionType::Serial) {
-        feedTerminalData(tr("Serial connections are not supported on Windows.\r\n").toUtf8());
+    m_conpty = new ConPty();
+    if (!m_conpty->start(program, args, 80, 24)) {
+        DWORD err = m_conpty->startError();
+        feedTerminalData(
+            tr("\r\n[Failed to start '%1' (error 0x%2)]\r\n").arg(program).arg(err, 8, 16, QChar('0')).toUtf8());
         m_isActive = false;
-    } else {
-        QString shell = m_session.shellPath;
-        // Ignore POSIX-style paths saved from Linux (e.g. /bin/bash) on Windows.
-        if (shell.isEmpty() || shell.startsWith('/')) {
-            shell = qEnvironmentVariable("COMSPEC");
-            if (shell.isEmpty())
-                shell = "cmd.exe";
-        }
-        if (shell.isEmpty())
-            shell = "cmd.exe";
-
-        // Defer ConPTY start until the embedded host reports its real size.
-        m_pendingShell = shell;
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+        return;
     }
+    m_conptyStarted = true;
+    startConPtyPolling();
 }
 
 void TerminalTab::startConPtyPolling() {
@@ -451,54 +344,69 @@ void TerminalTab::pollConPtyOutput() {
         DWORD exitCode = m_conpty->exitCode();
         m_conptyPollTimer->stop();
         m_isActive = false;
-        feedTerminalData(
-            tr("\r\n[Process exited with code %1]\r\n").arg(exitCode).toUtf8());
+        feedTerminalData(tr("\r\n[Process exited with code %1]\r\n").arg(exitCode).toUtf8());
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     }
 }
 
 #endif
 
-#ifndef Q_OS_WIN
-void TerminalTab::setupSshTerminal() {
-    m_terminal->startTerminalTeletype();
-
-    // Make the pty slave fd non-blocking so a burst of remote output (btop,
-    // git progress, etc.) never blocks the GUI thread. The emulator drains the
-    // same pty on this thread, so a blocking write would deadlock it.
-    int fd = m_terminal->getPtySlaveFd();
-    if (fd >= 0) {
-        int flags = fcntl(fd, F_GETFL, 0);
-        fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+void TerminalTab::setupLocalTerminal() {
+#ifdef Q_OS_WIN
+    // Ignore POSIX-style paths saved from Linux (e.g. /bin/bash) on Windows.
+    QString shell = m_session.shellPath;
+    if (shell.isEmpty() || shell.startsWith('/')) {
+        shell = qEnvironmentVariable("COMSPEC");
+        if (shell.isEmpty())
+            shell = "cmd.exe";
     }
+    if (shell.isEmpty())
+        shell = "cmd.exe";
 
-    m_flushTimer = new QTimer(this);
-    connect(m_flushTimer, &QTimer::timeout, this, &TerminalTab::flushWriteBuffer);
+    m_terminal->startExternal();
 
-    connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
+    // Defer ConPTY start until the widget reports its real size.
+    m_pendingShell = shell;
+#else
+    QString shell = m_session.shellPath;
+    if (shell.isEmpty()) {
+        shell = qgetenv("SHELL");
+        if (shell.isEmpty()) {
+            shell = "/bin/bash";
+        }
+    }
+    m_terminal->setShellProgram(shell);
+    m_terminal->startShellProgram();
+#endif
+}
+
+void TerminalTab::setupSshTerminal() {
+    // No local PTY needed: libssh2 owns the remote pty. Run the emulator in
+    // external mode and bridge bytes with the SSH connection.
+    m_terminal->startExternal();
 
     m_connection = new SshConnection();
     m_connectionThread = new QThread(this);
     m_connection->moveToThread(m_connectionThread);
     m_connectionThread->start();
 
-    connect(m_connection, &SshConnection::shellDataReceived, this, &TerminalTab::onShellDataReceived);
-        connect(m_connection, &SshConnection::shellClosed, this, &TerminalTab::onShellClosed);
-        connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
-            if (m_terminal) {
-                QString text = tr("\r\n[Connection failed: %1]\r\n").arg(error);
-                int fd = m_terminal->getPtySlaveFd();
-                if (fd >= 0) {
-                    ::write(fd, text.toUtf8().constData(), static_cast<size_t>(text.size()));
-                }
-            }
-            m_isActive = false;
-            emit titleChanged(tr("[Closed] %1").arg(m_session.name));
-            maybeScheduleReconnect();
-        });
+    connect(m_connection, &SshConnection::shellDataReceived, this, [this](const QByteArray& data) {
+        feedTerminalData(data);
+        logData(data);
+    });
+    connect(m_connection, &SshConnection::shellClosed, this, [this]() {
+        m_isActive = false;
+        feedTerminalData(tr("\r\n[Connection closed]\r\n").toUtf8());
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+        maybeScheduleReconnect();
+    });
+    connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
+        feedTerminalData(tr("\r\n[Connection failed: %1]\r\n").arg(error).toUtf8());
+        m_isActive = false;
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+        maybeScheduleReconnect();
+    });
 
-    // The connection itself is triggered by SftpSidebar::startSession(), which
-    // shares this same SshConnection with the terminal.
     if (m_session.x11Forwarding) {
         QMetaObject::invokeMethod(m_connection, "setX11Forwarding", Qt::QueuedConnection, Q_ARG(bool, true));
     }
@@ -506,53 +414,16 @@ void TerminalTab::setupSshTerminal() {
 }
 
 void TerminalTab::onSendData(const char* data, int size) {
-    if (m_connection) {
+    if (m_connection && m_session.type == SessionType::SSH) {
         QMetaObject::invokeMethod(m_connection, "sendToShell", Qt::QueuedConnection,
                                   Q_ARG(QByteArray, QByteArray(data, size)));
     }
-}
-
-void TerminalTab::onShellDataReceived(const QByteArray& data) {
-    if (!m_terminal)
-        return;
-    m_writeBuffer.append(data);
-    logData(data);
-    flushWriteBuffer();
-    if (!m_writeBuffer.isEmpty() && m_flushTimer) {
-        m_flushTimer->start(5);
+#ifdef Q_OS_WIN
+    else if (m_conpty) {
+        m_conpty->write(QByteArray(data, size));
     }
-}
-
-void TerminalTab::flushWriteBuffer() {
-    if (m_writeBuffer.isEmpty() || !m_terminal)
-        return;
-    int fd = m_terminal->getPtySlaveFd();
-    if (fd < 0) {
-        m_writeBuffer.clear();
-        return;
-    }
-    ssize_t written = ::write(fd, m_writeBuffer.constData(), static_cast<size_t>(m_writeBuffer.size()));
-    if (written > 0) {
-        m_writeBuffer.remove(0, static_cast<int>(written));
-    }
-    if (m_writeBuffer.isEmpty() && m_flushTimer) {
-        m_flushTimer->stop();
-    }
-}
-
-void TerminalTab::onShellClosed() {
-    m_isActive = false;
-    if (m_terminal) {
-        int fd = m_terminal->getPtySlaveFd();
-        if (fd >= 0) {
-            QString text = tr("\r\n[Connection closed]\r\n");
-            ::write(fd, text.toUtf8().constData(), static_cast<size_t>(text.size()));
-        }
-    }
-    emit titleChanged(tr("[Closed] %1").arg(m_session.name));
-    maybeScheduleReconnect();
-}
 #endif
+}
 
 void TerminalTab::applySshOptions() {
     if (!m_connection)
@@ -572,13 +443,8 @@ void TerminalTab::applySshOptions() {
 }
 
 void TerminalTab::onTitleChanged() {
-#ifdef Q_OS_WIN
-    // On Windows the terminal runs in the term host process and reports the
-    // title over IPC; see setupWindowsTerminal().
-#else
     if (m_terminal)
         emit titleChanged(m_terminal->title());
-#endif
 }
 
 void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
@@ -645,16 +511,6 @@ void TerminalTab::updateFontFromSettings() {
 
     const QString colorScheme = settings.value("terminal/colorScheme", "DarkPastels").toString();
 
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        // The host applies the font/scheme and reports the corrected size back
-        // over IPC (sizeChanged -> onHostSizeChanged), which pushes it to the
-        // remote PTY / ConPTY so content matches the viewer.
-        m_terminalHost->setFont(font);
-        m_terminalHost->setColorScheme(colorScheme);
-        return;
-    }
-#else
     if (m_terminal) {
         m_terminal->setTerminalFont(font);
 
@@ -670,7 +526,6 @@ void TerminalTab::updateFontFromSettings() {
         // matches the viewer without requiring a manual window resize.
         syncTerminalSize();
     }
-#endif
 }
 
 void TerminalTab::startLogging() {
@@ -843,13 +698,11 @@ void TerminalTab::launchExternalClient() {
     if (m_session.type == SessionType::RDP) {
 #ifdef Q_OS_WIN
         program = "mstsc";
-        args << "/v:" + m_session.host + ":" + QString::number(m_session.port)
-             << "/parent:" + QString::number(winId);
+        args << "/v:" + m_session.host + ":" + QString::number(m_session.port) << "/parent:" + QString::number(winId);
 #else
         program = "xfreerdp";
         args << "/v:" + m_session.host + ":" + QString::number(m_session.port)
-             << "/parent-window:" + QString::number(winId)
-             << "/cert:ignore"
+             << "/parent-window:" + QString::number(winId) << "/cert:ignore"
              << "/dynamic-resolution"
              << "+decoration";
         if (!m_session.user.isEmpty()) {
@@ -858,8 +711,7 @@ void TerminalTab::launchExternalClient() {
 #endif
     } else if (m_session.type == SessionType::VNC) {
         program = "vncviewer";
-        args << m_session.host + "::" + QString::number(m_session.port)
-             << "-parentwindow" << QString::number(winId);
+        args << m_session.host + "::" + QString::number(m_session.port) << "-parentwindow" << QString::number(winId);
     }
 
     if (program.isEmpty())
@@ -869,15 +721,18 @@ void TerminalTab::launchExternalClient() {
     m_externalProcess->setProcessChannelMode(QProcess::ForwardedChannels);
 
     connect(m_externalProcess, &QProcess::started, this, [this]() {
-        if (m_statusLabel) m_statusLabel->hide();
-        if (m_embeddedContainer) m_embeddedContainer->show();
+        if (m_statusLabel)
+            m_statusLabel->hide();
+        if (m_embeddedContainer)
+            m_embeddedContainer->show();
     });
 
     connect(m_externalProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int exitCode, QProcess::ExitStatus) {
                 Q_UNUSED(exitCode);
                 m_isActive = false;
-                if (m_embeddedContainer) m_embeddedContainer->hide();
+                if (m_embeddedContainer)
+                    m_embeddedContainer->hide();
                 if (m_statusLabel) {
                     m_statusLabel->show();
                     m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
@@ -887,7 +742,8 @@ void TerminalTab::launchExternalClient() {
 
     connect(m_externalProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         Q_UNUSED(error);
-        if (m_embeddedContainer) m_embeddedContainer->hide();
+        if (m_embeddedContainer)
+            m_embeddedContainer->hide();
         if (m_statusLabel) {
             m_statusLabel->show();
             m_statusLabel->setText(tr("Failed to launch embedded client.\n\n") +
@@ -908,7 +764,6 @@ void TerminalTab::closeExternalProcess() {
         }
     }
 }
-
 
 void TerminalTab::showSearchFrame() {
     if (m_searchFrame) {
@@ -961,133 +816,56 @@ void TerminalTab::clearTerminal() {
     doClear();
 }
 
-// Backend-agnostic dispatch: on Windows these route to the embedded term host
-// process; elsewhere they operate on the in-process QTermWidget.
-
 QWidget* TerminalTab::terminalView() const {
-#ifdef Q_OS_WIN
-    if (m_terminalHost)
-        return m_terminalHost->widget();
-    return nullptr;
-#else
     return m_terminal;
-#endif
 }
 
 bool TerminalTab::hasSelection() const {
-#ifdef Q_OS_WIN
-    if (m_terminalHost)
-        return m_terminalHost->hasSelection();
-    return false;
-#else
     return m_terminal && !m_terminal->selectedText().isEmpty();
-#endif
 }
 
 void TerminalTab::feedTerminalData(const QByteArray& data) {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->feedData(data);
-        return;
-    }
-#else
-    if (m_terminal)
+    if (m_terminal) {
         m_terminal->feedData(data);
-#endif
+    }
 }
 
 void TerminalTab::doSendText(const QString& text) {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->sendText(text);
-        return;
-    }
-#else
     if (m_terminal)
         m_terminal->sendText(text);
-#endif
 }
 
 void TerminalTab::doToggleSearchBar() {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->toggleSearchBar();
-        return;
-    }
-#else
     if (m_terminal)
         m_terminal->toggleShowSearchBar();
-#endif
 }
 
 void TerminalTab::doFocusTerminal() {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->requestFocus();
-        return;
-    }
-#else
     if (m_terminal)
         m_terminal->setFocus();
-#endif
 }
 
 void TerminalTab::doCopy() {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->copy();
-        return;
-    }
-#else
     if (m_terminal)
         m_terminal->copyClipboard();
-#endif
 }
 
 void TerminalTab::doPaste() {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->paste();
-        return;
-    }
-#else
     if (m_terminal)
         m_terminal->pasteClipboard();
-#endif
 }
 
 void TerminalTab::doClear() {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->clear();
-        return;
-    }
-#else
     if (m_terminal)
         m_terminal->clear();
-#endif
 }
 
 void TerminalTab::doZoomIn() {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->zoomIn();
-        return;
-    }
-#else
     if (m_terminal)
         m_terminal->zoomIn();
-#endif
 }
 
 void TerminalTab::doZoomOut() {
-#ifdef Q_OS_WIN
-    if (m_terminalHost) {
-        m_terminalHost->zoomOut();
-        return;
-    }
-#else
     if (m_terminal)
         m_terminal->zoomOut();
-#endif
 }

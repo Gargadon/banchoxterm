@@ -11,7 +11,6 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#endif
 
 #include <QString>
 #include <QStringList>
@@ -49,3 +48,4 @@ private:
     HANDLE m_thread = nullptr;
     DWORD m_startError = 0;
 };
+#endif

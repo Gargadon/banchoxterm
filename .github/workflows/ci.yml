@@ -82,14 +82,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path pkg\banchoxterm -Force
           Copy-Item build\Release\banchoxterm.exe pkg\banchoxterm\
-          Copy-Item build\Release\banchoxterm-term.exe pkg\banchoxterm\
           Copy-Item build\_deps\libssh2-build\src\Release\libssh2.dll pkg\banchoxterm\ -ErrorAction SilentlyContinue
           Copy-Item build\_deps\libssh2-build\src\libssh2.dll pkg\banchoxterm\ -ErrorAction SilentlyContinue
           Copy-Item -Path "third_party\qtermwidget\lib\color-schemes" -Destination "pkg\banchoxterm\" -Recurse -Force
           Copy-Item -Path "third_party\qtermwidget\lib\kb-layouts" -Destination "pkg\banchoxterm\" -Recurse -Force
           Copy-Item -Path "third_party\qtermwidget\lib\translations" -Destination "pkg\banchoxterm\" -Recurse -Force
           windeployqt --release --compiler-runtime pkg\banchoxterm\banchoxterm.exe
-          windeployqt --release --compiler-runtime pkg\banchoxterm\banchoxterm-term.exe
 
       - name: Install NSIS
         run: choco install nsis -y --no-progress

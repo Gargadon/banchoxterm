@@ -15,34 +15,6 @@ find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network Test LinguistTools
 
 include(FetchContent)
 
-if(NOT WIN32)
-    # Fetch QTermWidget6 and its dependency lxqt-build-tools
-
-    FetchContent_Declare(
-        lxqt_build_tools
-        GIT_REPOSITORY https://github.com/lxqt/lxqt-build-tools.git
-        GIT_TAG        master
-    )
-    FetchContent_GetProperties(lxqt_build_tools)
-    if(NOT lxqt_build_tools_POPULATED)
-        FetchContent_Populate(lxqt_build_tools)
-        set(SAVED_CMAKE_PROJECT_NAME ${CMAKE_PROJECT_NAME})
-        set(CMAKE_PROJECT_NAME "lxqt2-build-tools")
-        add_subdirectory(${lxqt_build_tools_SOURCE_DIR} ${lxqt_build_tools_BINARY_DIR})
-        set(CMAKE_PROJECT_NAME ${SAVED_CMAKE_PROJECT_NAME})
-    endif()
-    set(lxqt2-build-tools_DIR "${CMAKE_BINARY_DIR}")
-
-    # Use the vendored QTermWidget fork (git submodule) instead of upstream
-    # master: the fork keeps the app-dir color-schemes fallback enabled on
-    # Linux (upstream guards it with #ifdef Q_OS_MAC), so the color scheme
-    # list in the configuration dialog is populated.
-    add_subdirectory(third_party/qtermwidget)
-    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib/color-schemes" DESTINATION "${CMAKE_BINARY_DIR}")
-    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib/kb-layouts" DESTINATION "${CMAKE_BINARY_DIR}")
-    file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib/translations" DESTINATION "${CMAKE_BINARY_DIR}")
-endif()
-
 # Fetch libssh2
 if(WIN32)
     set(CRYPTO_BACKEND "WinCNG" CACHE STRING "" FORCE)
@@ -58,6 +30,9 @@ FetchContent_MakeAvailable(libssh2)
 
 # Include directories (target-scoped so third-party targets don't see src/)
 # include_directories removed: use target_include_directories below.
+
+# Optional: embedded VNC client via libvncclient (libvncserver project).
+option(BANCHO_ENABLE_VNC "Enable the embedded VNC client" ON)
 
 # Source files
 set(SOURCES
@@ -122,78 +97,90 @@ target_link_libraries(banchoxterm
         libssh2
 )
 
+# Vendored QTermWidget fork (Gargadon/qtermwidget), built directly from the
+# submodule on every platform so Linux and Windows run the exact same
+# emulator code.
+#
+# The fork is used instead of upstream lxqt/qtermwidget because it adds
+# startExternal()/feedData() (used to bridge SSH and ConPTY bytes) and keeps
+# the app-dir color-schemes fallback enabled on Linux (upstream guards it
+# with #ifdef Q_OS_MAC).
+#
+# The whole app is GPL-2.0-or-later, so QTermWidget (also GPL-2.0-or-later)
+# is linked directly into the application binary. On Windows the emulator has
+# no PTY: local shells run through ConPTY (conpty.cpp) which feeds the
+# emulator via QTermWidget::startExternal()/feedData(). On Unix KPty backs
+# the local shells via startShellProgram().
+set(QTQ_LIB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib)
+
+set(QTQ_SOURCES
+    ${QTQ_LIB}/BlockArray.cpp
+    ${QTQ_LIB}/ColorScheme.cpp
+    ${QTQ_LIB}/Emulation.cpp
+    ${QTQ_LIB}/Filter.cpp
+    ${QTQ_LIB}/History.cpp
+    ${QTQ_LIB}/HistorySearch.cpp
+    ${QTQ_LIB}/KeyboardTranslator.cpp
+    ${QTQ_LIB}/konsole_wcwidth.cpp
+    ${QTQ_LIB}/Pty.cpp
+    ${QTQ_LIB}/qtermwidget.cpp
+    ${QTQ_LIB}/Screen.cpp
+    ${QTQ_LIB}/ScreenWindow.cpp
+    ${QTQ_LIB}/SearchBar.cpp
+    ${QTQ_LIB}/SearchBar.ui
+    ${QTQ_LIB}/Session.cpp
+    ${QTQ_LIB}/ShellCommand.cpp
+    ${QTQ_LIB}/TerminalCharacterDecoder.cpp
+    ${QTQ_LIB}/TerminalDisplay.cpp
+    ${QTQ_LIB}/tools.cpp
+    ${QTQ_LIB}/Vt102Emulation.cpp
+)
+
 if(NOT WIN32)
-    target_link_libraries(banchoxterm PRIVATE qtermwidget6)
+    # KPty (vendored in the fork) provides the pseudo-terminal used by
+    # startShellProgram() for local/telnet/serial sessions on Unix. It is not
+    # part of the Windows build: Pty.cpp is a stub there and local shells use
+    # ConPTY.
+    list(APPEND QTQ_SOURCES
+        ${QTQ_LIB}/kprocess.cpp
+        ${QTQ_LIB}/kpty.cpp
+        ${QTQ_LIB}/kptydevice.cpp
+        ${QTQ_LIB}/kptyprocess.cpp
+    )
+endif()
+
+add_library(qtermwidget6 STATIC ${QTQ_SOURCES})
+target_include_directories(qtermwidget6 PUBLIC ${QTQ_LIB})
+target_link_libraries(qtermwidget6 PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets)
+target_compile_definitions(qtermwidget6 PRIVATE
+    KB_LAYOUT_DIR="${QTQ_LIB}/kb-layouts"
+    COLORSCHEMES_DIR="${QTQ_LIB}/color-schemes"
+    TRANSLATIONS_DIR="${QTQ_LIB}/translations"
+)
+
+if(NOT WIN32)
+    target_compile_definitions(qtermwidget6 PRIVATE HAVE_POSIX_OPENPT HAVE_SYS_TIME_H)
 else()
+    target_compile_definitions(qtermwidget6 PRIVATE _CRT_NONSTDC_NO_DEPRECATE)
+endif()
+
+target_link_libraries(banchoxterm PRIVATE qtermwidget6)
+
+# Ship the emulator data folders next to the app binary on every platform so
+# the color-schemes list and keyboard layouts are available at runtime.
+file(COPY "${QTQ_LIB}/color-schemes" DESTINATION "${CMAKE_BINARY_DIR}")
+file(COPY "${QTQ_LIB}/kb-layouts" DESTINATION "${CMAKE_BINARY_DIR}")
+file(COPY "${QTQ_LIB}/translations" DESTINATION "${CMAKE_BINARY_DIR}")
+
+if(WIN32)
     target_compile_definitions(banchoxterm PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006)
     target_link_libraries(banchoxterm PRIVATE advapi32)
 endif()
 
-# Vendored QTermWidget emulator, ported to build on Windows without KPty.
-# (Unix continues to use the system/FetchContent qtermwidget6 above.)
-#
-# QTermWidget is GPLv2+, so on Windows it is ONLY linked into the separate
-# GPL process banchoxterm-term.exe. The MIT app talks to that process over
-# IPC and embeds its window; it never links QTermWidget itself.
 if(WIN32)
-    set(QTQ_LIB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib)
-    add_library(qtermwidget_win STATIC
-        ${QTQ_LIB}/BlockArray.cpp
-        ${QTQ_LIB}/ColorScheme.cpp
-        ${QTQ_LIB}/Emulation.cpp
-        ${QTQ_LIB}/Filter.cpp
-        ${QTQ_LIB}/History.cpp
-        ${QTQ_LIB}/HistorySearch.cpp
-        ${QTQ_LIB}/KeyboardTranslator.cpp
-        ${QTQ_LIB}/konsole_wcwidth.cpp
-        ${QTQ_LIB}/Pty.cpp
-        ${QTQ_LIB}/qtermwidget.cpp
-        ${QTQ_LIB}/Screen.cpp
-        ${QTQ_LIB}/ScreenWindow.cpp
-        ${QTQ_LIB}/SearchBar.cpp
-        ${QTQ_LIB}/SearchBar.ui
-        ${QTQ_LIB}/Session.cpp
-        ${QTQ_LIB}/ShellCommand.cpp
-        ${QTQ_LIB}/TerminalCharacterDecoder.cpp
-        ${QTQ_LIB}/TerminalDisplay.cpp
-        ${QTQ_LIB}/tools.cpp
-        ${QTQ_LIB}/Vt102Emulation.cpp
-    )
-    target_include_directories(qtermwidget_win PUBLIC ${QTQ_LIB})
-    target_link_libraries(qtermwidget_win PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets)
-    target_compile_definitions(qtermwidget_win PRIVATE
-        _CRT_NONSTDC_NO_DEPRECATE
-        KB_LAYOUT_DIR="${QTQ_LIB}/kb-layouts"
-        COLORSCHEMES_DIR="${QTQ_LIB}/color-schemes"
-        TRANSLATIONS_DIR="${QTQ_LIB}/translations"
-    )
-
-    # GPL terminal host process. This is the only binary that links QTermWidget.
-    add_executable(banchoxterm-term
-        src/termhost/termhost.cpp
-    )
-    target_include_directories(banchoxterm-term PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_link_libraries(banchoxterm-term PRIVATE
-        qtermwidget_win
-        Qt6::Core
-        Qt6::Gui
-        Qt6::Widgets
-        Qt6::Network
-    )
-    target_compile_definitions(banchoxterm-term PRIVATE
-        _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006
-    )
-
-    # The MIT app embeds the term host via SetParent + a local pipe.
     target_sources(banchoxterm PRIVATE
         src/conpty.cpp
         src/conpty.h
-        src/terminalhostclient.cpp
-        src/terminalhostclient.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/banchoxterm.rc
-    )
-
-    target_sources(banchoxterm-term PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/banchoxterm.rc
     )
 endif()
@@ -209,7 +196,6 @@ if(WIN32)
 endif()
 
 # Optional: embedded VNC client via libvncclient (libvncserver project).
-option(BANCHO_ENABLE_VNC "Enable the embedded VNC client" ON)
 if(BANCHO_ENABLE_VNC)
     set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
     set(WITH_LZO OFF CACHE BOOL "" FORCE)

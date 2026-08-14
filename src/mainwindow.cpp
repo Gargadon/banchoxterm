@@ -60,7 +60,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         }
     });
 
-
     // Restore window layout geometry & state
     if (settings.contains("window/geometry")) {
         restoreGeometry(settings.value("window/geometry").toByteArray());
@@ -259,7 +258,8 @@ void MainWindow::setupUi() {
     connect(m_sessionsSidebar, &SessionsSidebar::connectSession, this, &MainWindow::onConnectSession);
     connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, [this](int i) { onTabCloseRequested(m_tabWidget, i); });
     connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget, i); });
-    connect(m_tabWidget2, &QTabWidget::tabCloseRequested, this, [this](int i) { onTabCloseRequested(m_tabWidget2, i); });
+    connect(m_tabWidget2, &QTabWidget::tabCloseRequested, this,
+            [this](int i) { onTabCloseRequested(m_tabWidget2, i); });
     connect(m_tabWidget2, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget2, i); });
     connect(m_sftpSidebar, &SftpSidebar::remoteStatsUpdated, this, &MainWindow::onRemoteStatsUpdated);
 
@@ -463,7 +463,6 @@ void MainWindow::onOpenSettings() {
     }
 }
 
-
 void MainWindow::toggleMultiInputBar() {
     bool visible = !m_multiInputBar->isVisible();
     m_multiInputBar->setVisible(visible);
@@ -622,15 +621,17 @@ void MainWindow::setupMenuBar() {
 }
 
 void MainWindow::showAbout() {
-    QString content = QString("<h2>BanchoXterm</h2>"
-                              "<p><b>%1</b></p>"
-                              "<p>%2</p>"
-                              "<p style=\"font-size: 11px; color: #888;\">%3</p>"
-                              "<p style=\"font-size: 11px; color: #888;\">%4</p>")
-                      .arg(tr("Version %1").arg(QStringLiteral(BANCHO_VERSION)))
-                      .arg(tr("A multi-protocol terminal emulator and remote session manager designed for command-line rebels."))
-                      .arg(tr("Supports SSH, SFTP, Telnet, Serial, RDP, VNC, and local terminals."))
-                      .arg(tr("Copyright &copy; 2026 BanchoXterm contributors. Licensed under the MIT License."));
+    QString content =
+        QString("<h2>BanchoXterm</h2>"
+                "<p><b>%1</b></p>"
+                "<p>%2</p>"
+                "<p style=\"font-size: 11px; color: #888;\">%3</p>"
+                "<p style=\"font-size: 11px; color: #888;\">%4</p>")
+            .arg(tr("Version %1").arg(QStringLiteral(BANCHO_VERSION)))
+            .arg(tr("A multi-protocol terminal emulator and remote session manager designed for command-line rebels."))
+            .arg(tr("Supports SSH, SFTP, Telnet, Serial, RDP, VNC, and local terminals."))
+            .arg(tr("Copyright &copy; 2026 BanchoXterm contributors. Licensed under the GNU General Public License v2 "
+                    "or later (GPL-2.0-or-later)."));
 
     QMessageBox::about(this, tr("About BanchoXterm"), content);
 }

@@ -15,9 +15,7 @@
 #include <QDialogButtonBox>
 #include <QMessageBox>
 #include <QDir>
-#ifndef Q_OS_WIN
 #include <qtermwidget.h>
-#endif
 #include <QInputDialog>
 #include <QListWidget>
 #include <QStandardPaths>
@@ -81,14 +79,24 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto* colorSchemeLayout = new QHBoxLayout();
     auto* colorSchemeLabel = new QLabel(tr("Terminal Color Scheme:"), appearanceTab);
     m_colorSchemeCombo = new QComboBox(appearanceTab);
-    QStringList schemes;
-#ifndef Q_OS_WIN
-    schemes = QTermWidget::availableColorSchemes();
-#else
-    schemes = {"BlackOnLightYellow", "BlackOnRandomLight", "BlackOnWhite", "Breeze", "BreezeModified",
-               "DarkPastels", "Falcon", "GreenOnBlack", "Linux", "Nord", "Solarized", "SolarizedLight",
-               "Tango", "Ubuntu", "WhiteOnBlack"};
-#endif
+    QStringList schemes = QTermWidget::availableColorSchemes();
+    if (schemes.isEmpty()) {
+        schemes = {"BlackOnLightYellow",
+                   "BlackOnRandomLight",
+                   "BlackOnWhite",
+                   "Breeze",
+                   "BreezeModified",
+                   "DarkPastels",
+                   "Falcon",
+                   "GreenOnBlack",
+                   "Linux",
+                   "Nord",
+                   "Solarized",
+                   "SolarizedLight",
+                   "Tango",
+                   "Ubuntu",
+                   "WhiteOnBlack"};
+    }
     m_colorSchemeCombo->addItems(schemes);
     int schemeIdx = schemes.indexOf(m_colorScheme);
     if (schemeIdx != -1)
@@ -143,9 +151,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     appLayout->addWidget(logDirWidget);
 
     connect(logDirBrowseBtn, &QPushButton::clicked, this, [this]() {
-        QString dir = QFileDialog::getExistingDirectory(this, tr("Select Log Directory"),
-                                                        m_logDirEdit->text().isEmpty() ? QDir::homePath()
-                                                                                       : m_logDirEdit->text());
+        QString dir = QFileDialog::getExistingDirectory(
+            this, tr("Select Log Directory"), m_logDirEdit->text().isEmpty() ? QDir::homePath() : m_logDirEdit->text());
         if (!dir.isEmpty())
             m_logDirEdit->setText(dir);
     });
@@ -243,8 +250,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     connect(m_masterPasswordCheck, &QCheckBox::clicked, this, [this](bool checked) {
         if (checked) {
             bool ok;
-            QString pwd1 = QInputDialog::getText(this, tr("Set Master Password"),
-                                                 tr("Enter new Master Password:"), QLineEdit::Password, "", &ok);
+            QString pwd1 = QInputDialog::getText(this, tr("Set Master Password"), tr("Enter new Master Password:"),
+                                                 QLineEdit::Password, "", &ok);
             if (!ok || pwd1.isEmpty()) {
                 m_masterPasswordCheck->setChecked(false);
                 return;
@@ -258,19 +265,24 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
             }
 
             MasterPasswordManager::instance().setMasterPassword(pwd1);
-            QMessageBox::information(this, tr("Master Password Set"), tr("All future session passwords will be encrypted with your Master Password."));
+            QMessageBox::information(this, tr("Master Password Set"),
+                                     tr("All future session passwords will be encrypted with your Master Password."));
         } else {
             bool ok;
-            QString currentPwd = QInputDialog::getText(this, tr("Disable Master Password"),
-                                                       tr("Enter current Master Password:"), QLineEdit::Password, "", &ok);
+            QString currentPwd =
+                QInputDialog::getText(this, tr("Disable Master Password"), tr("Enter current Master Password:"),
+                                      QLineEdit::Password, "", &ok);
             if (!ok || currentPwd.isEmpty()) {
                 m_masterPasswordCheck->setChecked(true);
                 return;
             }
             if (MasterPasswordManager::instance().disableMasterPassword(currentPwd)) {
-                QMessageBox::information(this, tr("Master Password Disabled"), tr("Master Password protection is now disabled. Saved passwords will be stored in plain text."));
+                QMessageBox::information(
+                    this, tr("Master Password Disabled"),
+                    tr("Master Password protection is now disabled. Saved passwords will be stored in plain text."));
             } else {
-                QMessageBox::warning(this, tr("Incorrect Password"), tr("The Master Password you entered is incorrect. Protection remains enabled."));
+                QMessageBox::warning(this, tr("Incorrect Password"),
+                                     tr("The Master Password you entered is incorrect. Protection remains enabled."));
                 m_masterPasswordCheck->setChecked(true);
             }
         }

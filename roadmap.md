@@ -10,15 +10,15 @@ Ya implementado:
 - **Verificación de host key** (`known_hosts`, formato OpenSSH, diálogo de confianza)
 - **SFTP** (navegar, subir, bajar, borrar, renombrar, chmod, crear carpeta, subir carpetas, editar con auto-upload)
 - **Túneles SSH** (local, remoto, dinámico/SOCKS5)
-- **Telnet**, **Serial** (solo Linux), **terminal local** (ConPTY en Windows vía el proceso GPL separado `banchoxterm-term.exe`; QTermWidget directo en Linux)
+- **Telnet**, **Serial** (solo Linux), **terminal local** (ConPTY en Windows alimentando QTermWidget en-proceso; QTermWidget directo en Linux)
 - **RDP embebido** en Windows vía ActiveQt (`QAxWidget` + `mstscax.dll`, con fallback a `mstsc.exe`); en Linux vía `xfreerdp`
 - **VNC embebido** vía `libvncclient` (renderizador propio + entrada de teclado/ratón)
 - **Gestor de sesiones** (JSON, grupos/carpetas, importar/exportar), pestañas, multi-input
 - **Monitor remoto** (CPU/RAM/disco/uptime; Linux `/proc` + fallback PowerShell en Windows)
 - **Macros de teclado**, **búsqueda global** (Windows), **logging de sesiones**, **auto-reconexión**
 - Temas claro/oscuro, i18n (en/es/pt), master password + keyring (Windows Credential Manager / secret-tool)
-- App licencia MIT (libre de código GPL) + proceso terminal GPL `banchoxterm-term.exe`
-  separado, CI (MSVC) + instalador NSIS + ZIP portable
+- App licencia GPL-2.0-or-later (enlaza QTermWidget directamente en todas las
+  plataformas), CI (MSVC) + instalador NSIS + ZIP portable
 
 ## Prioridades
 
@@ -39,23 +39,26 @@ Ya implementado:
 
 ### P2 — Calidad y robustez
 
-- [x] **Aislamiento de QTermWidget (GPL) en proceso aparte**: el fork vendado en
-      `third_party/qtermwidget` (parches MSVC: mmap→malloc en `BlockArray`/`History`,
-      `Pty` stub multiplataforma, `wcwidth` de respaldo, `startExternal()`/`feedData()`)
-      ya NO enlaza en `banchoxterm`. Se construye como `qtermwidget_win` solo para el
-      proceso GPL `banchoxterm-term.exe`, que la app lanza y embebe por HWND
-      (`SetParent`/`MoveWindow`/`ShowWindow`). La comunicación es por named-pipe IPC
-      (`src/termipc.h`, protocolo propio MIT): Ready/HWND+cols/rows, Input,
-      SizeChanged, Title, Cwd, CopyAvailable, ContextMenu, FeedData, SetFont/Color,
-      Copy/Paste/Zoom, ToggleSearchBar, Close, etc. `banchoxterm.exe` queda libre de
-      código GPL (verificado con dumpbin: solo Qt + sistema).
-- [x] **Cablear ConPTY a QTermWidget en Windows (vía term host)**: `TerminalTab` usa
-      `TerminalHostClient` (spawn, embed, routing IPC) con `applyTerminalSize`/
-      `feedTerminalData` compartidos entre ConPTY y SSH. Color schemes en Windows:
-      lista fija en `settingsdialog` (ya no depende del path de build). Nota: la
-      búsqueda global sigue deshabilitada en Windows (QTermWidget no expone búsqueda
-      programática; se usa su barra integrada). Pendiente: verificación visual
-      interactiva del embedding (render, teclado, resize, menú contexto).
+- [x] ~~**Aislamiento de QTermWidget (GPL) en proceso aparte**~~ **REVERTIDO**: cuando
+      la app era MIT, el fork vendado en `third_party/qtermwidget` (parches MSVC:
+      mmap→malloc en `BlockArray`/`History`, `Pty` stub multiplataforma, `wcwidth`
+      de respaldo, `startExternal()`/`feedData()`) se compilaba como `qtermwidget_win`
+      solo para el proceso GPL `banchoxterm-term.exe`, que la app lanzaba y embebía
+      por HWND (`SetParent`/`MoveWindow`/`ShowWindow`) con named-pipe IPC
+      (`src/termipc.h`). Al pasar la app a GPL-2.0-or-later se eliminó todo el
+      aparato de aislamiento: `banchoxterm-term.exe`, `TerminalHostClient`,
+      `termipc.h` y `src/termhost/`. Ahora el fork se compila como `qtermwidget6`
+      (estático) y se enlaza directo en `banchoxterm` en todas las plataformas,
+      sin dependencia del `qtermwidget6` de la distro ni de `lxqt-build-tools`.
+- [x] **Cablear ConPTY a QTermWidget en Windows (en-proceso)**: `TerminalTab` usa un
+      único `QTermWidget` en todas las plataformas; en Windows arranca el emulador
+      en modo `startExternal()` y alimenta ConPTY telnet/local vía `feedData()`/
+      `sendData()` con `applyTerminalSize` compartido entre ConPTY y SSH. Color
+      schemes en Windows: `QTermWidget::availableColorSchemes()` (ya no es lista
+      fija). Nota: la búsqueda global sigue deshabilitada en Windows (QTermWidget
+      no expone búsqueda programática; se usa su barra integrada). Pendiente:
+      verificación visual interactiva del render, teclado, resize y menú contexto
+      en Windows.
 - [x] **Rendimiento de red**: `SshConnection` usa polling (`QTimer` 15 ms +
       `select()`); migrado a socket notifier event-driven (`QSocketNotifier`
       Read siempre armado + Write solo cuando `libssh2_session_block_directions`
@@ -101,7 +104,7 @@ Ya implementado:
 - [x] **Icono `.ico` para el instalador NSIS**: `packaging/windows/banchoxterm.ico`
       generado desde `icons/logo.svg` (16/24/32/48/64/128/256 px, multi-frame
       ICO), `MUI_ICON`/`MUI_UNICON` en el instalador y `banchoxterm.rc` que
-      embebe el icono en `banchoxterm.exe` y `banchoxterm-term.exe`.
+      embebe el icono en `banchoxterm.exe`.
 - [x] **Documentar las limitaciones vigentes**: sección "Limitations" del README
       ampliada (FTP solo pasivo sin progreso por byte ni carpetas, drag & drop
       SFTP solo intra-app, VNC con encodings limitados y sin mods complejos,
@@ -125,13 +128,14 @@ Ya implementado:
   (SmartScreen).
 - VNC embebido: sin soporte de mods complejos (Ctrl+tecla) y encodings limitados
   (Raw/Hextile/CopyRect; Tight/ZRLE deshabilitados al no enlazar zlib).
-- El código propio es MIT y `banchoxterm.exe` NO enlaza código GPL (solo Qt LGPLv3
-  dinámico + libssh2 BSD). QTermWidget (GPL-2.0) vive únicamente dentro del proceso
-  separado `banchoxterm-term.exe`, distribuido bajo GPL con su fuente en
-  `third_party/` (ver `third-party-licenses.txt`).
-- En Linux el binario aún enlaza QTermWidget directamente (obra combinada GPL); si
-  se quisiera hacer la app propietaria, habría que aislarlo igual que en Windows o
-  usar un widget LGPL (p. ej. VTE).
+- El código propio es GPL-2.0-or-later y enlaza QTermWidget (también GPL-2.0-or-later)
+  directamente en todas las plataformas (Qt LGPLv3 dinámico + libssh2 BSD aparte).
+  QTermWidget se distribuye con su fuente en `third_party/` (ver
+  `third-party-licenses.txt`).
+- En Windows el fork vendado se compila sin KPty (`qtermwidget6` estático), por
+  lo que las sesiones locales/telnet usan ConPTY en modo `startExternal()`/`feedData()`;
+  en Linux el mismo target compila con KPty (`kprocess.cpp`/`kpty*.cpp`) para sus
+  PTY nativos.
 
 ## Convención
 

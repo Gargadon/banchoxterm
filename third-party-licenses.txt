@@ -50,17 +50,16 @@ https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
 Source code can be obtained from:
 https://github.com/lxqt/qtermwidget
 
-On Windows, BanchoXterm does NOT link QTermWidget into the main
-application. Instead, the (GPL-2+) QTermWidget sources, as vendored and
-modified under third_party/qtermwidget, are built only into the separate
-GPL process banchoxterm-term.exe, which BanchoXterm launches and embeds
-via its native window. banchoxterm-term.exe is distributed under the
-GNU General Public License v2 or later; its complete corresponding
-source is this repository (third_party/qtermwidget contains the
-modifications on top of upstream).
+On Windows, BanchoXterm builds the (GPL-2-or-later) QTermWidget sources,
+as vendored and modified under third_party/qtermwidget, directly into the
+application binary. The whole application is distributed under the GNU
+General Public License v2 or later; its complete corresponding source is
+this repository (third_party/qtermwidget contains the modifications on top
+of upstream).
 
-On Linux, BanchoXterm links against the system QTermWidget library
-(dynamically) and must be used under the terms of its license.
+On Linux, BanchoXterm also links the vendored QTermWidget fork (built
+directly from third_party/qtermwidget) and must be used under the terms of
+its license.
 
 The modified vendored sources are available in this repository under:
 third_party/qtermwidget/

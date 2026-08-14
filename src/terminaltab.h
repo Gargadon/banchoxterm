@@ -4,7 +4,6 @@
 #include "session.h"
 
 class QTermWidget;
-class TerminalHostClient;
 class QLabel;
 class QThread;
 class QTimer;
@@ -67,14 +66,8 @@ private slots:
     void onTerminalFinished();
     void onRemoteDirChanged(const QString& dir);
     void onTitleChanged();
-    void onHostSizeChanged(int rows, int cols);
     void showTerminalContextMenu(const QPoint& pos);
-#ifndef Q_OS_WIN
-    void onShellDataReceived(const QByteArray& data);
-    void onShellClosed();
     void onSendData(const char* data, int size);
-    void flushWriteBuffer();
-#endif
     void showSearchFrame();
     void hideSearchFrame();
     void onSearchNext();
@@ -83,7 +76,8 @@ private slots:
 private:
     void launchExternalClient();
     void setupSshTerminal();
-    void setupWindowsTerminal();
+    void setupLocalTerminal();
+    void setupWindowsConPty(const QString& program, const QStringList& args);
     void applySshOptions();
     void setupWindowsRdpActiveX();
     void setupEmbeddedVnc();
@@ -107,14 +101,11 @@ private:
 
     Session m_session;
     QTermWidget* m_terminal = nullptr;
-    TerminalHostClient* m_terminalHost = nullptr;
     QLabel* m_statusLabel = nullptr;
     QWidget* m_embeddedContainer = nullptr;
     QProcess* m_externalProcess = nullptr;
     SshConnection* m_connection = nullptr;
     QThread* m_connectionThread = nullptr;
-    QByteArray m_writeBuffer;
-    QTimer* m_flushTimer = nullptr;
     QFile* m_logFile = nullptr;
     QTimer* m_reconnectTimer = nullptr;
     QAxWidget* m_rdpWidget = nullptr;
