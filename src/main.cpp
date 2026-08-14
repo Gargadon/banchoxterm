@@ -9,6 +9,7 @@
 #endif
 #include "mainwindow.h"
 #include "keyring.h"
+#include "apppaths.h"
 
 int main(int argc, char* argv[]) {
 #ifdef Q_OS_WIN
@@ -28,6 +29,8 @@ int main(int argc, char* argv[]) {
     app.setApplicationDisplayName("BanchoXterm");
     app.setOrganizationName("BanchoXterm");
     app.setWindowIcon(QIcon(":/icons/logo.svg"));
+
+    AppPaths::applyPortableSettings();
 
     QSettings settings;
     QString lang = settings.value("locale/lang", "en").toString();

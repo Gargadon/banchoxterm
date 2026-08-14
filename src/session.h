@@ -47,6 +47,17 @@ struct Session {
     int baudRate = 115200;
     QString serialCmd;
 
+    // Terminal (SSH / Local / Telnet / Serial)
+    int scrollback = 5000;
+    QString fontFamily;
+    int fontSize = 0; // 0 = inherit global settings
+
+    // SSH advanced
+    int keepAliveSeconds = 0; // 0 = disabled
+    QString cryptCipher;      // comma-separated, empty = libssh2 default
+    QString kexAlgo;          // empty = libssh2 default
+    QString macAlgo;          // empty = libssh2 default
+
     QList<TunnelConfig> tunnels;
 
     QJsonObject toJson() const;

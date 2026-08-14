@@ -51,13 +51,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(libssh2)
 
-# Include directories
-include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
+# Include directories (target-scoped so third-party targets don't see src/)
+# include_directories removed: use target_include_directories below.
 
 # Source files
 set(SOURCES
+    src/apppaths.cpp
+    src/apppaths.h
     src/conpty.cpp
     src/conpty.h
     src/keyring.cpp
@@ -89,6 +89,8 @@ set(SOURCES
     src/masterpasswordmanager.h
     src/theme.cpp
     src/theme.h
+    src/updater.cpp
+    src/updater.h
     src/vtterminalwidget.cpp
     src/vtterminalwidget.h
     resources.qrc
@@ -102,6 +104,11 @@ if(BANCHO_ENABLE_VNC)
 endif()
 
 add_executable(banchoxterm ${SOURCES})
+
+target_include_directories(banchoxterm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+set(BANCHO_VERSION "${PROJECT_VERSION}" CACHE STRING "App version string (passed from CI for tagged builds)")
+target_compile_definitions(banchoxterm PRIVATE BANCHO_VERSION="${BANCHO_VERSION}")
 
 target_link_libraries(banchoxterm
     PRIVATE
@@ -117,6 +124,73 @@ if(NOT WIN32)
 else()
     target_compile_definitions(banchoxterm PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006)
     target_link_libraries(banchoxterm PRIVATE advapi32)
+endif()
+
+# Vendored QTermWidget emulator, ported to build on Windows without KPty.
+# (Unix continues to use the system/FetchContent qtermwidget6 above.)
+#
+# QTermWidget is GPLv2+, so on Windows it is ONLY linked into the separate
+# GPL process banchoxterm-term.exe. The MIT app talks to that process over
+# IPC and embeds its window; it never links QTermWidget itself.
+if(WIN32)
+    set(QTQ_LIB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib)
+    add_library(qtermwidget_win STATIC
+        ${QTQ_LIB}/BlockArray.cpp
+        ${QTQ_LIB}/ColorScheme.cpp
+        ${QTQ_LIB}/Emulation.cpp
+        ${QTQ_LIB}/Filter.cpp
+        ${QTQ_LIB}/History.cpp
+        ${QTQ_LIB}/HistorySearch.cpp
+        ${QTQ_LIB}/KeyboardTranslator.cpp
+        ${QTQ_LIB}/konsole_wcwidth.cpp
+        ${QTQ_LIB}/Pty.cpp
+        ${QTQ_LIB}/qtermwidget.cpp
+        ${QTQ_LIB}/Screen.cpp
+        ${QTQ_LIB}/ScreenWindow.cpp
+        ${QTQ_LIB}/SearchBar.cpp
+        ${QTQ_LIB}/SearchBar.ui
+        ${QTQ_LIB}/Session.cpp
+        ${QTQ_LIB}/ShellCommand.cpp
+        ${QTQ_LIB}/TerminalCharacterDecoder.cpp
+        ${QTQ_LIB}/TerminalDisplay.cpp
+        ${QTQ_LIB}/tools.cpp
+        ${QTQ_LIB}/Vt102Emulation.cpp
+    )
+    target_include_directories(qtermwidget_win PUBLIC ${QTQ_LIB})
+    target_link_libraries(qtermwidget_win PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets)
+    target_compile_definitions(qtermwidget_win PRIVATE
+        _CRT_NONSTDC_NO_DEPRECATE
+        KB_LAYOUT_DIR="${QTQ_LIB}/kb-layouts"
+        COLORSCHEMES_DIR="${QTQ_LIB}/color-schemes"
+        TRANSLATIONS_DIR="${QTQ_LIB}/translations"
+    )
+
+    # GPL terminal host process. This is the only binary that links QTermWidget.
+    add_executable(banchoxterm-term
+        src/termhost/termhost.cpp
+    )
+    target_include_directories(banchoxterm-term PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(banchoxterm-term PRIVATE
+        qtermwidget_win
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        Qt6::Network
+    )
+    target_compile_definitions(banchoxterm-term PRIVATE
+        _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006
+    )
+
+    # The MIT app embeds the term host via SetParent + a local pipe.
+    target_sources(banchoxterm PRIVATE
+        src/terminalhostclient.cpp
+        src/terminalhostclient.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/banchoxterm.rc
+    )
+
+    target_sources(banchoxterm-term PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/windows/banchoxterm.rc
+    )
 endif()
 
 # Optional: embed RDP on Windows via the native Remote Desktop ActiveX control
@@ -207,6 +281,8 @@ enable_testing()
 
 add_executable(banchoxterm_tests
     tests/test_session.cpp
+    src/apppaths.cpp
+    src/apppaths.h
     src/session.cpp
     src/session.h
     src/masterpasswordmanager.cpp

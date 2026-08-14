@@ -12,6 +12,9 @@
 #include <QHeaderView>
 #include <QDateTime>
 #include <QDir>
+#include <QUuid>
+#include <QSet>
+#include <QAbstractItemModel>
 
 namespace {
 constexpr int kSessionIdRole = Qt::UserRole;
@@ -49,6 +52,10 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     m_treeWidget->setHeaderHidden(true);
     m_treeWidget->setRootIsDecorated(true);
     m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_treeWidget->setDragEnabled(true);
+    m_treeWidget->setAcceptDrops(true);
+    m_treeWidget->setDropIndicatorShown(true);
+    m_treeWidget->setDragDropMode(QAbstractItemView::InternalMove);
     layout->addWidget(m_treeWidget);
 
     connect(newRemoteBtn, &QPushButton::clicked, this, &SessionsSidebar::onNewSession);
@@ -57,6 +64,8 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     connect(exportBtn, &QPushButton::clicked, this, &SessionsSidebar::onExportSessions);
     connect(m_treeWidget, &QTreeWidget::itemDoubleClicked, this, &SessionsSidebar::onItemDoubleClicked);
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SessionsSidebar::showContextMenu);
+    connect(m_treeWidget->model(), &QAbstractItemModel::rowsMoved, this,
+            [this](const QModelIndex&, int, int, const QModelIndex&, int) { onSessionsReordered(); });
 
     loadSessions();
 }
@@ -78,7 +87,7 @@ void SessionsSidebar::loadSessions() {
                 groupItem->setIcon(0, QIcon(":/icons/folder.svg"));
                 groupItem->setData(0, kIsGroupRole, true);
                 groupItem->setData(0, kSessionIdRole, QString());
-                groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
+                groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDropEnabled);
                 m_treeWidget->addTopLevelItem(groupItem);
                 groupItems.insert(session.group, groupItem);
                 parent = groupItem;
@@ -287,6 +296,7 @@ void SessionsSidebar::showContextMenu(const QPoint& pos) {
     auto* connectAction = menu.addAction(QIcon(":/icons/terminal.svg"), tr("Connect"));
     menu.addSeparator();
     auto* editAction = menu.addAction(QIcon(":/icons/edit.svg"), tr("Edit"));
+    auto* duplicateAction = menu.addAction(QIcon(":/icons/terminal.svg"), tr("Duplicate"));
     auto* deleteAction = menu.addAction(QIcon(":/icons/delete.svg"), tr("Delete"));
 
     auto* selectedAction = menu.exec(m_treeWidget->mapToGlobal(pos));
@@ -294,7 +304,76 @@ void SessionsSidebar::showContextMenu(const QPoint& pos) {
         onItemDoubleClicked(item, 0);
     } else if (selectedAction == editAction) {
         onEditSession();
+    } else if (selectedAction == duplicateAction) {
+        onDuplicateSession();
     } else if (selectedAction == deleteAction) {
         onDeleteSession();
     }
+}
+
+void SessionsSidebar::onDuplicateSession() {
+    auto* item = m_treeWidget->currentItem();
+    const QString id = sessionIdForItem(item);
+    if (id.isEmpty())
+        return;
+
+    for (const Session& s : m_sessions) {
+        if (s.id == id) {
+            Session copy = s;
+            copy.id = QUuid::createUuid().toString();
+            copy.name = s.name + tr(" (copy)");
+            m_sessions.append(copy);
+            saveSessions();
+            loadSessions();
+            break;
+        }
+    }
+}
+
+void SessionsSidebar::onSessionsReordered() {
+    QList<Session> reordered;
+    QSet<QString> seen;
+
+    auto appendById = [&](const QString& id) {
+        for (const Session& s : m_sessions) {
+            if (s.id == id) {
+                Session copy = s;
+                copy.group.clear();
+                reordered.append(copy);
+                seen.insert(id);
+                break;
+            }
+        }
+    };
+
+    const int top = m_treeWidget->topLevelItemCount();
+    for (int i = 0; i < top; ++i) {
+        QTreeWidgetItem* item = m_treeWidget->topLevelItem(i);
+        if (item->data(0, kIsGroupRole).toBool()) {
+            const QString group = item->text(0);
+            for (int j = 0; j < item->childCount(); ++j) {
+                const QString id = item->child(j)->data(0, kSessionIdRole).toString();
+                for (const Session& s : m_sessions) {
+                    if (s.id == id) {
+                        Session copy = s;
+                        copy.group = group;
+                        reordered.append(copy);
+                        seen.insert(id);
+                        break;
+                    }
+                }
+            }
+        } else {
+            appendById(item->data(0, kSessionIdRole).toString());
+        }
+    }
+
+    // Preserve any session that is not visible in the tree (safety net).
+    for (const Session& s : m_sessions) {
+        if (!seen.contains(s.id))
+            reordered.append(s);
+    }
+
+    m_sessions = reordered;
+    saveSessions();
 }

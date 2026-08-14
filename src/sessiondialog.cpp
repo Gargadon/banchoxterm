@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QStackedWidget>
 #include <QFileDialog>
+#include <QFontDialog>
 #include <QCheckBox>
 #include <QUuid>
 #include "keyring.h"
@@ -16,6 +17,7 @@
 #include <QHeaderView>
 #include <QTabWidget>
 #include <QDialogButtonBox>
+#include <QGroupBox>
 
 class TunnelEditDialog : public QDialog {
 public:
@@ -236,6 +238,38 @@ void SessionDialog::setupUi() {
 
     sshTabs->addTab(tunnelsTab, tr("Port Forwarding"));
 
+    // Tab 3: Advanced (keep-alive, algorithms)
+    auto* advancedTab = new QWidget(sshTabs);
+    auto* advancedForm = new QFormLayout(advancedTab);
+    advancedTab->setLayout(advancedForm);
+    advancedForm->setContentsMargins(10, 10, 10, 10);
+    advancedForm->setSpacing(10);
+
+    m_keepAliveSpin = new QSpinBox(advancedTab);
+    m_keepAliveSpin->setRange(0, 3600);
+    m_keepAliveSpin->setValue(0);
+    m_keepAliveSpin->setToolTip(tr("Seconds between SSH keep-alive probes. 0 disables it."));
+    advancedForm->addRow(tr("Keep-alive (sec, 0=off):"), m_keepAliveSpin);
+
+    m_cipherEdit = new QLineEdit(advancedTab);
+    m_cipherEdit->setPlaceholderText(tr("Default"));
+    m_cipherEdit->setToolTip(tr("Comma-separated, e.g. aes128-ctr,aes256-ctr"));
+    advancedForm->addRow(tr("Encryption ciphers:"), m_cipherEdit);
+
+    m_kexEdit = new QLineEdit(advancedTab);
+    m_kexEdit->setPlaceholderText(tr("Default"));
+    m_kexEdit->setToolTip(tr("Comma-separated, e.g. curve25519-sha256,diffie-hellman-group14-sha256"));
+    advancedForm->addRow(tr("Key exchange:"), m_kexEdit);
+
+    m_macEdit = new QLineEdit(advancedTab);
+    m_macEdit->setPlaceholderText(tr("Default"));
+    m_macEdit->setToolTip(tr("Comma-separated, e.g. hmac-sha2-256,hmac-sha2-512"));
+    advancedForm->addRow(tr("MAC algorithms:"), m_macEdit);
+
+    advancedForm->addRow(new QLabel(tr("Leave a field empty to use libssh2 defaults."), advancedTab));
+
+    sshTabs->addTab(advancedTab, tr("Advanced"));
+
     m_stackedWidget->addWidget(sshWidget); // index 0
 
     // ── Local page ──
@@ -363,6 +397,54 @@ void SessionDialog::setupUi() {
 
     mainLayout->addWidget(m_stackedWidget);
 
+    // ── Shared terminal settings (scrollback, font) ──
+    // Applies to SSH / Local / Telnet / Serial; hidden for RDP / VNC / FTP.
+    m_terminalSettingsWidget = new QWidget(this);
+    auto* termForm = new QFormLayout(m_terminalSettingsWidget);
+    termForm->setContentsMargins(0, 0, 0, 0);
+    termForm->setSpacing(8);
+
+    m_scrollbackSpin = new QSpinBox(m_terminalSettingsWidget);
+    m_scrollbackSpin->setRange(0, 1000000);
+    m_scrollbackSpin->setSingleStep(1000);
+    m_scrollbackSpin->setValue(5000);
+    m_scrollbackSpin->setToolTip(tr("Lines of scrollback history. 0 disables scrollback."));
+    termForm->addRow(tr("Scrollback (lines):"), m_scrollbackSpin);
+
+    auto* fontRow = new QHBoxLayout();
+    m_fontLabel = new QLabel(m_terminalSettingsWidget);
+    m_font = QFont("Monospace", 11);
+    m_font.setStyleHint(QFont::Monospace);
+    m_font.setFixedPitch(true);
+    m_fontLabel->setText(tr("Global default"));
+    fontRow->addWidget(m_fontLabel, 1);
+    auto* chooseFontBtn = new QPushButton(tr("Choose Font..."), m_terminalSettingsWidget);
+    fontRow->addWidget(chooseFontBtn);
+    termForm->addRow(tr("Font:"), fontRow);
+
+    connect(chooseFontBtn, &QPushButton::clicked, this, [this]() {
+        QFontDialog dialog(m_font, this);
+        dialog.setWindowTitle(tr("Select Terminal Font"));
+        dialog.setOption(QFontDialog::MonospacedFonts, true);
+        if (dialog.exec() == QDialog::Accepted) {
+            m_font = dialog.selectedFont();
+            m_font.setFixedPitch(true);
+            m_fontLabel->setText(QString("%1, %2pt").arg(m_font.family()).arg(m_font.pointSize()));
+            m_fontChosen = true;
+        }
+    });
+
+    mainLayout->addWidget(m_terminalSettingsWidget);
+
+    auto updateTerminalSettingsVisibility = [this](int index) {
+        // SSH(0), Local(1), Telnet(2), Serial(5) use a terminal emulator.
+        const bool visible = (index == 0 || index == 1 || index == 2 || index == 5);
+        m_terminalSettingsWidget->setVisible(visible);
+        adjustSize();
+    };
+    updateTerminalSettingsVisibility(0);
+    connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, updateTerminalSettingsVisibility);
+
     connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
             [this](int index) { m_stackedWidget->setCurrentIndex(index); });
 
@@ -461,6 +543,26 @@ void SessionDialog::loadSession(const Session& session) {
         }
         break;
     }
+
+    // Shared terminal settings
+    m_scrollbackSpin->setValue(session.scrollback > 0 ? session.scrollback : 5000);
+    m_fontChosen = !session.fontFamily.isEmpty();
+    if (m_fontChosen) {
+        m_font = QFont(session.fontFamily, session.fontSize > 0 ? session.fontSize : 11);
+        m_font.setFixedPitch(true);
+        m_font.setStyleHint(QFont::Monospace);
+        m_fontLabel->setText(QString("%1, %2pt").arg(m_font.family()).arg(m_font.pointSize()));
+    } else {
+        m_fontLabel->setText(tr("Global default"));
+    }
+
+    // SSH advanced options
+    if (m_keepAliveSpin) {
+        m_keepAliveSpin->setValue(qMax(0, session.keepAliveSeconds));
+        m_cipherEdit->setText(session.cryptCipher);
+        m_kexEdit->setText(session.kexAlgo);
+        m_macEdit->setText(session.macAlgo);
+    }
 }
 
 Session SessionDialog::getSession() const {
@@ -539,6 +641,24 @@ Session SessionDialog::getSession() const {
         s.port = m_ftpPortSpin->value();
         s.user = m_ftpUserEdit->text().trimmed();
         break;
+    }
+
+    // Shared terminal settings
+    s.scrollback = m_scrollbackSpin->value();
+    if (m_fontChosen) {
+        s.fontFamily = m_font.family();
+        s.fontSize = m_font.pointSize();
+    } else {
+        s.fontFamily.clear();
+        s.fontSize = 0;
+    }
+
+    // SSH advanced options
+    if (m_keepAliveSpin) {
+        s.keepAliveSeconds = m_keepAliveSpin->value();
+        s.cryptCipher = m_cipherEdit->text().trimmed();
+        s.kexAlgo = m_kexEdit->text().trimmed();
+        s.macAlgo = m_macEdit->text().trimmed();
     }
     return s;
 }

@@ -5,6 +5,7 @@
 #include "terminaltab.h"
 #include "sessiondialog.h"
 #include "settingsdialog.h"
+#include "updater.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSplitter>
@@ -328,6 +329,11 @@ void MainWindow::onConnectSession(const Session& session) {
     // for a fresh one with the same session.
     connect(tab, &TerminalTab::reconnectRequested, this, &MainWindow::onReconnectRequested);
 
+    // Alt+F4 on the embedded terminal hits the term host process, which
+    // forwards it here; route it through close() so the normal confirmation
+    // dialog (closeEvent) decides whether to actually quit.
+    connect(tab, &TerminalTab::closeRequested, this, [this]() { close(); });
+
     // Connect title updates
     connect(tab, &TerminalTab::titleChanged, this, [this, tab, pane](const QString& title) {
         int idx = pane->indexOf(tab);
@@ -590,6 +596,11 @@ void MainWindow::setupMenuBar() {
     globalSearchAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
     connect(globalSearchAction, &QAction::triggered, this, &MainWindow::onGlobalSearch);
 
+    editMenu->addSeparator();
+
+    auto* settingsAction = editMenu->addAction(tr("C&onfiguration..."));
+    connect(settingsAction, &QAction::triggered, this, &MainWindow::onOpenSettings);
+
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
 
     auto* splitAction = viewMenu->addAction(tr("Toggle &Split View"));
@@ -600,12 +611,14 @@ void MainWindow::setupMenuBar() {
     moveTabAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_M));
     connect(moveTabAction, &QAction::triggered, this, &MainWindow::moveTabToOtherPane);
 
+    m_macrosMenu = menuBar()->addMenu(tr("&Macros"));
+    rebuildMacrosMenu();
+
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
     auto* aboutAction = helpMenu->addAction(tr("&About BanchoXterm"));
     connect(aboutAction, &QAction::triggered, this, &MainWindow::showAbout);
-
-    m_macrosMenu = menuBar()->addMenu(tr("&Macros"));
-    rebuildMacrosMenu();
+    auto* updateAction = helpMenu->addAction(tr("Check for &Updates..."));
+    connect(updateAction, &QAction::triggered, this, [this]() { Updater::checkForUpdates(this); });
 }
 
 void MainWindow::showAbout() {
@@ -614,7 +627,7 @@ void MainWindow::showAbout() {
                               "<p>%2</p>"
                               "<p style=\"font-size: 11px; color: #888;\">%3</p>"
                               "<p style=\"font-size: 11px; color: #888;\">%4</p>")
-                      .arg(tr("Version %1").arg(QStringLiteral("0.1.0")))
+                      .arg(tr("Version %1").arg(QStringLiteral(BANCHO_VERSION)))
                       .arg(tr("A multi-protocol terminal emulator and remote session manager designed for command-line rebels."))
                       .arg(tr("Supports SSH, SFTP, Telnet, Serial, RDP, VNC, and local terminals."))
                       .arg(tr("Copyright &copy; 2026 BanchoXterm contributors. Licensed under the MIT License."));

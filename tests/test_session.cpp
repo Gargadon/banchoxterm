@@ -1,4 +1,5 @@
 #include <QTest>
+#include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QFile>
@@ -15,6 +16,10 @@ class TestSession : public QObject {
 private slots:
     void initTestCase() {
         qRegisterMetaType<Session>("Session");
+        // Match the app's QSettings namespace so MasterPasswordManager tests
+        // use a valid settings path.
+        QCoreApplication::setOrganizationName(QStringLiteral("BanchoXterm"));
+        QCoreApplication::setApplicationName(QStringLiteral("BanchoXterm"));
     }
 
     void testSshSessionRoundtrip() {
@@ -27,6 +32,13 @@ private slots:
         original.port = 2222;
         original.keyPath = "/home/user/.ssh/id_rsa";
         original.x11Forwarding = true;
+        original.keepAliveSeconds = 30;
+        original.cryptCipher = "aes128-ctr,aes256-ctr";
+        original.kexAlgo = "curve25519-sha256";
+        original.macAlgo = "hmac-sha2-256";
+        original.scrollback = 10000;
+        original.fontFamily = "JetBrains Mono";
+        original.fontSize = 12;
 
         QJsonObject json = original.toJson();
         QCOMPARE(json["id"].toString(), QString("test-id-ssh"));
@@ -47,6 +59,13 @@ private slots:
         QCOMPARE(restored.port, original.port);
         QCOMPARE(restored.keyPath, original.keyPath);
         QCOMPARE(restored.x11Forwarding, original.x11Forwarding);
+        QCOMPARE(restored.keepAliveSeconds, original.keepAliveSeconds);
+        QCOMPARE(restored.cryptCipher, original.cryptCipher);
+        QCOMPARE(restored.kexAlgo, original.kexAlgo);
+        QCOMPARE(restored.macAlgo, original.macAlgo);
+        QCOMPARE(restored.scrollback, original.scrollback);
+        QCOMPARE(restored.fontFamily, original.fontFamily);
+        QCOMPARE(restored.fontSize, original.fontSize);
     }
 
     void testSshSessionTunnelsRoundtrip() {
@@ -220,6 +239,37 @@ private slots:
         QVERIFY(widget.findText("test", true, true));
         QVERIFY(!widget.findText("ERROR", true, true));
         QVERIFY(widget.findText("ERROR", true, false));
+    }
+
+    void testVtTerminalRendering() {
+        VtTerminalWidget widget;
+        widget.resize(800, 600);
+
+        widget.writeData("AB\r\nCD\r\n");
+        QCOMPARE(widget.cellChar(0, 0), QChar('A'));
+        QCOMPARE(widget.cellChar(1, 0), QChar('B'));
+        QCOMPARE(widget.cellChar(0, 1), QChar('C'));
+        QCOMPARE(widget.cellChar(1, 1), QChar('D'));
+    }
+
+    void testVtClearScreen() {
+        VtTerminalWidget widget;
+        widget.resize(800, 600);
+
+        widget.writeData("hello world");
+        widget.writeData("\x1b[2J"); // clear entire screen
+        QCOMPARE(widget.cellChar(0, 0), QChar(' '));
+        QCOMPARE(widget.cellChar(4, 0), QChar(' '));
+    }
+
+    void testVtCursorPositioning() {
+        VtTerminalWidget widget;
+        widget.resize(800, 600);
+
+        widget.writeData("abc");
+        widget.writeData("\x1b[2;1H"); // cursor to row 2, column 1 (1-based)
+        widget.writeData("Z");
+        QCOMPARE(widget.cellChar(0, 1), QChar('Z'));
     }
 };
 

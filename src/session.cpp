@@ -1,5 +1,5 @@
 #include "session.h"
-#include <QStandardPaths>
+#include "apppaths.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
@@ -95,6 +95,13 @@ QJsonObject Session::toJson() const {
     json["serialPort"] = serialPort;
     json["baudRate"] = baudRate;
     json["serialCmd"] = serialCmd;
+    json["scrollback"] = scrollback;
+    json["fontFamily"] = fontFamily;
+    json["fontSize"] = fontSize;
+    json["keepAliveSeconds"] = keepAliveSeconds;
+    json["cryptCipher"] = cryptCipher;
+    json["kexAlgo"] = kexAlgo;
+    json["macAlgo"] = macAlgo;
 
     QJsonArray tunnelArray;
     for (const auto& t : tunnels) {
@@ -124,6 +131,13 @@ Session Session::fromJson(const QJsonObject& json) {
     s.serialPort = json["serialPort"].toString();
     s.baudRate = json["baudRate"].toInt(115200);
     s.serialCmd = json["serialCmd"].toString();
+    s.scrollback = json["scrollback"].toInt(5000);
+    s.fontFamily = json["fontFamily"].toString();
+    s.fontSize = json["fontSize"].toInt(0);
+    s.keepAliveSeconds = json["keepAliveSeconds"].toInt(0);
+    s.cryptCipher = json["cryptCipher"].toString();
+    s.kexAlgo = json["kexAlgo"].toString();
+    s.macAlgo = json["macAlgo"].toString();
 
     if (json.contains("tunnels") && json["tunnels"].isArray()) {
         QJsonArray tunnelArray = json["tunnels"].toArray();
@@ -136,7 +150,7 @@ Session Session::fromJson(const QJsonObject& json) {
 }
 
 QString SessionManager::getFilePath() {
-    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QString configDir = AppPaths::configDir();
     QDir().mkpath(configDir);
     return configDir + "/sessions.json";
 }

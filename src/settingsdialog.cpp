@@ -1,4 +1,5 @@
 #include "settingsdialog.h"
+#include "apppaths.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QTabWidget>
@@ -18,6 +19,10 @@
 #include <qtermwidget.h>
 #endif
 #include <QInputDialog>
+#include <QListWidget>
+#include <QStandardPaths>
+#include <QFile>
+#include <QRegularExpression>
 #include "masterpasswordmanager.h"
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
@@ -207,6 +212,14 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_masterPasswordCheck->setChecked(MasterPasswordManager::instance().isEnabled());
     securityLayout->addWidget(m_masterPasswordCheck);
 
+    auto* knownHostsTitle = new QLabel(tr("SSH Host Keys:"), securityTab);
+    knownHostsTitle->setStyleSheet("font-weight: bold;");
+    securityLayout->addWidget(knownHostsTitle);
+
+    auto* knownHostsBtn = new QPushButton(tr("Manage Known Hosts..."), securityTab);
+    securityLayout->addWidget(knownHostsBtn);
+    connect(knownHostsBtn, &QPushButton::clicked, this, &SettingsDialog::onManageKnownHosts);
+
     securityLayout->addStretch();
     tabWidget->addTab(securityTab, tr("Security"));
 
@@ -359,4 +372,68 @@ void SettingsDialog::onBrowseEditorClicked() {
 void SettingsDialog::onAccept() {
     saveSettings();
     accept();
+}
+
+void SettingsDialog::onManageKnownHosts() {
+    const QString path = AppPaths::configDir() + "/known_hosts";
+    QFile file(path);
+    QStringList lines;
+    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        lines = QString::fromUtf8(file.readAll()).split('\n');
+        file.close();
+    }
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Known Hosts"));
+    dlg.setMinimumWidth(480);
+    auto* lay = new QVBoxLayout(&dlg);
+
+    auto* list = new QListWidget(&dlg);
+    lay->addWidget(list);
+
+    QList<int> lineIndexes;
+    for (int i = 0; i < lines.size(); ++i) {
+        const QString t = lines[i].trimmed();
+        if (t.isEmpty() || t.startsWith('#'))
+            continue;
+        const QStringList parts = t.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        QString label = parts.size() >= 2 ? QString("%1  (%2)").arg(parts[0], parts[1]) : t;
+        list->addItem(label);
+        lineIndexes.append(i);
+    }
+
+    auto* btnRow = new QHBoxLayout();
+    auto* delBtn = new QPushButton(tr("Remove Selected"), &dlg);
+    auto* closeBtn = new QPushButton(tr("Close"), &dlg);
+    btnRow->addWidget(delBtn);
+    btnRow->addStretch();
+    btnRow->addWidget(closeBtn);
+    lay->addLayout(btnRow);
+
+    bool changed = false;
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+    connect(delBtn, &QPushButton::clicked, &dlg, [&]() {
+        const int row = list->currentRow();
+        if (row < 0 || row >= lineIndexes.size())
+            return;
+        lines[lineIndexes[row]].clear();
+        list->takeItem(row);
+        lineIndexes.removeAt(row);
+        changed = true;
+    });
+
+    dlg.exec();
+
+    if (changed) {
+        QFile out(path);
+        if (out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+            QStringList remaining;
+            for (const QString& l : lines)
+                if (!l.trimmed().isEmpty())
+                    remaining.append(l);
+            if (!remaining.isEmpty())
+                out.write(remaining.join('\n').toUtf8() + '\n');
+            out.close();
+        }
+    }
 }

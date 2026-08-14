@@ -4,11 +4,11 @@
 #include "session.h"
 
 class QTermWidget;
+class TerminalHostClient;
 class QLabel;
 class QThread;
 class QTimer;
 class SshConnection;
-class VtTerminalWidget;
 class QFrame;
 class QLineEdit;
 class QPushButton;
@@ -43,6 +43,7 @@ public:
         return m_connection;
     }
     void updateFontFromSettings();
+    void syncTerminalSize();
     void sendInputText(const QString& text);
     void sendRaw(const QString& text);
     bool searchText(const QString& str, bool next, bool caseSensitive);
@@ -60,13 +61,15 @@ signals:
     void titleChanged(const QString& title);
     void remoteDirChanged(const QString& dir);
     void reconnectRequested(const Session& session);
+    void closeRequested();
 
 private slots:
     void onTerminalFinished();
     void onRemoteDirChanged(const QString& dir);
-#ifndef Q_OS_WIN
     void onTitleChanged();
+    void onHostSizeChanged(int rows, int cols);
     void showTerminalContextMenu(const QPoint& pos);
+#ifndef Q_OS_WIN
     void onShellDataReceived(const QByteArray& data);
     void onShellClosed();
     void onSendData(const char* data, int size);
@@ -81,6 +84,7 @@ private:
     void launchExternalClient();
     void setupSshTerminal();
     void setupWindowsTerminal();
+    void applySshOptions();
     void setupWindowsRdpActiveX();
     void setupEmbeddedVnc();
     void startConPtyPolling();
@@ -88,10 +92,22 @@ private:
     void startLogging();
     void logData(const QByteArray& data);
     void maybeScheduleReconnect();
+    void applyTerminalSize(int rows, int cols);
+    void feedTerminalData(const QByteArray& data);
+    QWidget* terminalView() const;
+    bool hasSelection() const;
+    void doSendText(const QString& text);
+    void doToggleSearchBar();
+    void doFocusTerminal();
+    void doCopy();
+    void doPaste();
+    void doClear();
+    void doZoomIn();
+    void doZoomOut();
 
     Session m_session;
     QTermWidget* m_terminal = nullptr;
-    VtTerminalWidget* m_vtTerminal = nullptr;
+    TerminalHostClient* m_terminalHost = nullptr;
     QLabel* m_statusLabel = nullptr;
     QWidget* m_embeddedContainer = nullptr;
     QProcess* m_externalProcess = nullptr;
@@ -108,6 +124,8 @@ private:
 #ifdef Q_OS_WIN
     ConPty* m_conpty = nullptr;
     QTimer* m_conptyPollTimer = nullptr;
+    bool m_conptyStarted = false;
+    QString m_pendingShell;
 #endif
     bool m_isActive = true;
 

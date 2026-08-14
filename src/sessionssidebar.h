@@ -21,6 +21,7 @@ public slots:
 private slots:
     void onEditSession();
     void onDeleteSession();
+    void onDuplicateSession();
     void onImportSessions();
     void onExportSessions();
     void onItemDoubleClicked(QTreeWidgetItem* item, int column);
@@ -29,6 +30,7 @@ private slots:
 private:
     void loadSessions();
     void saveSessions();
+    void onSessionsReordered();
     QTreeWidgetItem* findSessionItem(const QString& id) const;
     QString sessionIdForItem(QTreeWidgetItem* item) const;
 

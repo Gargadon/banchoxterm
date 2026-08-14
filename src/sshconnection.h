@@ -10,12 +10,15 @@
 #include "session.h"
 #include "sshtunnel.h"
 
+class QSocketNotifier;
+
 // Bridges an incoming X11 channel to the local X server socket.
 struct X11Bridge {
     LIBSSH2_CHANNEL* channel = nullptr;
     int xSock = -1;
     bool channelEof = false;
     bool sockEof = false;
+    QSocketNotifier* xNotifier = nullptr;
 };
 
 // Owns a single libssh2 session shared by the terminal shell channel and the
@@ -34,6 +37,10 @@ public slots:
     void connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
                        const QString& password, const QList<TunnelConfig>& tunnels);
     void setX11Forwarding(bool enabled);
+    void setKeepAliveSeconds(int seconds);
+    void setCipherAlgorithms(const QString& ciphers);
+    void setKexAlgorithm(const QString& kex);
+    void setMacAlgorithm(const QString& mac);
     void disconnectFromHost();
     void sendToShell(const QByteArray& data);
     void resizePty(int rows, int cols);
@@ -54,10 +61,12 @@ signals:
     void shellClosed();
     void directoryListed(const QString& path, const QList<SftpFile>& files);
     void operationFinished(bool success, const QString& error);
+    void transferProgress(const QString& fileName, qint64 bytesDone, qint64 totalBytes);
     void remoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
 
 private slots:
-    void onPollTimer();
+    void onSocketActivity();
+    void onKeepAlive();
 
 private:
     bool openSocket();
@@ -79,6 +88,9 @@ private:
 
     void openShell();
     void readShell();
+    void handleShellClosed();
+    void armNotifiers();
+    void stopNotifiers();
     void setupX11Cookie();
     int connectToXServer();
     void handleX11Open(LIBSSH2_CHANNEL* channel, const char* shost, int sport);
@@ -122,9 +134,17 @@ private:
     int m_ptyRows = 24;
     int m_ptyCols = 80;
 
-    QTimer* m_pollTimer = nullptr;
     QTimer* m_statsTimer = nullptr;
+    QTimer* m_keepAliveTimer = nullptr;
+    QSocketNotifier* m_readNotifier = nullptr;
+    QSocketNotifier* m_writeNotifier = nullptr;
     bool m_connected = false;
+
+    // Per-session SSH options (set before connectToHost)
+    int m_keepAliveSeconds = 0;
+    QString m_cryptCipher;
+    QString m_kexAlgo;
+    QString m_macAlgo;
 
     // non-blocking stats query state machine
     enum class StatsState { Idle, Opening, Execing, Reading };

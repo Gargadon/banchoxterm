@@ -38,18 +38,32 @@ Copyright (C) 2010 KDE e.V. <kde-ev-board@kde.org>
 Copyright (C) 2022 Francesc Martinez <info@francescmm.com>
 and other contributors.
 
-License: GNU Lesser General Public License v2 or later (LGPL-2+)
+License: GNU General Public License v2 or later (GPL-2+), with specific
+files under the GNU Lesser General Public License v2 or later (LGPL-2+):
+lib/qtermwidget.cpp and lib/qtermwidget.h, kpty/, kprocess/ and
+lib/TerminalCharacterDecoder. The CMake build files are BSD 3-Clause.
 
-The core QTermWidget library files are licensed under LGPL-2+. The full
-license text is available at:
+The full license texts are available at:
+https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
 https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
 
 Source code can be obtained from:
 https://github.com/lxqt/qtermwidget
 
-Pursuant to LGPL-2+ section 6, BanchoXterm dynamically links against the
-QTermWidget shared library. You may replace this library with your own
-modified version.
+On Windows, BanchoXterm does NOT link QTermWidget into the main
+application. Instead, the (GPL-2+) QTermWidget sources, as vendored and
+modified under third_party/qtermwidget, are built only into the separate
+GPL process banchoxterm-term.exe, which BanchoXterm launches and embeds
+via its native window. banchoxterm-term.exe is distributed under the
+GNU General Public License v2 or later; its complete corresponding
+source is this repository (third_party/qtermwidget contains the
+modifications on top of upstream).
+
+On Linux, BanchoXterm links against the system QTermWidget library
+(dynamically) and must be used under the terms of its license.
+
+The modified vendored sources are available in this repository under:
+third_party/qtermwidget/
 
 
 ---

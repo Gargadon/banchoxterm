@@ -11,6 +11,7 @@ class QTreeWidgetItem;
 class QLineEdit;
 class QPushButton;
 class QLabel;
+class QProgressBar;
 class FtpClient;
 
 class SftpSidebar : public QWidget {
@@ -36,6 +37,7 @@ private slots:
     void onConnectionFailed(const QString& error);
     void onDirectoryListed(const QString& path, const QList<SftpFile>& files);
     void onOperationFinished(bool success, const QString& error);
+    void onTransferProgress(const QString& fileName, qint64 bytesDone, qint64 totalBytes);
     void onPasswordRequired(const QString& prompt);
 
     void onParentDirClicked();
@@ -71,6 +73,20 @@ private:
     void updatePath(const QString& path);
     void setFtpClient(FtpClient* client);
     void detachFtp();
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
+    // Transfer queue (serialized, one transfer at a time)
+    struct TransferItem {
+        QString remotePath;
+        QString localPath;
+        bool isUpload = false;
+        bool isDirUpload = false;
+    };
+    void enqueueUpload(const QStringList& localPaths);
+    void enqueueDownload(const QStringList& remotePaths);
+    void startNextTransfer();
+    void finishTransferQueue(bool success, const QString& error);
+    void setTransferUi(bool active);
 
     QLineEdit* m_pathEdit;
     QPushButton* m_upBtn;
@@ -82,6 +98,8 @@ private:
     QPushButton* m_chmodBtn;
     QTreeWidget* m_treeWidget;
     QLabel* m_statusLabel;
+    QProgressBar* m_progressBar;
+    QLabel* m_progressLabel;
 
     QPointer<SshConnection> m_connection;
     QPointer<FtpClient> m_ftp;
@@ -89,6 +107,10 @@ private:
     Session m_currentSession;
     QString m_currentPath;
     bool m_isConnected = false;
+
+    QList<TransferItem> m_transferQueue;
+    bool m_transferActive = false;
+    QString m_transferCurrentName;
 
     QString m_pendingEditRemotePath;
     QString m_pendingEditLocalPath;

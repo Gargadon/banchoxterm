@@ -237,6 +237,7 @@ void VtTerminalWidget::resizeEvent(QResizeEvent* e) {
         m_scrollback.clear();
         m_scrollOffset = 0;
         m_selecting = false;
+        m_highlightDirty = true;
         emit resized(m_cols, m_rows);
     }
 }
@@ -298,6 +299,7 @@ void VtTerminalWidget::setChar(int x, int y, ushort ch) {
 void VtTerminalWidget::writeData(const QByteArray& data) {
     m_parseBuffer.append(data);
     parseBuffer();
+    m_highlightDirty = true;
     update();
 }
 
@@ -827,20 +829,13 @@ static QVector<HighlightRule> getHighlightRules() {
     return rules;
 }
 
-void VtTerminalWidget::paintEvent(QPaintEvent*) {
-    QPainter painter(this);
-    painter.setFont(m_font);
+void VtTerminalWidget::rebuildHighlightCache(int firstLine) {
+    m_overrideFg = QVector<QVector<QColor>>(m_rows, QVector<QColor>(m_cols, QColor()));
+    m_overrideBold = QVector<QVector<bool>>(m_rows, QVector<bool>(m_cols, false));
 
-    painter.fillRect(rect(), currentPalette().bg);
-
-    int firstLine = firstVisibleLine();
-    QVector<HighlightRule> rules = getHighlightRules();
-
-    QVector<QVector<QColor>> overrideFg(m_rows, QVector<QColor>(m_cols, QColor()));
-    QVector<QVector<bool>> overrideBold(m_rows, QVector<bool>(m_cols, false));
-
+    const QVector<HighlightRule> rules = getHighlightRules();
     for (int y = 0; y < m_rows; ++y) {
-        int fullLine = firstLine + y;
+        const int fullLine = firstLine + y;
         QString lineText;
         lineText.reserve(m_cols);
         for (int x = 0; x < m_cols; ++x) {
@@ -851,26 +846,39 @@ void VtTerminalWidget::paintEvent(QPaintEvent*) {
             auto matchIterator = rule.regex.globalMatch(lineText);
             while (matchIterator.hasNext()) {
                 auto match = matchIterator.next();
-                int start = match.capturedStart();
-                int end = match.capturedEnd();
+                const int start = match.capturedStart();
+                const int end = match.capturedEnd();
                 for (int x = start; x < end && x < m_cols; ++x) {
-                    overrideFg[y][x] = rule.fgColor;
-                    if (rule.bold) {
-                        overrideBold[y][x] = true;
-                    }
+                    m_overrideFg[y][x] = rule.fgColor;
+                    if (rule.bold)
+                        m_overrideBold[y][x] = true;
                 }
             }
         }
     }
 
+    m_highlightFirstLine = firstLine;
+    m_highlightDirty = false;
+}
+
+void VtTerminalWidget::paintEvent(QPaintEvent*) {
+    QPainter painter(this);
+    painter.setFont(m_font);
+
+    painter.fillRect(rect(), currentPalette().bg);
+
+    int firstLine = firstVisibleLine();
+    if (m_highlightDirty || m_highlightFirstLine != firstLine)
+        rebuildHighlightCache(firstLine);
+
     for (int y = 0; y < m_rows; y++) {
         int fullLine = firstLine + y;
         for (int x = 0; x < m_cols; x++) {
             Cell c = cellAt(x, fullLine);
-            if (overrideFg[y][x].isValid()) {
-                c.fg = overrideFg[y][x];
+            if (m_overrideFg[y][x].isValid()) {
+                c.fg = m_overrideFg[y][x];
                 c.fgSet = true;
-                if (overrideBold[y][x]) {
+                if (m_overrideBold[y][x]) {
                     c.bold = true;
                 }
             }
@@ -1224,6 +1232,7 @@ void VtTerminalWidget::wheelEvent(QWheelEvent* e) {
     } else {
         m_scrollOffset = qMax(0, m_scrollOffset - lines);
     }
+    m_highlightDirty = true;
     update();
     e->accept();
 }

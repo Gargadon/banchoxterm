@@ -1,0 +1,62 @@
+; BanchoXterm NSIS installer script.
+; The DIST_DIR define points at the staged directory containing
+; banchoxterm.exe and its deployed runtime (produced by the CI workflow).
+
+!define APPNAME "BanchoXterm"
+!ifndef VERSION
+  !define VERSION "0.1.0"
+!endif
+!define PUBLISHER "BanchoXterm contributors"
+
+!ifndef DIST_DIR
+  !define DIST_DIR "..\..\pkg\banchoxterm"
+!endif
+
+Name "${APPNAME}"
+OutFile "BanchoXterm-Setup.exe"
+InstallDir "$PROGRAMFILES64\BanchoXterm"
+InstallDirRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "InstallLocation"
+RequestExecutionLevel admin
+Unicode true
+
+!include "MUI2.nsh"
+
+!define MUI_ICON "${__FILEDIR__}\banchoxterm.ico"
+!define MUI_UNICON "${__FILEDIR__}\banchoxterm.ico"
+
+!define MUI_ABORTWARNING
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
+
+Section "Install"
+  SetOutPath "$INSTDIR"
+  File /r "${DIST_DIR}\*"
+
+  CreateDirectory "$SMPROGRAMS\BanchoXterm"
+  CreateShortcut "$SMPROGRAMS\BanchoXterm\BanchoXterm.lnk" "$INSTDIR\banchoxterm.exe"
+  CreateShortcut "$DESKTOP\BanchoXterm.lnk" "$INSTDIR\banchoxterm.exe"
+
+  WriteUninstaller "$INSTDIR\uninstall.exe"
+
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "DisplayName" "BanchoXterm"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "Publisher" "${PUBLISHER}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "UninstallString" '"$INSTDIR\uninstall.exe"'
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "InstallLocation" "$INSTDIR"
+SectionEnd
+
+Section "Uninstall"
+  Delete "$DESKTOP\BanchoXterm.lnk"
+  Delete "$SMPROGRAMS\BanchoXterm\BanchoXterm.lnk"
+  RMDir "$SMPROGRAMS\BanchoXterm"
+  RMDir /r "$INSTDIR"
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm"
+SectionEnd

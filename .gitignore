@@ -78,6 +78,13 @@ packaging/
 *.AppImage
 *.appimage
 
+# ...but keep the Windows installer sources versioned (used by CI)
+!packaging/
+!packaging/windows/
+!packaging/windows/installer.nsi
+!packaging/windows/banchoxterm.ico
+!packaging/windows/banchoxterm.rc
+
 # Crash reports
 *.dmp
 *.stackdump

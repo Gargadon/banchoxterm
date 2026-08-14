@@ -6,6 +6,7 @@
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QLabel>
+#include <QProgressBar>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QMessageBox>
@@ -18,9 +19,58 @@
 #include <QUrl>
 #include <QProcess>
 #include <QSettings>
+#include <QDrag>
+#include <QMimeData>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QApplication>
+#include <QEvent>
+#include <QDropEvent>
 #include "keyring.h"
 #include "remoteeditordialog.h"
 #include "ftpclient.h"
+
+static QString formatBytes(qint64 bytes) {
+    const double b = static_cast<double>(bytes);
+    if (b >= 1024.0 * 1024.0 * 1024.0)
+        return QString("%1 GB").arg(b / (1024.0 * 1024.0 * 1024.0), 0, 'f', 1);
+    if (b >= 1024.0 * 1024.0)
+        return QString("%1 MB").arg(b / (1024.0 * 1024.0), 0, 'f', 1);
+    if (b >= 1024.0)
+        return QString("%1 KB").arg(b / 1024.0, 0, 'f', 1);
+    return QString("%1 B").arg(bytes);
+}
+
+// Tree widget that starts a custom drag carrying the selected remote paths,
+// so remote files can be dropped anywhere in the sidebar to download them.
+class SftpTreeWidget : public QTreeWidget {
+public:
+    using QTreeWidget::QTreeWidget;
+
+protected:
+    void startDrag(Qt::DropActions supportedActions) override {
+        Q_UNUSED(supportedActions);
+        QList<QTreeWidgetItem*> items = selectedItems();
+        if (items.isEmpty())
+            return;
+
+        QJsonArray paths;
+        for (QTreeWidgetItem* item : items) {
+            const QString remotePath = item->data(0, Qt::UserRole + 2).toString();
+            if (!remotePath.isEmpty())
+                paths.append(remotePath);
+        }
+        if (paths.isEmpty())
+            return;
+
+        auto* mime = new QMimeData;
+        mime->setData("application/x-banchoxterm-sftp-remote", QJsonDocument(paths).toJson(QJsonDocument::Compact));
+
+        auto* drag = new QDrag(this);
+        drag->setMimeData(mime);
+        drag->exec(Qt::CopyAction);
+    }
+};
 
 SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
@@ -76,14 +126,33 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
 
     mainLayout->addLayout(fileOpsLayout);
 
-    m_treeWidget = new QTreeWidget(this);
+    m_treeWidget = new SftpTreeWidget(this);
     m_treeWidget->setHeaderLabels({tr("Name"), tr("Size"), tr("Modified")});
     m_treeWidget->setRootIsDecorated(false);
     m_treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_treeWidget->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_treeWidget->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_treeWidget->setDragEnabled(true);
+    m_treeWidget->setAcceptDrops(true);
+    m_treeWidget->setDragDropMode(QAbstractItemView::DragDrop);
+    m_treeWidget->setDropIndicatorShown(true);
+    m_treeWidget->viewport()->installEventFilter(this);
     mainLayout->addWidget(m_treeWidget);
+
+    m_progressLabel = new QLabel(this);
+    m_progressLabel->setStyleSheet("color: #7aa2f7; font-weight: bold;");
+    m_progressLabel->hide();
+    mainLayout->addWidget(m_progressLabel);
+
+    m_progressBar = new QProgressBar(this);
+    m_progressBar->setTextVisible(false);
+    m_progressBar->setFixedHeight(6);
+    m_progressBar->setRange(0, 100);
+    m_progressBar->setValue(0);
+    m_progressBar->hide();
+    mainLayout->addWidget(m_progressBar);
 
     m_statusLabel = new QLabel(tr("Disconnected"), this);
     m_statusLabel->setStyleSheet("color: #787c99; font-style: italic;");
@@ -143,6 +212,7 @@ void SftpSidebar::setConnection(SshConnection* connection) {
     connect(m_connection, &SshConnection::connectionFailed, this, &SftpSidebar::onConnectionFailed);
     connect(m_connection, &SshConnection::directoryListed, this, &SftpSidebar::onDirectoryListed);
     connect(m_connection, &SshConnection::operationFinished, this, &SftpSidebar::onOperationFinished);
+    connect(m_connection, &SshConnection::transferProgress, this, &SftpSidebar::onTransferProgress);
     connect(m_connection, &SshConnection::passwordRequired, this, &SftpSidebar::onPasswordRequired);
     connect(m_connection, &SshConnection::remoteStatsUpdated, this, &SftpSidebar::remoteStatsUpdated);
 }
@@ -226,6 +296,11 @@ void SftpSidebar::stopSession() {
     m_statusLabel->setText(tr("Disconnected"));
     m_statusLabel->setStyleSheet("color: #787c99; font-style: italic;");
 
+    m_transferQueue.clear();
+    m_transferActive = false;
+    m_progressBar->hide();
+    m_progressLabel->hide();
+
     m_upBtn->setEnabled(false);
     m_pathEdit->setEnabled(false);
     m_refreshBtn->setEnabled(false);
@@ -294,11 +369,14 @@ void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& 
     QList<QTreeWidgetItem*> folders;
     QList<QTreeWidgetItem*> normalFiles;
 
+    const QString base = m_currentPath == "/" ? "/" : m_currentPath + "/";
+
     for (const SftpFile& file : files) {
         auto* item = new QTreeWidgetItem();
         item->setText(0, file.name);
         item->setData(0, Qt::UserRole, file.isDirectory);
         item->setData(0, Qt::UserRole + 1, QString());
+        item->setData(0, Qt::UserRole + 2, base + file.name);
 
         if (file.isDirectory) {
             item->setIcon(0, QIcon(":/icons/folder.svg"));
@@ -327,6 +405,11 @@ void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& 
 }
 
 void SftpSidebar::onOperationFinished(bool success, const QString& error) {
+    if (m_transferActive) {
+        finishTransferQueue(success, error);
+        return;
+    }
+
     m_statusLabel->setText(error);
     if (success) {
         m_statusLabel->setStyleSheet("color: #50fa7b; font-style: italic;");
@@ -435,22 +518,14 @@ void SftpSidebar::onRefreshClicked() {
 void SftpSidebar::onUploadClicked() {
     if (!m_isConnected)
         return;
-    QString path =
-        QFileDialog::getOpenFileName(this, tr("Select File to Upload"), QDir::homePath(), tr("All Files (*)"));
-    if (!path.isEmpty()) {
-        QFileInfo info(path);
-        QString remotePath = m_currentPath;
-        if (!remotePath.endsWith("/"))
-            remotePath += "/";
-        remotePath += info.fileName();
-
-        m_statusLabel->setText(tr("Uploading %1...").arg(info.fileName()));
-        emit requestUpload(path, remotePath);
-    }
+    QStringList paths =
+        QFileDialog::getOpenFileNames(this, tr("Select Files to Upload"), QDir::homePath(), tr("All Files (*)"));
+    if (!paths.isEmpty())
+        enqueueUpload(paths);
 }
 
 void SftpSidebar::onUploadFolderClicked() {
-    if (!m_isConnected)
+    if (!m_isConnected || m_transferActive)
         return;
     QString path = QFileDialog::getExistingDirectory(this, tr("Select Folder to Upload"), QDir::homePath());
     if (!path.isEmpty()) {
@@ -460,7 +535,7 @@ void SftpSidebar::onUploadFolderClicked() {
 }
 
 void SftpSidebar::onNewFolderClicked() {
-    if (!m_isConnected)
+    if (!m_isConnected || m_transferActive)
         return;
     bool ok = false;
     QString name = QInputDialog::getText(this, tr("New Folder"), tr("Folder name:"), QLineEdit::Normal, "", &ok);
@@ -477,7 +552,7 @@ void SftpSidebar::onNewFolderClicked() {
 }
 
 void SftpSidebar::onRenameClicked() {
-    if (!m_isConnected)
+    if (!m_isConnected || m_transferActive)
         return;
     auto* item = m_treeWidget->currentItem();
     if (!item)
@@ -502,7 +577,7 @@ void SftpSidebar::onRenameClicked() {
 }
 
 void SftpSidebar::onChmodClicked() {
-    if (!m_isConnected)
+    if (!m_isConnected || m_transferActive)
         return;
     auto* item = m_treeWidget->currentItem();
     if (!item)
@@ -535,29 +610,37 @@ void SftpSidebar::onChmodClicked() {
 }
 
 void SftpSidebar::onDownloadClicked() {
-    auto* item = m_treeWidget->currentItem();
-    if (!item)
+    QList<QTreeWidgetItem*> items = m_treeWidget->selectedItems();
+    if (items.isEmpty())
         return;
 
-    bool isDir = item->data(0, Qt::UserRole).toBool();
-    if (isDir)
-        return;
-
-    QString name = item->text(0);
-    QString remotePath = m_currentPath;
-    if (!remotePath.endsWith("/"))
-        remotePath += "/";
-    remotePath += name;
-
-    QString localPath =
-        QFileDialog::getSaveFileName(this, tr("Save File As"), QDir::homePath() + "/" + name, tr("All Files (*)"));
-    if (!localPath.isEmpty()) {
-        m_statusLabel->setText(tr("Downloading %1...").arg(name));
-        emit requestDownload(remotePath, localPath);
+    QStringList remotePaths;
+    for (QTreeWidgetItem* item : items) {
+        QString special = item->data(0, Qt::UserRole + 1).toString();
+        if (special == "." || special == "..")
+            continue;
+        if (item->data(0, Qt::UserRole).toBool())
+            continue;
+        QString remotePath = item->data(0, Qt::UserRole + 2).toString();
+        if (remotePath.isEmpty()) {
+            QString name = item->text(0);
+            QString base = m_currentPath;
+            if (!base.endsWith("/"))
+                base += "/";
+            remotePath = base + name;
+        }
+        remotePaths.append(remotePath);
     }
+
+    if (remotePaths.isEmpty())
+        return;
+
+    enqueueDownload(remotePaths);
 }
 
 void SftpSidebar::onDeleteClicked() {
+    if (m_transferActive)
+        return;
     auto* item = m_treeWidget->currentItem();
     if (!item)
         return;
@@ -659,13 +742,17 @@ void SftpSidebar::showContextMenu(const QPoint& pos) {
     } else if (selected == downloadAct) {
         onDownloadClicked();
     } else if (selected == deleteAct) {
-        onDeleteClicked();
+        if (!m_transferActive)
+            onDeleteClicked();
     } else if (selected == renameAct) {
-        onRenameClicked();
+        if (!m_transferActive)
+            onRenameClicked();
     } else if (selected == chmodAct) {
-        onChmodClicked();
+        if (!m_transferActive)
+            onChmodClicked();
     } else if (selected == newFolderAct) {
-        onNewFolderClicked();
+        if (!m_transferActive)
+            onNewFolderClicked();
     } else if (selected == refreshAct) {
         onRefreshClicked();
     }
@@ -677,6 +764,8 @@ void SftpSidebar::updatePath(const QString& path) {
 }
 
 void SftpSidebar::onEditClicked() {
+    if (m_transferActive)
+        return;
     auto* item = m_treeWidget->currentItem();
     if (!item)
         return;
@@ -698,6 +787,15 @@ void SftpSidebar::onEditClicked() {
     emit requestDownload(m_pendingEditRemotePath, m_pendingEditLocalPath);
 }
 
+void SftpSidebar::setTransferUi(bool active) {
+    bool enabled = !active && m_isConnected;
+    m_uploadBtn->setEnabled(enabled);
+    m_uploadDirBtn->setEnabled(enabled);
+    m_newFolderBtn->setEnabled(enabled);
+    m_renameBtn->setEnabled(enabled);
+    m_chmodBtn->setEnabled(enabled);
+}
+
 void SftpSidebar::onWatchedFileChanged(const QString& path) {
     if (m_watchedFiles.contains(path)) {
         QString remotePath = m_watchedFiles[path];
@@ -705,4 +803,204 @@ void SftpSidebar::onWatchedFileChanged(const QString& path) {
         m_statusLabel->setStyleSheet("color: #7aa2f7; font-style: italic;");
         emit requestUpload(path, remotePath);
     }
+}
+
+void SftpSidebar::enqueueUpload(const QStringList& localPaths) {
+    if (!m_isConnected)
+        return;
+
+    for (const QString& localPath : localPaths) {
+        QFileInfo info(localPath);
+        if (info.isDir()) {
+            if (m_ftp)
+                continue; // FTP has no recursive folder upload
+            if (!m_transferActive) {
+                m_transferActive = true;
+                setTransferUi(true);
+                m_transferCurrentName = info.fileName();
+                m_progressLabel->setText(tr("Uploading folder %1...").arg(info.fileName()));
+                m_progressLabel->show();
+                m_progressBar->setRange(0, 0);
+                m_progressBar->show();
+                m_statusLabel->setText(tr("Uploading folder %1...").arg(info.fileName()));
+                emit requestUploadDir(localPath, m_currentPath);
+            } else {
+                m_transferQueue.append({QString(), localPath, false, true});
+            }
+            continue;
+        }
+        QString remotePath = m_currentPath;
+        if (!remotePath.endsWith("/"))
+            remotePath += "/";
+        remotePath += info.fileName();
+
+        if (!m_transferActive) {
+            m_transferActive = true;
+            setTransferUi(true);
+            m_transferCurrentName = info.fileName();
+            m_progressLabel->setText(tr("Uploading %1...").arg(info.fileName()));
+            m_progressLabel->show();
+            m_progressBar->setRange(0, m_ftp ? 0 : 100);
+            m_progressBar->setValue(0);
+            m_progressBar->show();
+            m_statusLabel->setText(tr("Uploading %1...").arg(info.fileName()));
+            emit requestUpload(localPath, remotePath);
+        } else {
+            m_transferQueue.append({remotePath, localPath, true, false});
+        }
+    }
+}
+
+void SftpSidebar::enqueueDownload(const QStringList& remotePaths) {
+    if (!m_isConnected)
+        return;
+
+    QString destDir = QFileDialog::getExistingDirectory(this, tr("Select Download Folder"), QDir::homePath());
+    if (destDir.isEmpty())
+        return;
+
+    int added = 0;
+    for (const QString& remotePath : remotePaths) {
+        QString fileName = QFileInfo(remotePath).fileName();
+        QString localPath = destDir + "/" + fileName;
+        int n = 1;
+        while (QFile::exists(localPath)) {
+            QFileInfo fi(remotePath);
+            localPath = destDir + "/" + fi.completeBaseName() + QString(" (%1).").arg(n) + fi.suffix();
+            ++n;
+        }
+
+        if (!m_transferActive) {
+            m_transferActive = true;
+            setTransferUi(true);
+            m_transferCurrentName = fileName;
+            m_progressLabel->setText(tr("Downloading %1...").arg(fileName));
+            m_progressLabel->show();
+            m_progressBar->setRange(0, m_ftp ? 0 : 100);
+            m_progressBar->setValue(0);
+            m_progressBar->show();
+            m_statusLabel->setText(tr("Downloading %1...").arg(fileName));
+            emit requestDownload(remotePath, localPath);
+        } else {
+            m_transferQueue.append({remotePath, localPath, false});
+        }
+        ++added;
+    }
+
+    if (added > 1 && m_progressLabel->isVisible())
+        m_progressLabel->setText(tr("Downloading %1... (%2 queued)").arg(m_transferCurrentName).arg(added - 1));
+}
+
+void SftpSidebar::startNextTransfer() {
+    if (m_transferQueue.isEmpty()) {
+        m_transferActive = false;
+        setTransferUi(false);
+        m_progressBar->hide();
+        m_progressLabel->hide();
+        m_statusLabel->setText(tr("All transfers finished."));
+        m_statusLabel->setStyleSheet("color: #50fa7b; font-style: italic;");
+        emit requestList(m_currentPath);
+        return;
+    }
+
+    TransferItem item = m_transferQueue.takeFirst();
+    m_transferCurrentName = QFileInfo(item.isUpload ? item.localPath : item.remotePath).fileName();
+    m_progressBar->setRange(0, (item.isDirUpload || m_ftp) ? 0 : 100);
+    m_progressBar->setValue(0);
+    const QString actionText = item.isDirUpload ? tr("Uploading folder %1...").arg(m_transferCurrentName)
+                                                : (item.isUpload ? tr("Uploading %1...").arg(m_transferCurrentName)
+                                                                 : tr("Downloading %1...").arg(m_transferCurrentName));
+    m_progressLabel->setText(actionText);
+    m_statusLabel->setText(actionText);
+
+    if (item.isDirUpload)
+        emit requestUploadDir(item.localPath, m_currentPath);
+    else if (item.isUpload)
+        emit requestUpload(item.localPath, item.remotePath);
+    else
+        emit requestDownload(item.remotePath, item.localPath);
+}
+
+void SftpSidebar::finishTransferQueue(bool success, const QString& error) {
+    if (!success) {
+        m_transferQueue.clear();
+        m_transferActive = false;
+        setTransferUi(false);
+        m_progressBar->hide();
+        m_progressLabel->hide();
+        m_statusLabel->setText(error);
+        m_statusLabel->setStyleSheet("color: #f7768e; font-weight: bold;");
+        QMessageBox::critical(this, tr("SFTP Transfer Error"), error);
+        return;
+    }
+
+    startNextTransfer();
+}
+
+void SftpSidebar::onTransferProgress(const QString& fileName, qint64 bytesDone, qint64 totalBytes) {
+    m_transferCurrentName = fileName;
+    if (totalBytes > 0) {
+        m_progressBar->setRange(0, 100);
+        m_progressBar->setValue(static_cast<int>((bytesDone * 100) / totalBytes));
+    } else {
+        m_progressBar->setRange(0, 0);
+    }
+    if (m_progressBar->isVisible()) {
+        const QString totalText = totalBytes > 0 ? formatBytes(totalBytes) : tr("? bytes");
+        m_progressLabel->setText(tr("%1: %2 / %3").arg(fileName).arg(formatBytes(bytesDone)).arg(totalText));
+    }
+}
+
+bool SftpSidebar::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_treeWidget->viewport()) {
+        if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
+            auto* dragEvent = static_cast<QDropEvent*>(event);
+            const QMimeData* mime = dragEvent->mimeData();
+            if (mime->hasFormat("application/x-banchoxterm-sftp-remote")) {
+                dragEvent->acceptProposedAction();
+                return true;
+            }
+            if (mime->hasUrls()) {
+                bool localOnly = true;
+                const QList<QUrl> urls = mime->urls();
+                for (const QUrl& url : urls) {
+                    if (!url.isLocalFile()) {
+                        localOnly = false;
+                        break;
+                    }
+                }
+                if (localOnly && !urls.isEmpty()) {
+                    dragEvent->acceptProposedAction();
+                    return true;
+                }
+            }
+        } else if (event->type() == QEvent::Drop) {
+            auto* dropEvent = static_cast<QDropEvent*>(event);
+            const QMimeData* mime = dropEvent->mimeData();
+            if (mime->hasFormat("application/x-banchoxterm-sftp-remote")) {
+                const QByteArray payload = mime->data("application/x-banchoxterm-sftp-remote");
+                const QJsonArray arr = QJsonDocument::fromJson(payload).array();
+                QStringList remotePaths;
+                for (const QJsonValue& v : arr)
+                    remotePaths.append(v.toString());
+                if (!remotePaths.isEmpty())
+                    enqueueDownload(remotePaths);
+                dropEvent->acceptProposedAction();
+                return true;
+            }
+            if (mime->hasUrls()) {
+                QStringList localPaths;
+                const QList<QUrl> urls = mime->urls();
+                for (const QUrl& url : urls) {
+                    if (url.isLocalFile())
+                        localPaths.append(url.toLocalFile());
+                }
+                if (!localPaths.isEmpty())
+                    enqueueUpload(localPaths);
+                dropEvent->acceptProposedAction();
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }

@@ -1,15 +1,16 @@
 #include "sshconnection.h"
+#include "apppaths.h"
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
 #include <QThread>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSocketNotifier>
 #include <cstring>
 #include <cstdlib>
 #include <QSettings>
 #include <mutex>
-#include <QStandardPaths>
 #include <QDir>
 #include <QCryptographicHash>
 #include <QApplication>
@@ -94,6 +95,28 @@ QString hostKeyTypeName(int type) {
         return QStringLiteral("ssh-ed25519");
     default:
         return QStringLiteral("ssh-unknown");
+    }
+}
+
+int knownhostKeyType(int type) {
+    // Map the libssh2 session host key type to the LIBSSH2_KNOWNHOST_KEY_*
+    // bit that libssh2_knownhost_addc() requires (the key type must be set in
+    // the typemask, otherwise it fails with LIBSSH2_ERROR_INVAL).
+    switch (type) {
+    case LIBSSH2_HOSTKEY_TYPE_RSA:
+        return LIBSSH2_KNOWNHOST_KEY_SSHRSA;
+    case LIBSSH2_HOSTKEY_TYPE_DSS:
+        return LIBSSH2_KNOWNHOST_KEY_SSHDSS;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_256:
+        return LIBSSH2_KNOWNHOST_KEY_ECDSA_256;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_384:
+        return LIBSSH2_KNOWNHOST_KEY_ECDSA_384;
+    case LIBSSH2_HOSTKEY_TYPE_ECDSA_521:
+        return LIBSSH2_KNOWNHOST_KEY_ECDSA_521;
+    case LIBSSH2_HOSTKEY_TYPE_ED25519:
+        return LIBSSH2_KNOWNHOST_KEY_ED25519;
+    default:
+        return LIBSSH2_KNOWNHOST_KEY_UNKNOWN;
     }
 }
 
@@ -218,7 +241,7 @@ int SshConnection::retry(const std::function<int()>& fn) {
 }
 
 QString SshConnection::knownHostsPath() const {
-    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QStringLiteral("/known_hosts");
+    return AppPaths::configDir() + QStringLiteral("/known_hosts");
 }
 
 QString SshConnection::hostKeyFingerprint(const QByteArray& key) const {
@@ -272,7 +295,7 @@ bool SshConnection::verifyHostKey() {
     if (!key || keyLen == 0)
         return true;
 
-    const int typemask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW;
+    const int typemask = LIBSSH2_KNOWNHOST_TYPE_PLAIN | LIBSSH2_KNOWNHOST_KEYENC_RAW | knownhostKeyType(keyType);
 
     LIBSSH2_KNOWNHOSTS* hosts = libssh2_knownhost_init(m_session);
     if (!hosts)
@@ -431,6 +454,19 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
 
     libssh2_session_set_blocking(m_session, 0);
 
+    // Per-session algorithm preferences (empty = libssh2 defaults).
+    if (!m_cryptCipher.isEmpty()) {
+        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_CRYPT_CS, m_cryptCipher.toUtf8().constData());
+        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_CRYPT_SC, m_cryptCipher.toUtf8().constData());
+    }
+    if (!m_macAlgo.isEmpty()) {
+        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_MAC_CS, m_macAlgo.toUtf8().constData());
+        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_MAC_SC, m_macAlgo.toUtf8().constData());
+    }
+    if (!m_kexAlgo.isEmpty()) {
+        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_KEX, m_kexAlgo.toUtf8().constData());
+    }
+
     if (m_x11Forwarding) {
         libssh2_session_callback_set2(m_session, LIBSSH2_CALLBACK_X11,
                                       reinterpret_cast<libssh2_cb_generic*>(&SshConnection::x11OpenCallback));
@@ -520,14 +556,28 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
 
     openShell();
 
-    m_pollTimer = new QTimer(this);
-    connect(m_pollTimer, &QTimer::timeout, this, &SshConnection::onPollTimer);
-    m_pollTimer->start(15);
+    // Event-driven I/O: instead of a 15 ms polling timer, drive the libssh2
+    // session from socket notifiers on the SSH socket. The read notifier stays
+    // armed (shell/SFTP/X11 data arrives asynchronously); the write notifier is
+    // armed only while libssh2 actually needs to send (armNotifiers()).
+    m_readNotifier = new QSocketNotifier(m_sock, QSocketNotifier::Read, this);
+    m_writeNotifier = new QSocketNotifier(m_sock, QSocketNotifier::Write, this);
+    connect(m_readNotifier, &QSocketNotifier::activated, this, &SshConnection::onSocketActivity);
+    connect(m_writeNotifier, &QSocketNotifier::activated, this, &SshConnection::onSocketActivity);
+    m_readNotifier->setEnabled(true);
+    m_writeNotifier->setEnabled(false);
 
     m_statsTimer = new QTimer(this);
     connect(m_statsTimer, &QTimer::timeout, this, &SshConnection::startStats);
     m_statsTimer->start(8000);
     QTimer::singleShot(500, this, &SshConnection::startStats);
+
+    if (m_keepAliveSeconds > 0) {
+        libssh2_keepalive_config(m_session, 1, m_keepAliveSeconds);
+        m_keepAliveTimer = new QTimer(this);
+        connect(m_keepAliveTimer, &QTimer::timeout, this, &SshConnection::onKeepAlive);
+        m_keepAliveTimer->start(m_keepAliveSeconds * 1000);
+    }
 
     m_connected = true;
 
@@ -595,55 +645,107 @@ void SshConnection::readShell() {
     if (!m_channel || !m_connected)
         return;
 
-    LIBSSH2_POLLFD pfds[1];
-    pfds[0].type = LIBSSH2_POLLFD_CHANNEL;
-    pfds[0].fd.channel = m_channel;
-    pfds[0].events = LIBSSH2_POLLFD_POLLIN;
-    pfds[0].revents = 0;
-
-    int prc = libssh2_poll(pfds, 1, 0);
-    if (prc < 0)
+    // libssh2_channel_read() drives the transport read itself, pulling pending
+    // packets off the OS socket into the session queue, so it is safe to call
+    // from a socket notifier. (A libssh2_poll() gate would miss data still
+    // sitting in the kernel socket buffer, since poll only inspects the
+    // already-queued packets.)
+    char buf[8192];
+    ssize_t n;
+    while ((n = libssh2_channel_read(m_channel, buf, sizeof(buf))) > 0) {
+        emit shellDataReceived(QByteArray(buf, static_cast<int>(n)));
+    }
+    if (n < 0 && n != LIBSSH2_ERROR_EAGAIN) {
+        handleShellClosed();
         return;
-
-    if (pfds[0].revents & LIBSSH2_POLLFD_POLLIN) {
-        char buf[8192];
-        ssize_t n;
-        while ((n = libssh2_channel_read(m_channel, buf, sizeof(buf))) > 0) {
-            emit shellDataReceived(QByteArray(buf, static_cast<int>(n)));
-        }
-        if (n < 0 && n != LIBSSH2_ERROR_EAGAIN) {
-            m_connected = false;
-            if (m_pollTimer) m_pollTimer->stop();
-            if (m_statsTimer) m_statsTimer->stop();
-            emit shellClosed();
-            return;
-        }
     }
 
     if (libssh2_channel_eof(m_channel)) {
         // Drain any remaining buffered data before reporting closure.
-        char buf[8192];
-        ssize_t n;
         while ((n = libssh2_channel_read(m_channel, buf, sizeof(buf))) > 0) {
             emit shellDataReceived(QByteArray(buf, static_cast<int>(n)));
         }
-        m_connected = false;
-        if (m_pollTimer) m_pollTimer->stop();
-        if (m_statsTimer) m_statsTimer->stop();
-        emit shellClosed();
+        handleShellClosed();
     }
 }
 
-void SshConnection::onPollTimer() {
+void SshConnection::handleShellClosed() {
+    m_connected = false;
+    stopNotifiers();
+    if (m_statsTimer)
+        m_statsTimer->stop();
+    if (m_keepAliveTimer)
+        m_keepAliveTimer->stop();
+    emit shellClosed();
+}
+
+void SshConnection::onSocketActivity() {
     if (!m_connected)
         return;
     readShell();
+    if (!m_connected)
+        return;
     pollX11Bridges();
     pollStats();
 
     for (SshTunnel* t : m_tunnels) {
         t->poll();
     }
+    armNotifiers();
+}
+
+void SshConnection::armNotifiers() {
+    if (!m_readNotifier || !m_writeNotifier)
+        return;
+    if (!m_session || !m_connected) {
+        m_readNotifier->setEnabled(false);
+        m_writeNotifier->setEnabled(false);
+        return;
+    }
+    // Inbound data can arrive at any time, so the read notifier stays armed.
+    m_readNotifier->setEnabled(true);
+    // Arm the write notifier only while libssh2 needs to send; while the socket
+    // is writable a level-triggered write notifier would fire continuously.
+    m_writeNotifier->setEnabled(libssh2_session_block_directions(m_session) & LIBSSH2_SESSION_BLOCK_OUTBOUND);
+}
+
+void SshConnection::stopNotifiers() {
+    if (m_readNotifier) {
+        m_readNotifier->setEnabled(false);
+        delete m_readNotifier;
+        m_readNotifier = nullptr;
+    }
+    if (m_writeNotifier) {
+        m_writeNotifier->setEnabled(false);
+        delete m_writeNotifier;
+        m_writeNotifier = nullptr;
+    }
+}
+
+void SshConnection::setKeepAliveSeconds(int seconds) {
+    m_keepAliveSeconds = qMax(0, seconds);
+}
+
+void SshConnection::setCipherAlgorithms(const QString& ciphers) {
+    m_cryptCipher = ciphers.trimmed();
+}
+
+void SshConnection::setKexAlgorithm(const QString& kex) {
+    m_kexAlgo = kex.trimmed();
+}
+
+void SshConnection::setMacAlgorithm(const QString& mac) {
+    m_macAlgo = mac.trimmed();
+}
+
+void SshConnection::onKeepAlive() {
+    if (!m_connected || !m_session)
+        return;
+    // Non-blocking: sends a keepalive only when it is due. Re-arm the notifiers
+    // in case libssh2 now wants to write (the write notifier is otherwise only
+    // armed from onSocketActivity()).
+    libssh2_keepalive_send(m_session, nullptr);
+    armNotifiers();
 }
 
 void SshConnection::sendToShell(const QByteArray& data) {
@@ -733,6 +835,12 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
         return;
     }
 
+    qint64 totalBytes = -1;
+    LIBSSH2_SFTP_ATTRIBUTES attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    if (libssh2_sftp_fstat(handle, &attrs) == 0 && (attrs.flags & LIBSSH2_SFTP_ATTR_SIZE))
+        totalBytes = static_cast<qint64>(attrs.filesize);
+
     QFile localFile(localPath);
     if (!localFile.open(QIODevice::WriteOnly)) {
         libssh2_sftp_close(handle);
@@ -740,7 +848,9 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
         return;
     }
 
+    const QString displayName = QFileInfo(remotePath).fileName();
     char buffer[32768];
+    qint64 doneBytes = 0;
     while (true) {
         int bytesRead = retry([this, &handle, &buffer]() { return libssh2_sftp_read(handle, buffer, sizeof(buffer)); });
         if (bytesRead < 0) {
@@ -752,10 +862,13 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
         if (bytesRead == 0)
             break;
         localFile.write(buffer, bytesRead);
+        doneBytes += bytesRead;
+        emit transferProgress(displayName, doneBytes, totalBytes);
     }
 
     localFile.close();
     libssh2_sftp_close(handle);
+    emit transferProgress(displayName, totalBytes, totalBytes);
     emit operationFinished(true, "Download finished successfully: " + QFileInfo(remotePath).fileName());
 }
 
@@ -783,6 +896,9 @@ void SshConnection::uploadFile(const QString& localPath, const QString& remotePa
     }
 
     char buffer[32768];
+    qint64 doneBytes = 0;
+    const qint64 totalBytes = localFile.size();
+    const QString displayName = QFileInfo(localPath).fileName();
     while (true) {
         qint64 bytesRead = localFile.read(buffer, sizeof(buffer));
         if (bytesRead <= 0)
@@ -801,11 +917,14 @@ void SshConnection::uploadFile(const QString& localPath, const QString& remotePa
             }
             bytesToWrite -= bytesWritten;
             ptr += bytesWritten;
+            doneBytes += bytesWritten;
         }
+        emit transferProgress(displayName, doneBytes, totalBytes);
     }
 
     localFile.close();
     libssh2_sftp_close(handle);
+    emit transferProgress(displayName, totalBytes, totalBytes);
     emit operationFinished(true, "Upload finished successfully: " + QFileInfo(localPath).fileName());
 }
 
@@ -891,6 +1010,9 @@ bool SshConnection::uploadOneFile(const QString& localPath, const QString& remot
 
     char buffer[32768];
     bool ok = true;
+    qint64 doneBytes = 0;
+    const qint64 totalBytes = f.size();
+    const QString displayName = QFileInfo(localPath).fileName();
     while (true) {
         qint64 n = f.read(buffer, sizeof(buffer));
         if (n <= 0)
@@ -905,13 +1027,16 @@ bool SshConnection::uploadOneFile(const QString& localPath, const QString& remot
             }
             p += w;
             remaining -= w;
+            doneBytes += w;
         }
         if (!ok)
             break;
+        emit transferProgress(displayName, doneBytes, totalBytes);
     }
 
     f.close();
     libssh2_sftp_close(handle);
+    emit transferProgress(displayName, totalBytes, totalBytes);
     return ok;
 }
 
@@ -967,6 +1092,10 @@ void SshConnection::startStats() {
         return;
     m_statsState = StatsState::Opening;
     m_statsBuffer.clear();
+    // No socket event necessarily fires to start the stats channel, so kick the
+    // processing once; from then on the socket notifiers drive it.
+    if (m_connected)
+        onSocketActivity();
 }
 
 void SshConnection::pollStats() {
@@ -1179,6 +1308,13 @@ void SshConnection::handleX11Open(LIBSSH2_CHANNEL* channel, const char* shost, i
     auto* bridge = new X11Bridge();
     bridge->channel = channel;
     bridge->xSock = xSock;
+    // Forward X server -> SSH channel direction on its own notifier; the
+    // channel -> X server direction is handled from the SSH socket notifier.
+    bridge->xNotifier = new QSocketNotifier(xSock, QSocketNotifier::Read, this);
+    connect(bridge->xNotifier, &QSocketNotifier::activated, this, [this, bridge]() {
+        if (m_connected && m_x11Bridges.contains(bridge))
+            pollX11Bridges();
+    });
     m_x11Bridges.append(bridge);
 }
 
@@ -1224,6 +1360,10 @@ void SshConnection::pollX11Bridges() {
         if (b->channelEof && b->sockEof) {
             libssh2_channel_close(b->channel);
             libssh2_channel_free(b->channel);
+            if (b->xNotifier) {
+                b->xNotifier->setEnabled(false);
+                delete b->xNotifier;
+            }
             closeSocketFd(b->xSock);
             delete b;
             it = m_x11Bridges.erase(it);
@@ -1246,6 +1386,10 @@ void SshConnection::disconnectFromHost() {
     closeStats();
 
     for (X11Bridge* b : m_x11Bridges) {
+        if (b->xNotifier) {
+            b->xNotifier->setEnabled(false);
+            delete b->xNotifier;
+        }
         if (b->channel) {
             libssh2_channel_close(b->channel);
             libssh2_channel_free(b->channel);
@@ -1256,15 +1400,16 @@ void SshConnection::disconnectFromHost() {
     }
     m_x11Bridges.clear();
 
-    if (m_pollTimer) {
-        m_pollTimer->stop();
-        delete m_pollTimer;
-        m_pollTimer = nullptr;
-    }
+    stopNotifiers();
     if (m_statsTimer) {
         m_statsTimer->stop();
         delete m_statsTimer;
         m_statsTimer = nullptr;
+    }
+    if (m_keepAliveTimer) {
+        m_keepAliveTimer->stop();
+        delete m_keepAliveTimer;
+        m_keepAliveTimer = nullptr;
     }
     if (m_channel) {
         libssh2_channel_close(m_channel);

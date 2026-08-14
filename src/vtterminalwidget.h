@@ -90,6 +90,7 @@ private:
     void resetAttributes();
     void drawCell(QPainter& painter, int x, int y, const Cell& c);
     VtPalette currentPalette() const;
+    void rebuildHighlightCache(int firstLine);
 
 
 
@@ -147,6 +148,12 @@ private:
 
     // stream buffer for partial sequence & UTF-8 parsing across chunk boundaries
     QByteArray m_parseBuffer;
+
+    // highlight cache (regex results), rebuilt when content/scroll changes
+    QVector<QVector<QColor>> m_overrideFg;
+    QVector<QVector<bool>> m_overrideBold;
+    bool m_highlightDirty = true;
+    int m_highlightFirstLine = -1;
 
     // cursor state & blinking
     bool m_cursorVisible = true;

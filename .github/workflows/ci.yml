@@ -63,7 +63,9 @@ jobs:
           cache: true
 
       - name: Configure
-        run: cmake -B build -A x64 -DBANCHO_ENABLE_VNC=ON
+        run: |
+          $ver = if ($env:GITHUB_REF_NAME -match '^v') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.1.0' }
+          cmake -B build -A x64 -DBANCHO_ENABLE_VNC=ON -DBANCHO_VERSION=$ver
 
       - name: Build
         run: cmake --build build --config Release
@@ -75,9 +77,11 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path pkg\banchoxterm -Force
           Copy-Item build\Release\banchoxterm.exe pkg\banchoxterm\
+          Copy-Item build\Release\banchoxterm-term.exe pkg\banchoxterm\
           Copy-Item build\_deps\libssh2-build\src\Release\libssh2.dll pkg\banchoxterm\ -ErrorAction SilentlyContinue
           Copy-Item build\_deps\libssh2-build\src\libssh2.dll pkg\banchoxterm\ -ErrorAction SilentlyContinue
           windeployqt --release --compiler-runtime pkg\banchoxterm\banchoxterm.exe
+          windeployqt --release --compiler-runtime pkg\banchoxterm\banchoxterm-term.exe
 
       - name: Install NSIS
         run: choco install nsis -y --no-progress
@@ -85,10 +89,13 @@ jobs:
       - name: Build NSIS installer
         run: |
           $dist = (Resolve-Path "pkg\banchoxterm").Path
-          makensis -DDIST_DIR="$dist" packaging\windows\installer.nsi
+          $ver = if ($env:GITHUB_REF_NAME -match '^v') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.1.0' }
+          makensis -DVERSION="$ver" -DDIST_DIR="$dist" packaging\windows\installer.nsi
 
       - name: Create portable ZIP
         run: |
+          # The portable edition stores settings next to the exe (portable.ini marker).
+          New-Item -ItemType File -Path pkg\banchoxterm\portable.ini -Force
           Compress-Archive -Path "$env:GITHUB_WORKSPACE\pkg\banchoxterm\*" -DestinationPath "$env:GITHUB_WORKSPACE\BanchoXterm-windows-x64.zip"
 
       - name: Upload installer

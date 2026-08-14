@@ -29,22 +29,34 @@ Pre-built binaries are published on the [Releases](https://github.com/Gargadon/b
 
 ## Build from source
 
+The repository uses Git submodules for its vendored QTermWidget port, so a
+fresh clone needs an extra step before configuring:
+
+```bash
+git clone git@github.com:Gargadon/banchoxterm.git
+cd banchoxterm
+git submodule update --init --recursive
+```
+
 ### Requirements
 
 - CMake 3.16+
 - C++17 compiler (GCC, Clang, or MSVC)
-- Qt 6.6+ (Core, Widgets, Gui, Network)
-- [QTermWidget6](https://github.com/lxqt/qtermwidget) (Linux only)
-- [libssh2](https://www.libssh2.org)
+- Qt 6.6+ (Core, Widgets, Gui, Network, Test, LinguistTools)
+- [libssh2](https://www.libssh2.org) — fetched automatically by CMake (FetchContent)
+
+> QTermWidget is handled per-platform: on **Linux** it is fetched from upstream
+> via FetchContent; on **Windows** it is compiled from the vendored
+> `third_party/qtermwidget` submodule.
 
 ### Linux
 
 ```bash
 # Install dependencies (Ubuntu/Debian)
-sudo apt install build-essential cmake qt6-base-dev libqtermwidget6-dev libssh2-1-dev ninja-build
+sudo apt install build-essential cmake qt6-base-dev libssh2-1-dev ninja-build
 
 # Install dependencies (Fedora)
-sudo dnf install cmake qt6-qtbase-devel qtermwidget6-devel libssh2-devel ninja-build
+sudo dnf install cmake qt6-qtbase-devel libssh2-devel ninja-build
 
 # Build
 cmake -B build -G Ninja
@@ -54,26 +66,55 @@ cmake --build build
 ./build/banchoxterm
 ```
 
-### Windows (MSYS2)
+### Windows (MSVC)
 
-```bash
-# Install dependencies
-pacman -S mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja \
-          mingw-w64-x86_64-qt6-base mingw-w64-x86_64-qtermwidget6 \
-          mingw-w64-x86_64-libssh2
+Build with the MSVC toolchain (Visual Studio 2017+ or Build Tools) and a Qt 6
+build configured for MSVC (e.g. `msvc2022_64` from the online installer). From
+a **Developer Command Prompt**:
 
-# Build
+```bat
+set PATH=C:\Qt\6.x.x\msvc2022_64\bin;%PATH%
+cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Debug
+```
+
+Or with Ninja + jom:
+
+```bat
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+set PATH=C:\Qt\6.x.x\msvc2022_64\bin;C:\Qt\Tools\CMake_64\bin;%PATH%
 cmake -B build -G Ninja
 cmake --build build
 ```
 
+The build produces `banchoxterm.exe` plus `banchoxterm-term.exe` (the GPL
+terminal host that embeds QTermWidget, launched by the main app over IPC).
+
 ## Limitations
 
-- **FTP** is passive-mode only (no TLS/FTPS, no chmod).
-- **X11 forwarding** on Windows requires a local X server (e.g. VcXsrv, X410 or Xming) listening on `127.0.0.1:6000`.
+- **FTP** is passive-mode only (no TLS/FTPS, no chmod) and has no folder upload,
+  no byte-level progress, and no drag & drop (use the SFTP sidebar for those).
+- **SFTP drag & drop** only works *within* the app: local files dropped on the
+  sidebar are uploaded, and remote files can be dragged out of the sidebar to a
+  chosen local folder. Dragging remote files to another application (e.g.
+  Explorer) is not supported.
+- **X11 forwarding** on Windows requires a local X server (e.g. VcXsrv, X410 or
+  Xming) listening on `127.0.0.1:6000`.
 - **RDP** on Windows is embedded via the native Remote Desktop ActiveX control
   when Qt ActiveQt is available (falls back to `mstsc.exe` otherwise). On Linux
-  it uses `xfreerdp`. **VNC** uses the embedded `libvncclient`.
+  it uses `xfreerdp`.
+- **VNC** supports a limited set of encodings (Raw, Hextile, CopyRect; Tight and
+  ZRLE are disabled because the embedded libvncclient builds without zlib) and
+  does not support complex key modifiers (e.g. Ctrl+letter).
+- **Remote monitoring** is implemented for Windows hosts but has not been tested
+  against a real Windows SSH server.
+- **Auto-update** checks GitHub Releases and downloads the matching edition
+  (installer or portable ZIP). The portable edition relies on `tar.exe`
+  (bundled with Windows 10+), and the installer is not code-signed, so Windows
+  may show a SmartScreen warning.
+- **Portable edition** stores settings, sessions, and known hosts next to the
+  executable. These files are not shared with an installed copy of the app.
+- **Session logging** does not capture Linux local (QTermWidget) sessions.
 
 ## License
 

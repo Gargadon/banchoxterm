@@ -39,6 +39,7 @@ private slots:
     void onChangeFontClicked();
     void onBrowseEditorClicked();
     void onAccept();
+    void onManageKnownHosts();
 
 private:
     void loadSettings();

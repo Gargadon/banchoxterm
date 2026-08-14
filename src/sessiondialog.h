@@ -9,6 +9,8 @@ class QStackedWidget;
 class QCheckBox;
 class QTableWidget;
 class QPushButton;
+class QLabel;
+class QFont;
 
 class SessionDialog : public QDialog {
     Q_OBJECT
@@ -27,6 +29,19 @@ private:
     QLineEdit* m_groupEdit;
     QComboBox* m_typeCombo;
     QStackedWidget* m_stackedWidget;
+    QWidget* m_terminalSettingsWidget = nullptr;
+
+    // Shared terminal settings (SSH / Local / Telnet / Serial)
+    QSpinBox* m_scrollbackSpin = nullptr;
+    QLabel* m_fontLabel = nullptr;
+    QFont m_font;
+    bool m_fontChosen = false;
+
+    // SSH advanced
+    QSpinBox* m_keepAliveSpin = nullptr;
+    QLineEdit* m_cipherEdit = nullptr;
+    QLineEdit* m_kexEdit = nullptr;
+    QLineEdit* m_macEdit = nullptr;
 
     // SSH
     QLineEdit* m_hostEdit;
