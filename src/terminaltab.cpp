@@ -327,6 +327,8 @@ void TerminalTab::startConPtyPolling() {
 
     m_conptyPollTimer = new QTimer(this);
     connect(m_conptyPollTimer, &QTimer::timeout, this, &TerminalTab::pollConPtyOutput);
+    // Fast polling while there is output; pollConPtyOutput() adapts the
+    // interval up when the process is idle to avoid burning CPU at 100 Hz.
     m_conptyPollTimer->start(10);
 }
 
@@ -338,6 +340,13 @@ void TerminalTab::pollConPtyOutput() {
     if (!data.isEmpty()) {
         feedTerminalData(data);
         logData(data);
+        // Output arrived: resume fast polling.
+        if (m_conptyPollTimer->interval() != 10)
+            m_conptyPollTimer->start(10);
+    } else if (m_conptyPollTimer->interval() < 50) {
+        // No output: back off gradually (10 -> 20 -> 30 -> 40 -> 50 ms) so
+        // idle sessions stop waking up the UI thread constantly.
+        m_conptyPollTimer->start(m_conptyPollTimer->interval() + 10);
     }
 
     if (!m_conpty->isRunning()) {

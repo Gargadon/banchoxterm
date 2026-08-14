@@ -65,6 +65,21 @@ Ya implementado:
       reporta `LIBSSH2_SESSION_BLOCK_OUTBOUND`; notificador propio por socket X11;
       se eliminó el `QTimer` de 15 ms. El paso de transporte lo dispara
       `libssh2_channel_read`, que lee el socket real).
+- [x] **Rendimiento de CPU**: guard anti-spin en `SshConnection::onSocketActivity()`
+      (`m_activityProgress`/`m_socketKickPending`: el re-kick con
+      `QTimer::singleShot(0)` solo se re-encola mientras las máquinas de estado
+      realmente consumieron datos, evitando girar el event loop al máximo si
+      libssh2 bufferiza sin progreso en el socket); `readShell()` acumula todos
+      los chunks del pase y emite un único `shellDataReceived` (la señal cruza
+      hilos vía cola, así que se eliminan cientos de entregas/copias por segundo
+      en salida masiva); en Windows el timer de ConPTY pasó de fijo 10 ms a
+      adaptativo (10→50 ms, sube 10 ms por pase sin salida y vuelve a 10 ms al
+      llegar datos). Verificado en Linux (build limpio + tests). Pendiente:
+      verificación en Windows.
+- [x] **Rendimiento de UI**: iconos de carpeta/archivo del árbol SFTP cacheados
+      como estáticos (`folderIcon()`/`fileIcon()` en `sftpsidebar.cpp`); antes se
+      re-decodificaba el SVG por cada item, costoso con directorios de miles de
+      archivos.
 - [x] **Rendimiento de pintado**: caché de highlighting en `VtTerminalWidget`
       (los regex se recalculan solo cuando cambia el contenido/scroll, no en
       cada parpadeo del cursor).

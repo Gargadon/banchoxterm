@@ -30,6 +30,38 @@
 #include "remoteeditordialog.h"
 #include "ftpclient.h"
 
+// Icons are cached as statics: constructing a QIcon from an :/ resource
+// re-decodes the SVG every time, which is noticeable when populating a
+// directory listing with thousands of entries.
+static const QIcon& folderIcon() {
+    static const QIcon icon(QStringLiteral(":/icons/folder.svg"));
+    return icon;
+}
+static const QIcon& fileIcon() {
+    static const QIcon icon(QStringLiteral(":/icons/file.svg"));
+    return icon;
+}
+static const QIcon& editIcon() {
+    static const QIcon icon(QStringLiteral(":/icons/edit.svg"));
+    return icon;
+}
+static const QIcon& downloadIcon() {
+    static const QIcon icon(QStringLiteral(":/icons/download.svg"));
+    return icon;
+}
+static const QIcon& uploadIcon() {
+    static const QIcon icon(QStringLiteral(":/icons/upload.svg"));
+    return icon;
+}
+static const QIcon& deleteIcon() {
+    static const QIcon icon(QStringLiteral(":/icons/delete.svg"));
+    return icon;
+}
+static const QIcon& refreshIcon() {
+    static const QIcon icon(QStringLiteral(":/icons/refresh.svg"));
+    return icon;
+}
+
 static QString formatBytes(qint64 bytes) {
     const double b = static_cast<double>(bytes);
     if (b >= 1024.0 * 1024.0 * 1024.0)
@@ -351,7 +383,7 @@ void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& 
     // "." entry (refresh current directory)
     auto* dotItem = new QTreeWidgetItem();
     dotItem->setText(0, ".");
-    dotItem->setIcon(0, QIcon(":/icons/folder.svg"));
+    dotItem->setIcon(0, folderIcon());
     dotItem->setData(0, Qt::UserRole, true);
     dotItem->setData(0, Qt::UserRole + 1, QStringLiteral("."));
     m_treeWidget->addTopLevelItem(dotItem);
@@ -360,7 +392,7 @@ void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& 
     if (m_currentPath != "/" && !m_currentPath.isEmpty()) {
         auto* dotdotItem = new QTreeWidgetItem();
         dotdotItem->setText(0, "..");
-        dotdotItem->setIcon(0, QIcon(":/icons/folder.svg"));
+        dotdotItem->setIcon(0, folderIcon());
         dotdotItem->setData(0, Qt::UserRole, true);
         dotdotItem->setData(0, Qt::UserRole + 1, QStringLiteral(".."));
         m_treeWidget->addTopLevelItem(dotdotItem);
@@ -379,12 +411,12 @@ void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& 
         item->setData(0, Qt::UserRole + 2, base + file.name);
 
         if (file.isDirectory) {
-            item->setIcon(0, QIcon(":/icons/folder.svg"));
+            item->setIcon(0, folderIcon());
             item->setText(1, tr("<DIR>"));
             item->setText(2, file.mtime.isValid() ? file.mtime.toString("yyyy-MM-dd hh:mm") : "");
             folders.append(item);
         } else {
-            item->setIcon(0, QIcon(":/icons/file.svg"));
+            item->setIcon(0, fileIcon());
 
             double sizeKB = file.size / 1024.0;
             if (sizeKB > 1024.0) {

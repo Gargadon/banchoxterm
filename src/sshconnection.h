@@ -153,6 +153,13 @@ private:
     QByteArray m_statsBuffer;
     bool m_remoteIsWindows = false;
 
+    // Event-loop kick guard: when libssh2 is buffering data internally without
+    // socket activity, onSocketActivity() re-arms itself via a queued kick. These
+    // two members prevent the kick from spinning the event loop when no progress
+    // is being made (m_activityProgress) or while a kick is already queued.
+    bool m_activityProgress = false;
+    bool m_socketKickPending = false;
+
     // X11 forwarding
     bool m_x11Forwarding = false;
     QString m_x11Display;

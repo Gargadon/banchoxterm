@@ -653,11 +653,20 @@ void SshConnection::readShell() {
     // from a socket notifier. (A libssh2_poll() gate would miss data still
     // sitting in the kernel socket buffer, since poll only inspects the
     // already-queued packets.)
+    //
+    // All chunks read in this pass are accumulated into one buffer and emitted
+    // as a single queued signal. shellDataReceived crosses a thread boundary, so
+    // emitting one signal per 8 KiB chunk would swamp the UI thread's event
+    // queue with signal deliveries and buffer copies under heavy output.
     char buf[8192];
     ssize_t n;
+    QByteArray data;
     while ((n = libssh2_channel_read(m_channel, buf, sizeof(buf))) > 0) {
-        emit shellDataReceived(QByteArray(buf, static_cast<int>(n)));
+        m_activityProgress = true;
+        data.append(buf, static_cast<int>(n));
     }
+    if (!data.isEmpty())
+        emit shellDataReceived(data);
     if (n < 0 && n != LIBSSH2_ERROR_EAGAIN) {
         handleShellClosed();
         return;
@@ -665,9 +674,13 @@ void SshConnection::readShell() {
 
     if (libssh2_channel_eof(m_channel)) {
         // Drain any remaining buffered data before reporting closure.
+        data.clear();
         while ((n = libssh2_channel_read(m_channel, buf, sizeof(buf))) > 0) {
-            emit shellDataReceived(QByteArray(buf, static_cast<int>(n)));
+            m_activityProgress = true;
+            data.append(buf, static_cast<int>(n));
         }
+        if (!data.isEmpty())
+            emit shellDataReceived(data);
         handleShellClosed();
     }
 }
@@ -685,6 +698,7 @@ void SshConnection::handleShellClosed() {
 void SshConnection::onSocketActivity() {
     if (!m_connected)
         return;
+    m_activityProgress = false;
     readShell();
     if (!m_connected)
         return;
@@ -701,10 +715,20 @@ void SshConnection::onSocketActivity() {
     // In that case no socket notifier will ever fire, so the non-blocking state
     // machines (stats, tunnels) would stall forever. Kick them again on the next
     // event-loop turn so buffered data is processed.
+    //
+    // Guarded by m_activityProgress: only re-arm the kick while the state
+    // machines actually consumed data in this pass. Once there is no buffered
+    // progress left, stop kicking and let the always-armed read notifier wake us
+    // when real network data arrives, instead of spinning the event loop.
     if (m_connected && m_session &&
         libssh2_session_block_directions(m_session) == 0 &&
-        m_statsState != StatsState::Idle) {
-        QTimer::singleShot(0, this, &SshConnection::onSocketActivity);
+        m_statsState != StatsState::Idle &&
+        m_activityProgress && !m_socketKickPending) {
+        m_socketKickPending = true;
+        QTimer::singleShot(0, this, [this]() {
+            m_socketKickPending = false;
+            onSocketActivity();
+        });
     }
 }
 
@@ -1151,6 +1175,7 @@ void SshConnection::pollStats() {
         while (true) {
             int bytesRead = libssh2_channel_read(m_statsChannel, buffer, sizeof(buffer));
             if (bytesRead > 0) {
+                m_activityProgress = true;
                 m_statsBuffer.append(buffer, bytesRead);
             } else if (bytesRead == 0) {
                 finishStats();
@@ -1339,6 +1364,7 @@ void SshConnection::pollX11Bridges() {
         char buf[8192];
         ssize_t n;
         while ((n = libssh2_channel_read(b->channel, buf, sizeof(buf))) > 0) {
+            m_activityProgress = true;
             ssize_t off = 0;
             while (off < n) {
                 ssize_t w = sockWrite(b->xSock, buf + off, static_cast<size_t>(n - off));
