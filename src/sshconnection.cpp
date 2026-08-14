@@ -26,6 +26,7 @@ using SockLenT = int;
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -153,6 +154,13 @@ bool SshConnection::openSocket() {
     }
 
     setNonBlocking(m_sock);
+
+    int flag = 1;
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+    int bufSize = 262144;
+    ::setsockopt(m_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&bufSize), sizeof(bufSize));
+    ::setsockopt(m_sock, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bufSize), sizeof(bufSize));
+
     int cres = ::connect(m_sock, res->ai_addr, static_cast<SockLenT>(res->ai_addrlen));
     freeaddrinfo(res);
 
@@ -604,13 +612,19 @@ void SshConnection::openShell() {
         return;
     }
 
-    int rc = retry([this]() { return libssh2_channel_request_pty(m_channel, "xterm-256color"); });
+    static const char pty_modes[] = {
+        3, 0, 0, 0, 0x7f, // TTY_OP_ERASE = 0x7F (Backspace)
+        0                 // TTY_OP_END
+    };
+    int rc = retry([this]() {
+        return libssh2_channel_request_pty_ex(m_channel, "xterm-256color", 14,
+                                              pty_modes, sizeof(pty_modes),
+                                              m_ptyCols, m_ptyRows, 0, 0);
+    });
     if (rc != 0) {
         emit connectionFailed("Failed to request PTY");
         return;
     }
-
-    libssh2_channel_request_pty_size(m_channel, m_ptyCols, m_ptyRows);
 
     if (m_x11Forwarding) {
         // Empty auth protocol/cookie means "no access control" (the local X
@@ -628,19 +642,6 @@ void SshConnection::openShell() {
     if (rc != 0) {
         emit connectionFailed("Failed to start shell");
         return;
-    }
-
-    // Enable OSC 7 working directory reporting so the SFTP browser can follow
-    // terminal navigation (bash and zsh), if enabled in settings. The trailing clear-screen
-    // erases the command's own echo so the user does not see the injected snippet.
-    QSettings settings;
-    if (settings.value("terminal/shellIntegration", true).toBool()) {
-        static const char* integration = "if [ -n \"$BASH_VERSION\" ]; then "
-                                         "PROMPT_COMMAND='printf \"\\033]7;file://%s\\007\" \"$PWD\"'; "
-                                         "elif [ -n \"$ZSH_VERSION\" ]; then "
-                                         "precmd(){ printf \"\\033]7;file://%s\\007\" \"$PWD\"; }; fi"
-                                         "; printf '\\033[2J\\033[H'\n";
-        libssh2_channel_write(m_channel, integration, std::strlen(integration));
     }
 }
 
@@ -887,7 +888,7 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
     }
 
     const QString displayName = QFileInfo(remotePath).fileName();
-    char buffer[32768];
+    char buffer[131072];
     qint64 doneBytes = 0;
     while (true) {
         int bytesRead = retry([this, &handle, &buffer]() { return libssh2_sftp_read(handle, buffer, sizeof(buffer)); });
@@ -933,7 +934,7 @@ void SshConnection::uploadFile(const QString& localPath, const QString& remotePa
         return;
     }
 
-    char buffer[32768];
+    char buffer[131072];
     qint64 doneBytes = 0;
     const qint64 totalBytes = localFile.size();
     const QString displayName = QFileInfo(localPath).fileName();
@@ -1046,7 +1047,7 @@ bool SshConnection::uploadOneFile(const QString& localPath, const QString& remot
         return false;
     }
 
-    char buffer[32768];
+    char buffer[131072];
     bool ok = true;
     qint64 doneBytes = 0;
     const qint64 totalBytes = f.size();

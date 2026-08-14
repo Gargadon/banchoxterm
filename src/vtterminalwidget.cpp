@@ -861,17 +861,21 @@ void VtTerminalWidget::rebuildHighlightCache(int firstLine) {
     m_highlightDirty = false;
 }
 
-void VtTerminalWidget::paintEvent(QPaintEvent*) {
+void VtTerminalWidget::paintEvent(QPaintEvent* event) {
     QPainter painter(this);
     painter.setFont(m_font);
 
-    painter.fillRect(rect(), currentPalette().bg);
+    const QRect dirtyRect = event ? event->rect() : rect();
+    painter.fillRect(dirtyRect, currentPalette().bg);
 
     int firstLine = firstVisibleLine();
     if (m_highlightDirty || m_highlightFirstLine != firstLine)
         rebuildHighlightCache(firstLine);
 
-    for (int y = 0; y < m_rows; y++) {
+    int startY = qBound(0, dirtyRect.top() / m_charHeight, m_rows - 1);
+    int endY = qBound(0, (dirtyRect.bottom() + m_charHeight - 1) / m_charHeight, m_rows);
+
+    for (int y = startY; y < endY; y++) {
         int fullLine = firstLine + y;
         for (int x = 0; x < m_cols; x++) {
             Cell c = cellAt(x, fullLine);

@@ -377,6 +377,7 @@ void SftpSidebar::onConnectionFailed(const QString& error) {
 }
 
 void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& files) {
+    m_treeWidget->setUpdatesEnabled(false);
     m_treeWidget->clear();
     updatePath(path);
 
@@ -430,10 +431,9 @@ void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& 
         }
     }
 
-    for (QTreeWidgetItem* f : folders)
-        m_treeWidget->addTopLevelItem(f);
-    for (QTreeWidgetItem* f : normalFiles)
-        m_treeWidget->addTopLevelItem(f);
+    m_treeWidget->addTopLevelItems(folders);
+    m_treeWidget->addTopLevelItems(normalFiles);
+    m_treeWidget->setUpdatesEnabled(true);
 }
 
 void SftpSidebar::onOperationFinished(bool success, const QString& error) {

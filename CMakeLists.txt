@@ -88,6 +88,18 @@ target_include_directories(banchoxterm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(BANCHO_VERSION "${PROJECT_VERSION}")
 target_compile_definitions(banchoxterm PRIVATE BANCHO_VERSION="${BANCHO_VERSION}")
 
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+if(ipo_supported)
+    set_property(TARGET banchoxterm PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
+
+if(MSVC)
+    target_compile_options(banchoxterm PRIVATE $<$<CONFIG:Release>:/O2 /Ob2 /Oi /Ot>)
+else()
+    target_compile_options(banchoxterm PRIVATE $<$<CONFIG:Release>:-O3>)
+endif()
+
 # Generate the version file consumed by the NSIS installer so the installer,
 # the About dialog and the updater all derive the version from project(VERSION).
 configure_file(
