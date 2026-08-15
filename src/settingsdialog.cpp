@@ -41,19 +41,14 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     appLayout->setSpacing(15);
     appLayout->setContentsMargins(15, 15, 15, 15);
 
-    // Theme selector
     auto* themeLayout = new QHBoxLayout();
     auto* themeLabel = new QLabel(tr("Interface Theme:"), appearanceTab);
     m_themeCombo = new QComboBox(appearanceTab);
-    m_themeCombo->addItem(tr("System Native (Auto)"), "system");
-    m_themeCombo->addItem(tr("Tokyo Night (Dark)"), "dark");
-    m_themeCombo->addItem(tr("Classic (Light)"), "light");
-    int themeIdx = m_themeCombo->findData(m_themeMode);
-    if (themeIdx != -1)
-        m_themeCombo->setCurrentIndex(themeIdx);
-    else
-        m_themeCombo->setCurrentIndex(0);
-
+    m_themeCombo->addItem(tr("System Default"), "system");
+    m_themeCombo->addItem(tr("Light"), "light");
+    m_themeCombo->addItem(tr("Dark"), "dark");
+    const int themeIndex = m_themeCombo->findData(m_themeMode);
+    m_themeCombo->setCurrentIndex(themeIndex >= 0 ? themeIndex : 0);
     themeLayout->addWidget(themeLabel);
     themeLayout->addWidget(m_themeCombo);
     appLayout->addLayout(themeLayout);
@@ -112,7 +107,6 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     fontLayout->setSpacing(8);
 
     auto* fontTitle = new QLabel(tr("Terminal Typography:"), appearanceTab);
-    fontTitle->setStyleSheet("font-weight: bold;");
     fontLayout->addWidget(fontTitle);
 
     auto* fontBtnLayout = new QHBoxLayout();
@@ -171,7 +165,6 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     editorLayout->setContentsMargins(15, 15, 15, 15);
 
     auto* editorTitle = new QLabel(tr("External Text Editor:"), editorTab);
-    editorTitle->setStyleSheet("font-weight: bold;");
     editorLayout->addWidget(editorTitle);
 
     m_sysDefaultRadio = new QRadioButton(tr("Use System Default Text Editor"), editorTab);
@@ -212,7 +205,6 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     securityLayout->setContentsMargins(15, 15, 15, 15);
 
     auto* securityTitle = new QLabel(tr("Master Password:"), securityTab);
-    securityTitle->setStyleSheet("font-weight: bold;");
     securityLayout->addWidget(securityTitle);
 
     m_masterPasswordCheck = new QCheckBox(tr("Use Master Password to protect session credentials"), securityTab);
@@ -220,7 +212,6 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     securityLayout->addWidget(m_masterPasswordCheck);
 
     auto* knownHostsTitle = new QLabel(tr("SSH Host Keys:"), securityTab);
-    knownHostsTitle->setStyleSheet("font-weight: bold;");
     securityLayout->addWidget(knownHostsTitle);
 
     auto* knownHostsBtn = new QPushButton(tr("Manage Known Hosts..."), securityTab);
@@ -291,15 +282,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 
 void SettingsDialog::loadSettings() {
     QSettings settings;
-    // Theme
-    if (settings.contains("theme/mode")) {
-        m_themeMode = settings.value("theme/mode", "system").toString();
-    } else if (settings.contains("theme/dark")) {
-        m_themeMode = settings.value("theme/dark", true).toBool() ? "dark" : "light";
-    } else {
+    m_themeMode = settings.value("theme/mode", "system").toString();
+    if (m_themeMode != "system" && m_themeMode != "light" && m_themeMode != "dark")
         m_themeMode = "system";
-    }
-
     // Font
     if (settings.contains("terminal/font")) {
         m_font.fromString(settings.value("terminal/font").toString());
@@ -330,6 +315,7 @@ void SettingsDialog::loadSettings() {
 void SettingsDialog::saveSettings() {
     QSettings settings;
     m_themeMode = m_themeCombo->currentData().toString();
+    settings.setValue("theme/mode", m_themeMode);
     m_useCustomEditor = m_customRadio->isChecked();
     m_customEditorPath = m_editorPathEdit->text().trimmed();
 
@@ -340,8 +326,6 @@ void SettingsDialog::saveSettings() {
     m_loggingEnabled = m_loggingCheck->isChecked();
     m_logDir = m_logDirEdit->text().trimmed();
 
-    settings.setValue("theme/mode", m_themeMode);
-    settings.setValue("theme/dark", (m_themeMode == "dark"));
     settings.setValue("terminal/font", m_font.toString());
     settings.setValue("editor/useCustom", m_useCustomEditor);
     settings.setValue("editor/customPath", m_customEditorPath);

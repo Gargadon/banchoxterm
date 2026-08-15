@@ -29,6 +29,7 @@
 
 #ifdef Q_OS_WIN
 #include "conpty.h"
+#include <QSerialPort>
 #endif
 
 #ifdef BANCHO_HAVE_RDP_AX
@@ -116,8 +117,33 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 #endif
         } else if (m_session.type == SessionType::Serial) {
 #ifdef Q_OS_WIN
-            feedTerminalData(tr("Serial connections are not supported on Windows.\r\n").toUtf8());
-            m_isActive = false;
+            m_terminal->startExternal();
+            m_serialPort = new QSerialPort(this);
+            m_serialPort->setPortName(m_session.serialPort);
+            m_serialPort->setBaudRate(m_session.baudRate);
+            m_serialPort->setDataBits(QSerialPort::Data8);
+            m_serialPort->setParity(QSerialPort::NoParity);
+            m_serialPort->setStopBits(QSerialPort::OneStop);
+            m_serialPort->setFlowControl(QSerialPort::NoFlowControl);
+            connect(m_serialPort, &QSerialPort::readyRead, this, [this]() {
+                const QByteArray data = m_serialPort->readAll();
+                if (!data.isEmpty()) {
+                    feedTerminalData(data);
+                    logData(data);
+                }
+            });
+            connect(m_serialPort, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError error) {
+                if (error == QSerialPort::NoError)
+                    return;
+                feedTerminalData(tr("\r\n[Serial error: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
+                m_isActive = false;
+                emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+            });
+            if (!m_serialPort->open(QIODevice::ReadWrite)) {
+                feedTerminalData(tr("\r\n[Unable to open serial port: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
+                m_isActive = false;
+                emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+            }
 #else
             QString tool = m_session.serialCmd;
             if (tool.isEmpty())
@@ -144,7 +170,6 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
     // Construir la barra de búsqueda (Ctrl+F)
     m_searchFrame = new QFrame(this);
     m_searchFrame->setFrameShape(QFrame::StyledPanel);
-    m_searchFrame->setStyleSheet("QFrame { background-color: #1a1b26; border-top: 1px solid #414868; }");
     m_searchFrame->hide();
 
     auto* searchLayout = new QHBoxLayout(m_searchFrame);
@@ -152,29 +177,18 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
     searchLayout->setSpacing(8);
 
     auto* searchLabel = new QLabel(tr("Search:"), m_searchFrame);
-    searchLabel->setStyleSheet("color: #a9b1d6; font-weight: bold;");
 
     m_searchEdit = new QLineEdit(m_searchFrame);
-    m_searchEdit->setStyleSheet("QLineEdit { background-color: #16161e; color: #c0caf5; border: 1px solid #414868; "
-                                "padding: 4px; border-radius: 4px; }");
     m_searchEdit->setPlaceholderText(tr("Find text..."));
 
     m_btnPrev = new QPushButton(tr("Previous"), m_searchFrame);
-    m_btnPrev->setStyleSheet(
-        "QPushButton { background-color: #24283b; color: #a9b1d6; border: 1px solid #414868; padding: 4px 8px; "
-        "border-radius: 4px; } QPushButton:hover { background-color: #414868; }");
 
     m_btnNext = new QPushButton(tr("Next"), m_searchFrame);
-    m_btnNext->setStyleSheet(
-        "QPushButton { background-color: #24283b; color: #a9b1d6; border: 1px solid #414868; padding: 4px 8px; "
-        "border-radius: 4px; } QPushButton:hover { background-color: #414868; }");
 
     m_caseSensitiveCheck = new QCheckBox(tr("Case Sensitive"), m_searchFrame);
-    m_caseSensitiveCheck->setStyleSheet("QCheckBox { color: #a9b1d6; }");
 
     auto* closeBtn = new QPushButton("X", m_searchFrame);
     closeBtn->setFlat(true);
-    closeBtn->setStyleSheet("QPushButton { color: #f7768e; font-weight: bold; } QPushButton:hover { color: #ff8998; }");
 
     searchLayout->addWidget(searchLabel);
     searchLayout->addWidget(m_searchEdit, 1);
@@ -207,6 +221,12 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 TerminalTab::~TerminalTab() {
     closeExternalProcess();
 
+    if (m_reconnectTimer) {
+        m_reconnectTimer->stop();
+        delete m_reconnectTimer;
+        m_reconnectTimer = nullptr;
+    }
+
     if (m_logFile) {
         m_logFile->close();
         delete m_logFile;
@@ -214,6 +234,14 @@ TerminalTab::~TerminalTab() {
     }
 
 #ifdef Q_OS_WIN
+    if (m_serialPort) {
+        disconnect(m_serialPort, nullptr, this, nullptr);
+        if (m_serialPort->isOpen())
+            m_serialPort->close();
+        delete m_serialPort;
+        m_serialPort = nullptr;
+    }
+
     if (m_conptyPollTimer) {
         m_conptyPollTimer->stop();
         delete m_conptyPollTimer;
@@ -224,6 +252,9 @@ TerminalTab::~TerminalTab() {
         m_conpty = nullptr;
     }
 #endif
+
+    if (m_connection)
+        disconnect(m_connection, nullptr, this, nullptr);
 
     if (m_connection && m_connectionThread && m_connectionThread->isRunning()) {
         QMetaObject::invokeMethod(m_connection, "disconnectFromHost", Qt::BlockingQueuedConnection);
@@ -428,7 +459,9 @@ void TerminalTab::onSendData(const char* data, int size) {
                                   Q_ARG(QByteArray, QByteArray(data, size)));
     }
 #ifdef Q_OS_WIN
-    else if (m_conpty) {
+    else if (m_serialPort && m_serialPort->isOpen() && m_session.type == SessionType::Serial) {
+        m_serialPort->write(data, size);
+    } else if (m_conpty) {
         m_conpty->write(QByteArray(data, size));
     }
 #endif

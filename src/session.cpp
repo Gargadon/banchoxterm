@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QUuid>
+#include <QRegularExpression>
 
 static QString tunnelTypeToString(TunnelConfig::Type type) {
     switch (type) {
@@ -85,11 +86,16 @@ QJsonObject Session::toJson() const {
     json["id"] = id;
     json["name"] = name;
     json["group"] = group;
+    json["favorite"] = favorite;
     json["type"] = sessionTypeToString(type);
     json["host"] = host;
     json["user"] = user;
     json["port"] = port;
     json["keyPath"] = keyPath;
+    json["jumpHost"] = jumpHost;
+    json["jumpUser"] = jumpUser;
+    json["jumpPort"] = jumpPort;
+    json["jumpKeyPath"] = jumpKeyPath;
     json["x11Forwarding"] = x11Forwarding;
     json["autoReconnect"] = autoReconnect;
     json["shellPath"] = shellPath;
@@ -122,11 +128,16 @@ Session Session::fromJson(const QJsonObject& json) {
     }
     s.name = json["name"].toString();
     s.group = json["group"].toString();
+    s.favorite = json["favorite"].toBool(false);
     s.type = sessionTypeFromString(json["type"].toString());
     s.host = json["host"].toString();
     s.user = json["user"].toString();
     s.port = json["port"].toInt(22);
     s.keyPath = json["keyPath"].toString();
+    s.jumpHost = json["jumpHost"].toString();
+    s.jumpUser = json["jumpUser"].toString();
+    s.jumpPort = json["jumpPort"].toInt(22);
+    s.jumpKeyPath = json["jumpKeyPath"].toString();
     s.x11Forwarding = json["x11Forwarding"].toBool(false);
     s.autoReconnect = json["autoReconnect"].toBool(false);
     s.shellPath = json["shellPath"].toString();
@@ -225,9 +236,7 @@ QList<Session> SessionManager::importSessions(const QString& path, bool* ok) {
     QByteArray data = file.readAll();
     QJsonDocument doc = QJsonDocument::fromJson(data);
     if (!doc.isArray()) {
-        if (ok)
-            *ok = false;
-        return sessions;
+        return importOpenSshConfig(path, ok);
     }
     const QJsonArray arr = doc.array();
     for (const QJsonValue& val : arr) {
@@ -241,5 +250,96 @@ QList<Session> SessionManager::importSessions(const QString& path, bool* ok) {
     }
     if (ok)
         *ok = true;
+    return sessions;
+}
+
+QList<Session> SessionManager::importOpenSshConfig(const QString& path, bool* ok) {
+    QList<Session> sessions;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (ok)
+            *ok = false;
+        return sessions;
+    }
+
+    Session current;
+    bool inHost = false;
+    auto finishHost = [&]() {
+        if (!inHost || current.host.isEmpty())
+            return;
+        if (current.name.isEmpty())
+            current.name = current.host;
+        if (current.id.isEmpty())
+            current.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        current.type = SessionType::SSH;
+        sessions.append(current);
+    };
+
+    const QString home = QDir::homePath();
+    const auto expandPath = [&home](QString value) {
+        value = value.trimmed();
+        if (value.startsWith("~/"))
+            value.replace(0, 1, home);
+        return value;
+    };
+
+    const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+    for (QString line : lines) {
+        line = line.trimmed();
+        if (line.isEmpty() || line.startsWith('#'))
+            continue;
+        const int comment = line.indexOf('#');
+        if (comment >= 0)
+            line = line.left(comment).trimmed();
+        const QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+        if (parts.size() < 2)
+            continue;
+
+        const QString key = parts.at(0).toLower();
+        const QString value = parts.mid(1).join(' ').trimmed();
+        if (key == "host") {
+            finishHost();
+            current = Session();
+            const QString alias = parts.at(1);
+            inHost = !alias.contains('*') && !alias.contains('?');
+            if (inHost)
+                current.name = alias;
+            continue;
+        }
+        if (!inHost)
+            continue;
+
+        if (key == "hostname")
+            current.host = value;
+        else if (key == "user")
+            current.user = value;
+        else if (key == "port") {
+            bool valid = false;
+            const int port = value.toInt(&valid);
+            if (valid && port > 0 && port <= 65535)
+                current.port = port;
+        }
+        else if (key == "identityfile")
+            current.keyPath = expandPath(value);
+        else if (key == "proxyjump") {
+            current.jumpHost = value;
+            const int at = current.jumpHost.lastIndexOf('@');
+            if (at >= 0) {
+                current.jumpUser = current.jumpHost.left(at);
+                current.jumpHost = current.jumpHost.mid(at + 1);
+            }
+            const int colon = current.jumpHost.lastIndexOf(':');
+            if (colon > 0) {
+                bool valid = false;
+                const int port = current.jumpHost.mid(colon + 1).toInt(&valid);
+                if (valid && port > 0 && port <= 65535)
+                    current.jumpPort = port;
+                current.jumpHost = current.jumpHost.left(colon);
+            }
+        }
+    }
+    finishHost();
+    if (ok)
+        *ok = !sessions.isEmpty();
     return sessions;
 }

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(banchoxterm VERSION 1.0.0 LANGUAGES C CXX)
 
+option(BANCHO_ENABLE_ASAN "Enable AddressSanitizer for memory debugging" OFF)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -11,7 +13,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
 # Find Qt6 components
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network Test LinguistTools)
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network SerialPort Test LinguistTools)
 
 include(FetchContent)
 
@@ -141,8 +143,6 @@ set(SOURCES
     src/sshtunnel.h
     src/masterpasswordmanager.cpp
     src/masterpasswordmanager.h
-    src/theme.cpp
-    src/theme.h
     src/updater.cpp
     src/updater.h
     src/vtterminalwidget.cpp
@@ -195,6 +195,7 @@ target_link_libraries(banchoxterm
         Qt6::Widgets
         Qt6::Gui
         Qt6::Network
+        Qt6::SerialPort
         libssh2
         sodium
 )
@@ -254,6 +255,18 @@ endif()
 add_library(qtermwidget6 STATIC ${QTQ_SOURCES})
 target_include_directories(qtermwidget6 PUBLIC ${QTQ_LIB})
 target_link_libraries(qtermwidget6 PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets)
+
+# MSVC's AddressSanitizer reports the instruction that performs an invalid
+# access. This is intentionally opt-in because it changes the runtime and is
+# not suitable for normal release builds.
+if(BANCHO_ENABLE_ASAN AND MSVC)
+    foreach(bancho_sanitized_target banchoxterm qtermwidget6 libssh2_static sodium)
+        if(TARGET ${bancho_sanitized_target})
+            target_compile_options(${bancho_sanitized_target} PRIVATE /fsanitize=address /Zi)
+            target_link_options(${bancho_sanitized_target} PRIVATE /fsanitize=address /INCREMENTAL:NO)
+        endif()
+    endforeach()
+endif()
 target_compile_definitions(qtermwidget6 PRIVATE
     KB_LAYOUT_DIR="${QTQ_LIB}/kb-layouts"
     COLORSCHEMES_DIR="${QTQ_LIB}/color-schemes"

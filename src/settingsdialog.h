@@ -48,7 +48,6 @@ private:
 
     QFont m_font;
     QString m_themeMode = "system";
-
     bool m_useCustomEditor = false;
     QString m_customEditorPath;
     QString m_colorScheme;

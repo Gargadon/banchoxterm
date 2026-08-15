@@ -52,6 +52,10 @@ private:
     QCheckBox* m_x11ForwardCheck = nullptr;
     QCheckBox* m_autoReconnectCheck = nullptr;
     QLineEdit* m_keyEdit;
+    QLineEdit* m_jumpHostEdit = nullptr;
+    QSpinBox* m_jumpPortSpin = nullptr;
+    QLineEdit* m_jumpUserEdit = nullptr;
+    QLineEdit* m_jumpKeyEdit = nullptr;
 
     // Local
     QLineEdit* m_shellEdit;
@@ -71,7 +75,7 @@ private:
     QLineEdit* m_vncPasswordEdit = nullptr;
 
     // Serial
-    QLineEdit* m_serialPortEdit;
+    QComboBox* m_serialPortCombo;
     QComboBox* m_serialBaudCombo;
     QComboBox* m_serialCmdCombo;
 

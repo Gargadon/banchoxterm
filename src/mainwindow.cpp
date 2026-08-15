@@ -1,5 +1,4 @@
 #include "mainwindow.h"
-#include "theme.h"
 #include "sessionssidebar.h"
 #include "sftpsidebar.h"
 #include "terminaltab.h"
@@ -18,6 +17,7 @@
 #include <QLabel>
 #include <QIcon>
 #include <QApplication>
+#include <QPalette>
 #include <QStyle>
 #include <QStyleFactory>
 #include <QStyleHints>
@@ -34,6 +34,56 @@
 #include <QCloseEvent>
 #include <QMessageBox>
 #include <QMenu>
+#include <QSize>
+#include <functional>
+
+namespace {
+QString sessionTypeName(SessionType type) {
+    switch (type) {
+    case SessionType::SSH: return QStringLiteral("SSH");
+    case SessionType::Local: return QStringLiteral("LOCAL");
+    case SessionType::Telnet: return QStringLiteral("TELNET");
+    case SessionType::Serial: return QStringLiteral("SERIAL");
+    case SessionType::RDP: return QStringLiteral("RDP");
+    case SessionType::VNC: return QStringLiteral("VNC");
+    case SessionType::FTP: return QStringLiteral("FTP");
+    }
+    return QStringLiteral("SESSION");
+}
+}
+
+class DetachedTabWindow final : public QMainWindow {
+public:
+    using CloseHandler = std::function<void(DetachedTabWindow*)>;
+    explicit DetachedTabWindow(const QString& title, QWidget* parent = nullptr) : QMainWindow(parent) {
+        setWindowTitle(title);
+        setWindowFlag(Qt::Window, true);
+    }
+
+    CloseHandler closeHandler;
+
+protected:
+    void closeEvent(QCloseEvent* event) override {
+        if (m_closing) {
+            event->accept();
+            return;
+        }
+
+        m_closing = true;
+        hide();
+
+        // Finish the reparenting while the window is hidden, then defer the
+        // actual destruction until Qt has finished processing this event.
+        auto handler = std::move(closeHandler);
+        if (handler)
+            handler(this);
+        event->accept();
+        deleteLater();
+    }
+
+private:
+    bool m_closing = false;
+};
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QDialog>
@@ -44,19 +94,20 @@
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowIcon(QIcon(":/icons/logo.svg"));
+    m_systemPalette = qApp->palette();
+    if (QStyle* fusion = QStyleFactory::create("Fusion"))
+        qApp->setStyle(fusion);
+
     QSettings settings;
-    if (settings.contains("theme/mode")) {
-        m_themeMode = settings.value("theme/mode", "system").toString();
-    } else if (settings.contains("theme/dark")) {
-        m_themeMode = settings.value("theme/dark", true).toBool() ? "dark" : "light";
-    } else {
+    m_themeMode = settings.value("theme/mode", "system").toString();
+    if (m_themeMode != "system" && m_themeMode != "light" && m_themeMode != "dark")
         m_themeMode = "system";
-    }
     setupUi();
     applyThemeMode(m_themeMode);
 
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this]() {
         if (m_themeMode == "system") {
+            m_systemPalette = qApp->palette();
             applyThemeMode("system");
         }
     });
@@ -114,6 +165,12 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         }
     }
 
+    // Detached windows are children of MainWindow. Reattach their terminal
+    // widgets explicitly before the main window starts its destruction so
+    // that Qt never destroys a detached QMainWindow and its live terminal
+    // child recursively in an unspecified order.
+    reattachDetachedTabs();
+
     QSettings settings;
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/state", saveState());
@@ -121,6 +178,35 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     settings.setValue("window/tabLayoutMode", m_paneLayoutMode);
     settings.setValue("window/activePane", qMax(0, visiblePanes().indexOf(activePane())));
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::reattachDetachedTabs() {
+    if (m_detachedTabs.isEmpty())
+        return;
+
+    const auto detachedTabs = m_detachedTabs;
+    for (auto it = detachedTabs.cbegin(); it != detachedTabs.cend(); ++it) {
+        TerminalTab* tab = it.key();
+        auto* window = static_cast<DetachedTabWindow*>(it.value());
+        if (!tab || !window)
+            continue;
+
+        m_detachedTabs.remove(tab);
+        QWidget* content = window->takeCentralWidget();
+        if (content) {
+            QTabWidget* target = activePane();
+            if (target) {
+                content->setParent(target);
+                const int newIndex = target->addTab(content, window->windowTitle());
+                target->setCurrentIndex(newIndex);
+                content->show();
+            }
+        }
+
+        // The close handler is now empty from the map's perspective, so this
+        // only hides and schedules the detached shell for deletion.
+        window->close();
+    }
 }
 
 void MainWindow::setupUi() {
@@ -132,6 +218,67 @@ void MainWindow::setupUi() {
     mainLayout->setSpacing(0);
 
     setupMenuBar();
+
+    auto* toolBar = addToolBar(tr("Main Toolbar"));
+    toolBar->setObjectName("mainToolBar");
+    toolBar->setMovable(false);
+    toolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolBar->setIconSize(QSize(16, 16));
+
+    auto* newRemoteAction = toolBar->addAction(QIcon(":/icons/add.svg"), tr("New Session"));
+    newRemoteAction->setToolTip(tr("Create a new remote session"));
+    connect(newRemoteAction, &QAction::triggered, this, [this]() {
+        SessionDialog dialog(this);
+        if (dialog.exec() == QDialog::Accepted)
+            onConnectSession(dialog.getSession());
+    });
+
+    auto* localAction = toolBar->addAction(QIcon(":/icons/terminal.svg"), tr("Local"));
+    localAction->setToolTip(tr("Open a local terminal"));
+    connect(localAction, &QAction::triggered, this, &MainWindow::onNewLocalTerminal);
+
+    toolBar->addSeparator();
+
+    auto* splitAction = toolBar->addAction(QIcon(":/icons/chevron-right.svg"), tr("Split"));
+    splitAction->setToolTip(tr("Toggle split view"));
+    connect(splitAction, &QAction::triggered, this, &MainWindow::toggleSplitView);
+
+    auto* gridAction = toolBar->addAction(QIcon(":/icons/folder.svg"), tr("Grid"));
+    gridAction->setToolTip(tr("Toggle 2x2 grid view"));
+    connect(gridAction, &QAction::triggered, this, &MainWindow::toggleGridView);
+
+    auto* moveAction = toolBar->addAction(QIcon(":/icons/chevron-right.svg"), tr("Move"));
+    moveAction->setToolTip(tr("Move the current tab to another pane"));
+    connect(moveAction, &QAction::triggered, this, &MainWindow::moveTabToOtherPane);
+
+    toolBar->addSeparator();
+
+    auto* multiAction = toolBar->addAction(QIcon(":/icons/multiinput.svg"), tr("Multi-Input"));
+    multiAction->setCheckable(true);
+    multiAction->setToolTip(tr("Send input to all terminal sessions"));
+    connect(multiAction, &QAction::triggered, this, [this]() {
+        if (m_multiInputBtn)
+            m_multiInputBtn->setChecked(!m_multiInputBtn->isChecked());
+        toggleMultiInputBar();
+    });
+
+    auto* settingsAction = toolBar->addAction(QIcon(":/icons/gear.svg"), tr("Settings"));
+    connect(settingsAction, &QAction::triggered, this, &MainWindow::onOpenSettings);
+
+    m_sessionContextBar = new QFrame(centralWidget);
+    m_sessionContextBar->setFrameShape(QFrame::StyledPanel);
+    m_sessionContextBar->setFixedHeight(30);
+    auto* contextLayout = new QHBoxLayout(m_sessionContextBar);
+    contextLayout->setContentsMargins(8, 2, 8, 2);
+    contextLayout->setSpacing(10);
+    m_contextProtocolLabel = new QLabel(tr("NO SESSION"), m_sessionContextBar);
+    m_contextSessionLabel = new QLabel(tr("Open a session to begin"), m_sessionContextBar);
+    m_contextStateLabel = new QLabel(m_sessionContextBar);
+    m_contextStateLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    contextLayout->addWidget(m_contextProtocolLabel);
+    contextLayout->addWidget(m_contextSessionLabel, 1);
+    contextLayout->addWidget(m_contextStateLabel);
+    mainLayout->addWidget(m_sessionContextBar);
 
     // Main splitter
     m_mainSplitter = new QSplitter(Qt::Horizontal, centralWidget);
@@ -231,6 +378,9 @@ void MainWindow::setupUi() {
     m_activePane = m_tabWidget;
     m_mainSplitter->addWidget(m_tabSplitter);
 
+    m_statusConnectionLabel = new QLabel(tr("Ready"), this);
+    statusBar()->addWidget(m_statusConnectionLabel, 1);
+
     // Set initial sizes
     m_mainSplitter->setSizes({350, 850});
 
@@ -245,7 +395,6 @@ void MainWindow::setupUi() {
     multiInputLayout->setSpacing(10);
 
     auto* multiInputLabel = new QLabel(tr("Write to all terminals:"), m_multiInputBar);
-    multiInputLabel->setStyleSheet("font-weight: bold; color: #7aa2f7;");
     multiInputLayout->addWidget(multiInputLabel);
 
     m_multiInputEdit = new QComboBox(m_multiInputBar);
@@ -347,6 +496,7 @@ void MainWindow::setupUi() {
 
     // Open an initial local terminal tab
     onNewLocalTerminal();
+    updateSessionContext();
 }
 
 void MainWindow::switchSidebarTab(int index) {
@@ -390,6 +540,7 @@ void MainWindow::onConnectSession(const Session& session) {
     }
 
     pane->setCurrentIndex(index);
+    updateSessionContext();
 
     // Auto-reconnect: when a session drops and asks to reconnect, swap this tab
     // for a fresh one with the same session.
@@ -408,8 +559,40 @@ void MainWindow::onConnectSession(const Session& session) {
             if (pane == activePane() && idx == pane->currentIndex()) {
                 setWindowTitle(QString("BanchoXterm - %1").arg(title));
             }
+            updateSessionContext();
         }
     });
+}
+
+void MainWindow::updateSessionContext() {
+    TerminalTab* tab = currentTerminalTab();
+    if (!tab) {
+        m_contextProtocolLabel->setText(tr("NO SESSION"));
+        m_contextSessionLabel->setText(tr("Open a session to begin"));
+        m_contextStateLabel->clear();
+        if (m_statusConnectionLabel)
+            m_statusConnectionLabel->setText(tr("Ready"));
+        return;
+    }
+
+    const Session& session = tab->session();
+    QString endpoint;
+    if (session.type == SessionType::Local) {
+        endpoint = session.shellPath.isEmpty() ? tr("Local shell") : session.shellPath;
+    } else if (session.type == SessionType::Serial) {
+        endpoint = QStringLiteral("%1 @ %2 baud").arg(session.serialPort).arg(session.baudRate);
+    } else if (!session.host.isEmpty()) {
+        endpoint = QStringLiteral("%1@%2:%3").arg(session.user, session.host).arg(session.port);
+    } else {
+        endpoint = session.name;
+    }
+
+    const bool active = tab->isSessionActive();
+    m_contextProtocolLabel->setText(sessionTypeName(session.type));
+    m_contextSessionLabel->setText(QStringLiteral("%1  ·  %2").arg(session.name, endpoint));
+    m_contextStateLabel->setText(active ? tr("Connected") : tr("Disconnected"));
+    if (m_statusConnectionLabel)
+        m_statusConnectionLabel->setText(QStringLiteral("%1  |  %2").arg(sessionTypeName(session.type), endpoint));
 }
 
 void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {
@@ -429,12 +612,16 @@ void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {
             m_sftpSidebar->stopSession();
         }
         pane->removeTab(index);
-        delete tab;
+        // Defer destruction until pending signals and timers finish their
+        // current event-loop iteration.
+        tab->deleteLater();
+        updateSessionContext();
     }
 }
 
 void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
     m_activePane = pane;
+    updateSessionContext();
 
     if (index < 0) {
         // If this pane has no tabs but another visible pane does, switch to it.
@@ -483,39 +670,39 @@ void MainWindow::onNewLocalTerminal() {
 }
 
 void MainWindow::toggleTheme() {
-    if (m_themeMode == "dark")
-        applyThemeMode("light");
-    else
-        applyThemeMode("dark");
+    applyThemeMode(m_themeMode == "dark" ? "light" : "dark");
 }
 
 void MainWindow::applyThemeMode(const QString& mode) {
     m_themeMode = mode;
-    if (mode == "system") {
-        qApp->setStyleSheet("");
-#ifdef Q_OS_WIN
-        QStyle* nativeStyle = QStyleFactory::create("windowsvista");
-        if (!nativeStyle)
-            nativeStyle = QStyleFactory::create("windows11");
-        if (nativeStyle)
-            qApp->setStyle(nativeStyle);
-#endif
-    } else if (mode == "light") {
-        qApp->setStyleSheet(Theme::getLightTheme());
-    } else { // "dark"
-        qApp->setStyleSheet(Theme::getDarkTheme());
+    QPalette palette = m_systemPalette;
+    if (mode == "light" || mode == "dark") {
+        const bool wantDark = mode == "dark";
+        const bool isDark = palette.color(QPalette::Window).lightness() < 128;
+        if (wantDark != isDark) {
+            const auto transform = [wantDark](const QColor& color) {
+                return wantDark ? color.darker(180) : color.lighter(180);
+            };
+            palette.setColor(QPalette::Window, transform(palette.color(QPalette::Window)));
+            palette.setColor(QPalette::Base, transform(palette.color(QPalette::Base)));
+            palette.setColor(QPalette::AlternateBase, transform(palette.color(QPalette::AlternateBase)));
+            palette.setColor(QPalette::Button, transform(palette.color(QPalette::Button)));
+            palette.setColor(QPalette::Text, transform(palette.color(QPalette::Text)));
+            palette.setColor(QPalette::WindowText, transform(palette.color(QPalette::WindowText)));
+            palette.setColor(QPalette::ButtonText, transform(palette.color(QPalette::ButtonText)));
+            palette.setColor(QPalette::PlaceholderText, transform(palette.color(QPalette::PlaceholderText)));
+        }
     }
+    qApp->setPalette(mode == "system" ? m_systemPalette : palette);
 }
 
 void MainWindow::onOpenSettings() {
     SettingsDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
-        // 1. Theme Configuration
-        if (dialog.themeMode() != m_themeMode) {
+        if (dialog.themeMode() != m_themeMode)
             applyThemeMode(dialog.themeMode());
-        }
 
-        // 2. Typography Configuration
+        // Typography Configuration
         for (QTabWidget* pane : allPanes()) {
             for (int i = 0; i < pane->count(); ++i) {
                 auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
@@ -543,15 +730,34 @@ void MainWindow::onSendMultiInput() {
     if (text.isEmpty())
         return;
 
-    // Send to all tabs
+    QList<TerminalTab*> targets;
+    QStringList targetNames;
     for (QTabWidget* pane : allPanes()) {
         for (int i = 0; i < pane->count(); ++i) {
             auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
-            if (tab) {
-                tab->sendInputText(text);
-            }
+            if (!tab)
+                continue;
+            targets.append(tab);
+            targetNames.append(pane->tabText(i));
         }
     }
+    if (targets.isEmpty())
+        return;
+
+    const QString preview = targetNames.mid(0, 8).join("\n") +
+                            (targetNames.size() > 8 ? tr("\n...and %1 more").arg(targetNames.size() - 8) : QString());
+    const auto answer = QMessageBox::question(
+        this, tr("Confirm Multi-Input"),
+        tr("Send this command to %1 terminal(s)?\n\n%2\n\nCommand:\n%3")
+            .arg(targets.size())
+            .arg(preview)
+            .arg(text),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes)
+        return;
+
+    for (TerminalTab* tab : targets)
+        tab->sendInputText(text);
 
     // Add to dropdown history and save
     QSettings settings;
@@ -683,6 +889,10 @@ void MainWindow::setupMenuBar() {
     auto* moveTabAction = viewMenu->addAction(tr("Move Tab to &Other Pane"));
     moveTabAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_M));
     connect(moveTabAction, &QAction::triggered, this, &MainWindow::moveTabToOtherPane);
+
+    auto* detachTabAction = viewMenu->addAction(tr("&Detach Current Tab"));
+    detachTabAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D));
+    connect(detachTabAction, &QAction::triggered, this, &MainWindow::detachCurrentTab);
 
     m_macrosMenu = menuBar()->addMenu(tr("&Macros"));
     rebuildMacrosMenu();
@@ -824,6 +1034,41 @@ void MainWindow::moveTabToOtherPane() {
     int newIdx = to->addTab(w, title);
     to->setCurrentIndex(newIdx);
     m_activePane = to;
+}
+
+void MainWindow::detachCurrentTab() {
+    QTabWidget* from = activePane();
+    if (!from)
+        return;
+    const int index = from->currentIndex();
+    if (index < 0)
+        return;
+    auto* tab = qobject_cast<TerminalTab*>(from->widget(index));
+    if (!tab || m_detachedTabs.contains(tab))
+        return;
+
+    const QString title = from->tabText(index);
+    from->removeTab(index);
+    auto* window = new DetachedTabWindow(title, this);
+    tab->setParent(window);
+    window->setCentralWidget(tab);
+    window->resize(900, 600);
+    m_detachedTabs.insert(tab, window);
+    window->closeHandler = [this, tab, title](DetachedTabWindow* detached) {
+        if (!m_detachedTabs.remove(tab))
+            return;
+        QWidget* content = detached->takeCentralWidget();
+        QTabWidget* target = activePane();
+        if (!content || !target)
+            return;
+        content->setParent(target);
+        const int newIndex = target->addTab(content, title);
+        target->setCurrentIndex(newIndex);
+        m_activePane = target;
+        content->show();
+    };
+    window->show();
+    tab->show();
 }
 
 void MainWindow::onCopy() {

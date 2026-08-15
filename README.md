@@ -17,7 +17,7 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Session manager** — save, organize, and quickly reconnect to your sessions
 - **SSH tunnels** — local, remote, and dynamic (SOCKS5) port forwarding
 - **Session logging** — record terminal output to a file
-- **Dark & Light themes** — Tokyo Night (dark) and Classic (light) styles
+- **Dark & Light themes** — the default interface adapts to the system or can be forced to light/dark mode
 - **Internationalization** — English, Spanish, and Portuguese
 
 ## Install

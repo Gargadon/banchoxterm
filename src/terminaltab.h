@@ -16,6 +16,7 @@ class ConPty;
 class QFile;
 class QAxWidget;
 class VncClientWidget;
+class QSerialPort;
 
 class TerminalTab : public QWidget {
     Q_OBJECT
@@ -31,6 +32,9 @@ public:
     }
     bool isSsh() const {
         return m_session.type == SessionType::SSH;
+    }
+    const Session& session() const {
+        return m_session;
     }
     bool isRdpOrVnc() const {
         return m_session.type == SessionType::RDP || m_session.type == SessionType::VNC;
@@ -113,6 +117,7 @@ private:
     bool m_rdpWasConnected = false;
     VncClientWidget* m_vncWidget = nullptr;
 #ifdef Q_OS_WIN
+    QSerialPort* m_serialPort = nullptr;
     ConPty* m_conpty = nullptr;
     QTimer* m_conptyPollTimer = nullptr;
     bool m_conptyStarted = false;

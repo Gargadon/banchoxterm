@@ -1,6 +1,8 @@
 #pragma once
 #include <QMainWindow>
+#include <QPalette>
 #include <QMap>
+#include <QHash>
 #include <QList>
 #include "session.h"
 
@@ -18,6 +20,7 @@ class QMenu;
 class SessionsSidebar;
 class SftpSidebar;
 class TerminalTab;
+class QMainWindow;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -43,6 +46,7 @@ private slots:
     void toggleSplitView();
     void toggleGridView();
     void moveTabToOtherPane();
+    void detachCurrentTab();
 
     void onCopy();
     void onPaste();
@@ -61,8 +65,9 @@ private:
     QList<QTabWidget*> allPanes() const;
     QList<QTabWidget*> visiblePanes() const;
     void setPaneLayout(int mode, bool moveCurrentTab = false);
+    void updateSessionContext();
+    void reattachDetachedTabs();
 
-    QString m_themeMode = "system";
     QSplitter* m_mainSplitter;
 
     QFrame* m_sidebarContainer;
@@ -95,5 +100,12 @@ private:
     QAction* m_pasteAction;
     QMenu* m_macrosMenu = nullptr;
 
-    bool m_isDarkTheme = true;
+    QString m_themeMode = "system";
+    QPalette m_systemPalette;
+    QHash<TerminalTab*, QMainWindow*> m_detachedTabs;
+    QFrame* m_sessionContextBar = nullptr;
+    QLabel* m_contextProtocolLabel = nullptr;
+    QLabel* m_contextSessionLabel = nullptr;
+    QLabel* m_contextStateLabel = nullptr;
+    QLabel* m_statusConnectionLabel = nullptr;
 };

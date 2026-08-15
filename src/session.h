@@ -29,6 +29,7 @@ struct Session {
     QString id;
     QString name;
     QString group;
+    bool favorite = false;
     SessionType type = SessionType::Local;
 
     // SSH / Telnet / RDP / VNC
@@ -36,6 +37,12 @@ struct Session {
     QString user;
     int port = 22;
     QString keyPath;
+    // Optional OpenSSH-style bastion configuration. The transport wiring is
+    // added independently so imported profiles can preserve this data.
+    QString jumpHost;
+    QString jumpUser;
+    int jumpPort = 22;
+    QString jumpKeyPath;
     bool x11Forwarding = false;
     bool autoReconnect = false;
 
@@ -73,6 +80,7 @@ public:
     static void saveSessions(const QList<Session>& sessions);
     static bool exportSessions(const QList<Session>& sessions, const QString& path);
     static QList<Session> importSessions(const QString& path, bool* ok = nullptr);
+    static QList<Session> importOpenSshConfig(const QString& path, bool* ok = nullptr);
 
 private:
     static QString getFilePath();

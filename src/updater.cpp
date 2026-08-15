@@ -18,6 +18,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QCryptographicHash>
+#include <QSysInfo>
 
 #ifndef BANCHO_VERSION
 #define BANCHO_VERSION "1.0.0"
@@ -176,7 +177,12 @@ void Updater::checkForUpdates(QWidget* parent) {
             return;
 
         const bool portable = AppPaths::isPortable();
-        const QString assetName = portable ? "BanchoXterm-windows-x64.zip" : "BanchoXterm-Setup.exe";
+        const QString architecture = QSysInfo::currentCpuArchitecture().contains("arm", Qt::CaseInsensitive)
+                                          ? QStringLiteral("arm64")
+                                          : QStringLiteral("x64");
+        const QString assetName = portable
+                                      ? QStringLiteral("BanchoXterm-windows-%1.zip").arg(architecture)
+                                      : QStringLiteral("BanchoXterm-Setup-%1.exe").arg(architecture);
         const QString url = findAssetUrl(obj.value("assets").toArray(), assetName);
         const QString expectedDigest = findAssetDigest(obj.value("assets").toArray(), assetName);
         if (url.isEmpty()) {

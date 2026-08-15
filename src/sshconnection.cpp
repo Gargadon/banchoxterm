@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <cstring>
 #include <cstdlib>
+#include <cerrno>
 #include <QSettings>
 #include <mutex>
 #include <QDir>
@@ -210,7 +211,11 @@ bool SshConnection::waitSocket(int timeoutMs) {
     if (!m_session)
         return false;
 
-    int dir = libssh2_session_block_directions(m_session);
+    LIBSSH2_SESSION* waitSession = m_proxyTransport && m_jumpSession ? m_jumpSession : m_session;
+    const int waitSock = m_proxyTransport && m_jumpSock >= 0 ? m_jumpSock : m_sock;
+    if (waitSock < 0)
+        return false;
+    int dir = libssh2_session_block_directions(waitSession);
     if (dir == 0) {
         // libssh2 does not need to wait on the socket (it has buffered data to
         // process); yield briefly to avoid a busy loop, then let the caller
@@ -228,15 +233,15 @@ bool SshConnection::waitSocket(int timeoutMs) {
     FD_ZERO(&rfds);
     FD_ZERO(&wfds);
     if (dir & LIBSSH2_SESSION_BLOCK_INBOUND)
-        FD_SET(m_sock, &rfds);
+        FD_SET(waitSock, &rfds);
     if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
-        FD_SET(m_sock, &wfds);
+        FD_SET(waitSock, &wfds);
 
     struct timeval tv;
     tv.tv_sec = timeoutMs / 1000;
     tv.tv_usec = (timeoutMs % 1000) * 1000;
 
-    int rc = select(m_sock + 1, &rfds, &wfds, nullptr, &tv);
+    int rc = select(waitSock + 1, &rfds, &wfds, nullptr, &tv);
     return rc > 0;
 }
 
@@ -437,8 +442,111 @@ bool SshConnection::promptKbdInteractive(const QString& name, const QString& ins
     return ok;
 }
 
+void SshConnection::configureSession(LIBSSH2_SESSION* session, bool enableX11) {
+    libssh2_session_set_blocking(session, 0);
+    if (!m_cryptCipher.isEmpty()) {
+        libssh2_session_method_pref(session, LIBSSH2_METHOD_CRYPT_CS, m_cryptCipher.toUtf8().constData());
+        libssh2_session_method_pref(session, LIBSSH2_METHOD_CRYPT_SC, m_cryptCipher.toUtf8().constData());
+    }
+    if (!m_macAlgo.isEmpty()) {
+        libssh2_session_method_pref(session, LIBSSH2_METHOD_MAC_CS, m_macAlgo.toUtf8().constData());
+        libssh2_session_method_pref(session, LIBSSH2_METHOD_MAC_SC, m_macAlgo.toUtf8().constData());
+    }
+    if (!m_kexAlgo.isEmpty())
+        libssh2_session_method_pref(session, LIBSSH2_METHOD_KEX, m_kexAlgo.toUtf8().constData());
+    if (enableX11) {
+        libssh2_session_callback_set2(session, LIBSSH2_CALLBACK_X11,
+                                      reinterpret_cast<libssh2_cb_generic*>(&SshConnection::x11OpenCallback));
+    }
+}
+
+bool SshConnection::authenticateSession(const QString& user, const QString& keyPath, const QString& password) {
+    int rc = 0;
+    bool authenticated = false;
+
+    if (!keyPath.isEmpty()) {
+        rc = retry([this, &user, &keyPath]() {
+            return libssh2_userauth_publickey_fromfile(m_session, user.toUtf8().constData(), nullptr,
+                                                       keyPath.toUtf8().constData(), nullptr);
+        });
+        authenticated = rc == 0;
+    }
+
+    if (!authenticated && !password.isEmpty()) {
+        rc = retry([this, &user, &password]() {
+            return libssh2_userauth_password(m_session, user.toUtf8().constData(), password.toUtf8().constData());
+        });
+        authenticated = rc == 0;
+    }
+
+    if (!authenticated && keyPath.isEmpty() && password.isEmpty()) {
+        LIBSSH2_AGENT* agent = libssh2_agent_init(m_session);
+        if (agent) {
+            if (retry([&agent]() { return libssh2_agent_connect(agent); }) == 0 &&
+                retry([&agent]() { return libssh2_agent_list_identities(agent); }) == 0) {
+                struct libssh2_agent_publickey* identity = nullptr;
+                struct libssh2_agent_publickey* previous = nullptr;
+                while (retry([&agent, &identity, &previous]() {
+                           return libssh2_agent_get_identity(agent, &identity, previous);
+                       }) == 0) {
+                    rc = retry([this, &agent, &identity, &user]() {
+                        return libssh2_agent_userauth(agent, user.toUtf8().constData(), identity);
+                    });
+                    if (rc == 0) {
+                        authenticated = true;
+                        break;
+                    }
+                    previous = identity;
+                }
+            }
+            libssh2_agent_disconnect(agent);
+            libssh2_agent_free(agent);
+        }
+    }
+
+    if (!authenticated) {
+        rc = retry([this, &user]() {
+            return libssh2_userauth_keyboard_interactive_ex(m_session, user.toUtf8().constData(),
+                                                            static_cast<unsigned int>(user.toUtf8().size()),
+                                                            &SshConnection::kbdIntResponseCallback);
+        });
+        authenticated = rc == 0;
+    }
+
+    if (!authenticated)
+        emit passwordRequired(QStringLiteral("Password required for %1@%2").arg(user, m_host));
+    return authenticated;
+}
+
+ssize_t SshConnection::proxySend(libssh2_socket_t socket, const void* buffer, size_t length, int flags,
+                                 void** abstract) {
+    Q_UNUSED(socket);
+    Q_UNUSED(flags);
+    auto* self = abstract ? static_cast<SshConnection*>(*abstract) : nullptr;
+    if (!self || !self->m_jumpSession || !self->m_jumpChannel)
+        return -1;
+    const ssize_t rc = libssh2_channel_write(self->m_jumpChannel, static_cast<const char*>(buffer), length);
+    if (rc == LIBSSH2_ERROR_EAGAIN)
+        return -EAGAIN;
+    return rc;
+}
+
+ssize_t SshConnection::proxyRecv(libssh2_socket_t socket, void* buffer, size_t length, int flags, void** abstract) {
+    Q_UNUSED(socket);
+    Q_UNUSED(flags);
+    auto* self = abstract ? static_cast<SshConnection*>(*abstract) : nullptr;
+    if (!self || !self->m_jumpSession || !self->m_jumpChannel)
+        return -1;
+    const ssize_t rc = libssh2_channel_read(self->m_jumpChannel, static_cast<char*>(buffer), length);
+    if (rc == LIBSSH2_ERROR_EAGAIN)
+        return -EAGAIN;
+    return rc;
+}
+
 void SshConnection::connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
-                                  const QString& password, const QList<TunnelConfig>& tunnels) {
+                                  const QString& password, const QList<TunnelConfig>& tunnels,
+                                  const QString& jumpHost, int jumpPort, const QString& jumpUser,
+                                  const QString& jumpKeyPath) {
     m_host = host;
     m_port = port;
     m_user = user;
@@ -451,37 +559,71 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
 
     disconnectFromHost();
 
-    if (!openSocket())
+    const bool useJump = !jumpHost.trimmed().isEmpty();
+    if (useJump) {
+        // Establish and authenticate the bastion first. The active fields are
+        // temporarily pointed at the bastion because retry(), host-key
+        // verification and keyboard-interactive prompts use them.
+        const QString targetHost = m_host;
+        const int targetPort = m_port;
+        const QString targetUser = m_user;
+        const QString targetKey = m_keyPath;
+        m_host = jumpHost.trimmed();
+        m_port = jumpPort > 0 ? jumpPort : 22;
+        m_user = jumpUser.trimmed().isEmpty() ? targetUser : jumpUser.trimmed();
+        m_keyPath = jumpKeyPath.trimmed().isEmpty() ? targetKey : jumpKeyPath.trimmed();
+        if (!openSocket())
+            return;
+        m_jumpSock = m_sock;
+        m_jumpSession = libssh2_session_init_ex(nullptr, nullptr, nullptr, &m_abstract);
+        if (!m_jumpSession) {
+            emit connectionFailed("Failed to initialize SSH bastion session");
+            disconnectFromHost();
+            return;
+        }
+        m_session = m_jumpSession;
+        configureSession(m_jumpSession, false);
+        int jumpRc = retry([this]() { return libssh2_session_handshake(m_jumpSession, m_jumpSock); });
+        if (jumpRc != 0 || !verifyHostKey() || !authenticateSession(m_user, m_keyPath, password)) {
+            emit connectionFailed("SSH bastion connection failed");
+            disconnectFromHost();
+            return;
+        }
+        m_jumpChannel = retryPtr([this, &targetHost, targetPort]() {
+            return libssh2_channel_direct_tcpip_ex(m_jumpSession, targetHost.toUtf8().constData(), targetPort,
+                                                   "127.0.0.1", 0);
+        });
+        if (!m_jumpChannel) {
+            emit connectionFailed(QStringLiteral("Bastion could not open a channel to %1:%2").arg(targetHost).arg(targetPort));
+            disconnectFromHost();
+            return;
+        }
+        m_host = targetHost;
+        m_port = targetPort;
+        m_user = targetUser;
+        m_keyPath = targetKey;
+        m_proxyTransport = true;
+        m_session = nullptr;
+    } else if (!openSocket()) {
         return;
+    }
 
     m_session = libssh2_session_init_ex(nullptr, nullptr, nullptr, &m_abstract);
     if (!m_session) {
         emit connectionFailed("Failed to initialize SSH session");
-        closeSocket();
+        disconnectFromHost();
         return;
     }
 
-    libssh2_session_set_blocking(m_session, 0);
-
-    // Per-session algorithm preferences (empty = libssh2 defaults).
-    if (!m_cryptCipher.isEmpty()) {
-        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_CRYPT_CS, m_cryptCipher.toUtf8().constData());
-        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_CRYPT_SC, m_cryptCipher.toUtf8().constData());
-    }
-    if (!m_macAlgo.isEmpty()) {
-        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_MAC_CS, m_macAlgo.toUtf8().constData());
-        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_MAC_SC, m_macAlgo.toUtf8().constData());
-    }
-    if (!m_kexAlgo.isEmpty()) {
-        libssh2_session_method_pref(m_session, LIBSSH2_METHOD_KEX, m_kexAlgo.toUtf8().constData());
+    configureSession(m_session, m_x11Forwarding);
+    if (m_proxyTransport) {
+        libssh2_session_callback_set2(m_session, LIBSSH2_CALLBACK_SEND,
+                                      reinterpret_cast<libssh2_cb_generic*>(&SshConnection::proxySend));
+        libssh2_session_callback_set2(m_session, LIBSSH2_CALLBACK_RECV,
+                                      reinterpret_cast<libssh2_cb_generic*>(&SshConnection::proxyRecv));
     }
 
-    if (m_x11Forwarding) {
-        libssh2_session_callback_set2(m_session, LIBSSH2_CALLBACK_X11,
-                                      reinterpret_cast<libssh2_cb_generic*>(&SshConnection::x11OpenCallback));
-    }
-
-    int rc = retry([this]() { return libssh2_session_handshake(m_session, m_sock); });
+    int rc = retry([this]() { return libssh2_session_handshake(m_session, m_proxyTransport ? m_jumpSock : m_sock); });
     if (rc != 0) {
         char* errmsg = nullptr;
         libssh2_session_last_error(m_session, &errmsg, nullptr, 0);
@@ -496,64 +638,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
         return;
     }
 
-    bool authenticated = false;
-
-    if (!keyPath.isEmpty()) {
-        rc = retry([this, &keyPath]() {
-            return libssh2_userauth_publickey_fromfile(m_session, m_user.toUtf8().constData(), nullptr,
-                                                       keyPath.toUtf8().constData(), nullptr);
-        });
-        if (rc == 0)
-            authenticated = true;
-    }
-
-    if (!authenticated && !password.isEmpty()) {
-        rc = retry([this, &password]() {
-            return libssh2_userauth_password(m_session, m_user.toUtf8().constData(), password.toUtf8().constData());
-        });
-        if (rc == 0)
-            authenticated = true;
-    }
-
-    if (!authenticated && keyPath.isEmpty() && password.isEmpty()) {
-        LIBSSH2_AGENT* agent = libssh2_agent_init(m_session);
-        if (agent) {
-            if (retry([&agent]() { return libssh2_agent_connect(agent); }) == 0) {
-                if (retry([&agent]() { return libssh2_agent_list_identities(agent); }) == 0) {
-                    struct libssh2_agent_publickey* identity = nullptr;
-                    struct libssh2_agent_publickey* prev_identity = nullptr;
-                    while (retry([&agent, &identity, &prev_identity]() {
-                               return libssh2_agent_get_identity(agent, &identity, prev_identity);
-                           }) == 0) {
-                        rc = retry([this, &agent, &identity]() {
-                            return libssh2_agent_userauth(agent, m_user.toUtf8().constData(), identity);
-                        });
-                        if (rc == 0) {
-                            authenticated = true;
-                            break;
-                        }
-                        prev_identity = identity;
-                    }
-                }
-                libssh2_agent_disconnect(agent);
-            }
-            libssh2_agent_free(agent);
-        }
-    }
-
-    if (!authenticated) {
-        // Keyboard-interactive: used for OTP/2FA and password prompts.
-        rc = retry([this]() {
-            return libssh2_userauth_keyboard_interactive_ex(m_session, m_user.toUtf8().constData(),
-                                                            static_cast<unsigned int>(m_user.toUtf8().size()),
-                                                            &SshConnection::kbdIntResponseCallback);
-        });
-        if (rc == 0)
-            authenticated = true;
-    }
-
-    if (!authenticated) {
-        emit passwordRequired("Password required for " + user + "@" + host);
+    if (!authenticateSession(m_user, m_keyPath, password)) {
         disconnectFromHost();
         return;
     }
@@ -579,7 +664,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     m_writeNotifier->setEnabled(false);
 
     m_statsTimer = new QTimer(this);
-    connect(m_statsTimer, &QTimer::timeout, this, &SshConnection::startStats);
+    connect(m_statsTimer, &QTimer::timeout, this, &SshConnection::onStatsTimer);
     // Stats are lightweight and should feel live in the status bar. Keep a
     // short interval without polling aggressively while a previous probe is
     // still running (startStats guards against overlapping channels).
@@ -1140,6 +1225,22 @@ void SshConnection::startStats() {
         onSocketActivity();
 }
 
+void SshConnection::onStatsTimer() {
+    if (!m_connected || !m_session)
+        return;
+
+    if (m_statsState == StatsState::Idle) {
+        startStats();
+    } else {
+        // The socket notifier handles normal network replies, but a
+        // non-blocking libssh2 operation may be waiting without any socket
+        // activity (for example while the remote command is still running).
+        // Advance the active probe periodically so stats do not depend on the
+        // user typing in the terminal.
+        onSocketActivity();
+    }
+}
+
 void SshConnection::pollStats() {
     switch (m_statsState) {
     case StatsState::Idle:
@@ -1464,10 +1565,27 @@ void SshConnection::disconnectFromHost() {
         libssh2_sftp_shutdown(m_sftp);
         m_sftp = nullptr;
     }
-    if (m_session) {
+    if (m_session && m_session != m_jumpSession) {
         libssh2_session_disconnect(m_session, "Disconnecting");
         libssh2_session_free(m_session);
         m_session = nullptr;
     }
+    if (m_session == m_jumpSession)
+        m_session = nullptr;
+    if (m_jumpChannel) {
+        libssh2_channel_close(m_jumpChannel);
+        libssh2_channel_free(m_jumpChannel);
+        m_jumpChannel = nullptr;
+    }
+    if (m_jumpSession) {
+        libssh2_session_disconnect(m_jumpSession, "Disconnecting");
+        libssh2_session_free(m_jumpSession);
+        m_jumpSession = nullptr;
+    }
+    if (m_jumpSock >= 0 && m_jumpSock != m_sock) {
+        closeSocketFd(m_jumpSock);
+    }
+    m_jumpSock = -1;
+    m_proxyTransport = false;
     closeSocket();
 }

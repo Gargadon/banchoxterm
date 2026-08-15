@@ -38,10 +38,15 @@ private slots:
         original.id = "test-id-ssh";
         original.name = "My Server";
         original.type = SessionType::SSH;
+        original.favorite = true;
         original.host = "example.com";
         original.user = "admin";
         original.port = 2222;
         original.keyPath = "/home/user/.ssh/id_rsa";
+        original.jumpHost = "bastion.example.com";
+        original.jumpUser = "jumpadmin";
+        original.jumpPort = 2200;
+        original.jumpKeyPath = "/home/user/.ssh/jump_rsa";
         original.x11Forwarding = true;
         original.keepAliveSeconds = 30;
         original.cryptCipher = "aes128-ctr,aes256-ctr";
@@ -59,6 +64,8 @@ private slots:
         QCOMPARE(json["user"].toString(), QString("admin"));
         QCOMPARE(json["port"].toInt(), 2222);
         QCOMPARE(json["keyPath"].toString(), QString("/home/user/.ssh/id_rsa"));
+        QVERIFY(json["favorite"].toBool());
+        QCOMPARE(json["jumpHost"].toString(), QString("bastion.example.com"));
         QVERIFY(json["x11Forwarding"].toBool());
 
         Session restored = Session::fromJson(json);
@@ -69,6 +76,11 @@ private slots:
         QCOMPARE(restored.user, original.user);
         QCOMPARE(restored.port, original.port);
         QCOMPARE(restored.keyPath, original.keyPath);
+        QCOMPARE(restored.favorite, original.favorite);
+        QCOMPARE(restored.jumpHost, original.jumpHost);
+        QCOMPARE(restored.jumpUser, original.jumpUser);
+        QCOMPARE(restored.jumpPort, original.jumpPort);
+        QCOMPARE(restored.jumpKeyPath, original.jumpKeyPath);
         QCOMPARE(restored.x11Forwarding, original.x11Forwarding);
         QCOMPARE(restored.keepAliveSeconds, original.keepAliveSeconds);
         QCOMPARE(restored.cryptCipher, original.cryptCipher);
@@ -187,6 +199,43 @@ private slots:
         json["id"] = "some-id";
         Session s = Session::fromJson(json);
         QCOMPARE(s.type, SessionType::Local);
+    }
+
+    void testOpenSshConfigImport() {
+        QTemporaryFile config;
+        QVERIFY(config.open());
+        const QByteArray contents =
+            "Host *\n"
+            "    User ignored\n"
+            "Host production\n"
+            "    HostName prod.example.com\n"
+            "    User deploy\n"
+            "    Port 2222\n"
+            "    IdentityFile ~/.ssh/prod_ed25519\n"
+            "    ProxyJump jumpuser@bastion.example.com:2201\n"
+            "Host staging\n"
+            "    HostName staging.example.com\n";
+        QVERIFY(config.write(contents) == contents.size());
+        QVERIFY(config.flush());
+
+        bool ok = false;
+        const QList<Session> sessions = SessionManager::importOpenSshConfig(config.fileName(), &ok);
+        QVERIFY(ok);
+        QCOMPARE(sessions.size(), 2);
+
+        QCOMPARE(sessions[0].name, QString("production"));
+        QCOMPARE(sessions[0].type, SessionType::SSH);
+        QCOMPARE(sessions[0].host, QString("prod.example.com"));
+        QCOMPARE(sessions[0].user, QString("deploy"));
+        QCOMPARE(sessions[0].port, 2222);
+        QVERIFY(sessions[0].keyPath.endsWith(QStringLiteral("/.ssh/prod_ed25519")));
+        QCOMPARE(sessions[0].jumpHost, QString("bastion.example.com"));
+        QCOMPARE(sessions[0].jumpUser, QString("jumpuser"));
+        QCOMPARE(sessions[0].jumpPort, 2201);
+
+        QCOMPARE(sessions[1].name, QString("staging"));
+        QCOMPARE(sessions[1].host, QString("staging.example.com"));
+        QCOMPARE(sessions[1].port, 22);
     }
 
     void testToJsonOmitsIrrelevantFields() {

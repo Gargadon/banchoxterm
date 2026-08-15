@@ -26,20 +26,12 @@ void RemoteEditorDialog::setupUi(const QString& fileName) {
     layout->setSpacing(12);
 
     auto* header = new QLabel(tr("Editing: %1").arg(fileName), this);
-    header->setStyleSheet("font-weight: bold; font-size: 14px; color: #7aa2f7;");
     layout->addWidget(header);
 
     m_textEdit = new QPlainTextEdit(this);
-    m_textEdit->setStyleSheet("background-color: #16161e;"
-                              "color: #c0caf5;"
-                              "border: 1px solid #24283b;"
-                              "border-radius: 6px;"
-                              "font-family: 'Monospace', 'Courier New', monospace;"
-                              "font-size: 12px;");
     layout->addWidget(m_textEdit);
 
     m_statusLabel = new QLabel(this);
-    m_statusLabel->setStyleSheet("color: #787c99; font-style: italic;");
     layout->addWidget(m_statusLabel);
 
     auto* btns = new QHBoxLayout();

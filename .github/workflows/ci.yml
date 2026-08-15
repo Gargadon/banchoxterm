@@ -6,8 +6,11 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
-  release:
-    types: [published]
+
+# Required by softprops/action-gh-release to create/update the GitHub release
+# and upload the generated installers and portable archives.
+permissions:
+  contents: write
 
 jobs:
   format-check:
@@ -22,31 +25,62 @@ jobs:
         run: cmake -B build -G Ninja && cmake --build build --target format-check
 
   build-windows:
-    runs-on: windows-latest
+    # Windows binaries, installers and portable archives are release-only.
+    if: github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
         arch:
           - name: x64
+            runner: windows-latest
             qt_arch: win64_msvc2022_64
             cmake_arch: x64
+            python_arch: x64
           - name: arm64
+            # Native ARM64 runner is required to execute ARM64 tests.
+            runner: windows-11-vs2026-arm
             qt_arch: win64_msvc2022_arm64
-            cmake_arch: arm64
+            cmake_arch: ARM64
+            python_arch: arm64
+
+    runs-on: ${{ matrix.arch.runner }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      # Avoid the unreadable WindowsApps Store alias (EACCES) when
+      # install-qt-action/aqt inspects Python executables on PATH.
+      - name: Select hosted Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: ${{ matrix.arch.python_arch }}
+
+      - name: Remove WindowsApps Python alias
+        shell: pwsh
+        run: |
+          $windowsApps = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps'
+          $env:Path = (($env:Path -split ';' | Where-Object {
+            $_ -and $_.TrimEnd('\') -ne $windowsApps.TrimEnd('\')
+          }) -join ';')
+          Add-Content -Path $env:GITHUB_ENV -Value "PATH=$env:Path"
+          python --version
+          where.exe python
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.7.*'
+          # Qt 6.8.3 is the latest public Qt 6.8 package available through
+          # aqt-list-server and supports the MSVC Windows ARM64 target.
+          version: '6.8.3'
           arch: ${{ matrix.arch.qt_arch }}
+          modules: 'qtserialport'
           cache: true
 
       - name: Configure
-        run: cmake -B build -A ${{ matrix.arch.cmake_arch }} -DBANCHO_ENABLE_VNC=ON
+        shell: pwsh
+        run: cmake -B build -A ${{ matrix.arch.cmake_arch }} "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" -DBANCHO_ENABLE_VNC=ON
 
       - name: Build
         run: cmake --build build --config Release
@@ -94,7 +128,7 @@ jobs:
           path: BanchoXterm-windows-${{ matrix.arch.name }}.zip
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     needs: [build-windows]
     runs-on: ubuntu-latest
     steps:

@@ -110,8 +110,6 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     mainLayout->setSpacing(8);
 
     auto* titleLabel = new QLabel(tr("SFTP FILES"), this);
-    titleLabel->setStyleSheet(
-        "font-weight: bold; color: #787c99; font-size: 11px; letter-spacing: 1px; margin-bottom: 4px;");
     mainLayout->addWidget(titleLabel);
 
     auto* navLayout = new QHBoxLayout();
@@ -174,7 +172,6 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     mainLayout->addWidget(m_treeWidget);
 
     m_progressLabel = new QLabel(this);
-    m_progressLabel->setStyleSheet("color: #7aa2f7; font-weight: bold;");
     m_progressLabel->hide();
     mainLayout->addWidget(m_progressLabel);
 
@@ -187,7 +184,6 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     mainLayout->addWidget(m_progressBar);
 
     m_statusLabel = new QLabel(tr("Disconnected"), this);
-    m_statusLabel->setStyleSheet("color: #787c99; font-style: italic;");
     mainLayout->addWidget(m_statusLabel);
 
     m_upBtn->setEnabled(false);
@@ -294,7 +290,6 @@ void SftpSidebar::startSession(const Session& session) {
         detachConnection();
         m_currentSession = session;
         m_statusLabel->setText(tr("Connecting to %1...").arg(session.host));
-        m_statusLabel->setStyleSheet("color: #7aa2f7; font-weight: bold;");
         if (!m_ftp)
             setFtpClient(new FtpClient(this));
         const QString password = Keyring::lookupPassword(session.id);
@@ -314,10 +309,10 @@ void SftpSidebar::startSession(const Session& session) {
     }
 
     m_statusLabel->setText(tr("Connecting to %1...").arg(session.host));
-    m_statusLabel->setStyleSheet("color: #7aa2f7; font-weight: bold;");
 
     QString password = Keyring::lookupPassword(session.id);
-    emit requestConnect(session.host, session.port, session.user, session.keyPath, password, session.tunnels);
+    emit requestConnect(session.host, session.port, session.user, session.keyPath, password, session.tunnels,
+                        session.jumpHost, session.jumpPort, session.jumpUser, session.jumpKeyPath);
 }
 
 void SftpSidebar::stopSession() {
@@ -326,7 +321,6 @@ void SftpSidebar::stopSession() {
     m_treeWidget->clear();
     m_pathEdit->clear();
     m_statusLabel->setText(tr("Disconnected"));
-    m_statusLabel->setStyleSheet("color: #787c99; font-style: italic;");
 
     m_transferQueue.clear();
     m_transferActive = false;
@@ -353,7 +347,6 @@ void SftpSidebar::stopSession() {
 void SftpSidebar::onConnectionSuccess() {
     m_isConnected = true;
     m_statusLabel->setText(tr("Connected"));
-    m_statusLabel->setStyleSheet("color: #50fa7b; font-weight: bold;");
 
     m_upBtn->setEnabled(true);
     m_pathEdit->setEnabled(true);
@@ -372,7 +365,6 @@ void SftpSidebar::onConnectionSuccess() {
 void SftpSidebar::onConnectionFailed(const QString& error) {
     m_isConnected = false;
     m_statusLabel->setText(tr("Failed: %1").arg(error));
-    m_statusLabel->setStyleSheet("color: #f7768e; font-weight: bold;");
     stopSession();
 }
 
@@ -444,7 +436,6 @@ void SftpSidebar::onOperationFinished(bool success, const QString& error) {
 
     m_statusLabel->setText(error);
     if (success) {
-        m_statusLabel->setStyleSheet("color: #50fa7b; font-style: italic;");
 
         if (!m_pendingEditRemotePath.isEmpty()) {
             QString localPath = m_pendingEditLocalPath;
@@ -498,7 +489,6 @@ void SftpSidebar::onOperationFinished(bool success, const QString& error) {
 
         emit requestList(m_currentPath);
     } else {
-        m_statusLabel->setStyleSheet("color: #f7768e; font-weight: bold;");
         m_pendingEditRemotePath.clear();
         m_pendingEditLocalPath.clear();
         QMessageBox::critical(this, tr("SFTP Error"), error);
@@ -511,7 +501,9 @@ void SftpSidebar::onPasswordRequired(const QString& prompt) {
     if (ok) {
         m_statusLabel->setText(tr("Connecting with password..."));
         emit requestConnect(m_currentSession.host, m_currentSession.port, m_currentSession.user,
-                            m_currentSession.keyPath, password, m_currentSession.tunnels);
+                            m_currentSession.keyPath, password, m_currentSession.tunnels,
+                            m_currentSession.jumpHost, m_currentSession.jumpPort,
+                            m_currentSession.jumpUser, m_currentSession.jumpKeyPath);
     } else {
         stopSession();
     }
@@ -832,7 +824,6 @@ void SftpSidebar::onWatchedFileChanged(const QString& path) {
     if (m_watchedFiles.contains(path)) {
         QString remotePath = m_watchedFiles[path];
         m_statusLabel->setText(tr("Auto-uploading changes to %1...").arg(QFileInfo(remotePath).fileName()));
-        m_statusLabel->setStyleSheet("color: #7aa2f7; font-style: italic;");
         emit requestUpload(path, remotePath);
     }
 }
@@ -930,7 +921,6 @@ void SftpSidebar::startNextTransfer() {
         m_progressBar->hide();
         m_progressLabel->hide();
         m_statusLabel->setText(tr("All transfers finished."));
-        m_statusLabel->setStyleSheet("color: #50fa7b; font-style: italic;");
         emit requestList(m_currentPath);
         return;
     }
@@ -961,7 +951,6 @@ void SftpSidebar::finishTransferQueue(bool success, const QString& error) {
         m_progressBar->hide();
         m_progressLabel->hide();
         m_statusLabel->setText(error);
-        m_statusLabel->setStyleSheet("color: #f7768e; font-weight: bold;");
         QMessageBox::critical(this, tr("SFTP Transfer Error"), error);
         return;
     }

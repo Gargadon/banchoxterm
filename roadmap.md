@@ -10,10 +10,10 @@ Ya implementado:
 - **Verificación de host key** (`known_hosts`, formato OpenSSH, diálogo de confianza)
 - **SFTP** (navegar, subir, bajar, borrar, renombrar, chmod, crear carpeta, subir carpetas, editar con auto-upload)
 - **Túneles SSH** (local, remoto, dinámico/SOCKS5)
-- **Telnet**, **Serial** (solo Linux), **terminal local** (ConPTY en Windows alimentando QTermWidget en-proceso; QTermWidget directo en Linux)
+- **Telnet**, **Serial** (QSerialPort nativo en Windows; herramientas del sistema en Linux), **terminal local** (ConPTY en Windows alimentando QTermWidget en-proceso; QTermWidget directo en Linux)
 - **RDP embebido** en Windows vía ActiveQt (`QAxWidget` + `mstscax.dll`, con fallback a `mstsc.exe`); en Linux vía `xfreerdp`
 - **VNC embebido** vía `libvncclient` (renderizador propio + entrada de teclado/ratón)
-- **Gestor de sesiones** (JSON, grupos/carpetas, importar/exportar), pestañas, multi-input
+- **Gestor de sesiones** (JSON, grupos/carpetas, importar/exportar, favoritos, recientes e importación OpenSSH), pestañas, multi-input con confirmación
 - **Monitor remoto** (CPU/RAM/disco/uptime; Linux `/proc` + fallback PowerShell en Windows)
 - **Macros de teclado**, **búsqueda global** (Windows), **logging de sesiones**, **auto-reconexión**
 - Temas claro/oscuro, i18n (en/es/pt), master password + keyring (Windows Credential Manager / secret-tool)
@@ -24,12 +24,13 @@ Ya implementado:
 
 ### P1 — Diferenciadores clave frente a MobaXterm
 
-- [ ] **Split-view / multi-terminal en rejilla**: dos paneles de pestañas
-      (`QSplitter` con dos `QTabWidget`), menú "View → Toggle Split View" y
-      "Move Tab to Other Pane". Pendiente: rejilla 2x2, pestañas desmontables
-      y restauración del layout.
-- [ ] **SSH gateway / jump host (ProxyJump)**: campo `jumpHost` en `Session`,
-      conexión en dos saltos en `SshConnection` (direct-tcpip sobre el bastión).
+- [x] **Split-view / multi-terminal en rejilla**: cuatro grupos de pestañas
+      independientes, modos simple/split/2x2, movimiento entre paneles y
+      persistencia del modo/panel activo. Pendiente: restauración completa de
+      cada sesión y mejoras de acoplamiento.
+- [x] **SSH gateway / jump host (ProxyJump)**: el bastión se autentica y
+      verifica por separado; el destino usa una sesión libssh2 sobre un canal
+      `direct-tcpip`, conservando SFTP, shell, túneles y monitorización.
 - [x] **Keyboard-interactive / 2FA**: `libssh2_userauth_keyboard_interactive`
       con diálogo de prompts (OTP/MFA) en `SshConnection`.
 - [ ] **X server en Windows**: X11 forwarding permite conectar con un servidor
@@ -142,26 +143,27 @@ con componentes libres y una arquitectura mantenible.
 
 - [x] QuickConnect: `usuario@host[:puerto]`, Enter para conectar y búsqueda por
   nombre o endpoint guardado.
-- [ ] Historial de conexiones recientes y favoritos, sin guardar secretos en
+- [x] Historial de conexiones recientes y favoritos, sin guardar secretos en
   texto plano.
 - [ ] Paleta global (`Ctrl+K`) para abrir sesión, cambiar panel, ejecutar macro,
   buscar en sesiones y activar acciones.
 
 ### Fase 3.2 — organizar trabajo paralelo
 
-- [ ] Rejilla 2x2 con cuatro grupos de pestañas independientes.
-- [ ] Desmontar una pestaña en ventana propia y volver a acoplarla.
+- [x] Rejilla 2x2 con cuatro grupos de pestañas independientes.
+- [x] Desmontar una pestaña en ventana propia y volver a acoplarla.
 - [ ] Guardar/restaurar el layout al iniciar, incluyendo sesión, panel y
   directorio remoto.
-- [ ] MultiExec con confirmación visible, lista de destinos y exclusiones; la
-  ejecución masiva debe ser explícita para evitar comandos accidentales.
+- [x] MultiExec con confirmación visible y lista de destinos; la ejecución
+  masiva es explícita para evitar comandos accidentales. Pendiente: exclusiones
+  y selección individual de destinos.
 
 ### Fase 3.3 — sesiones como activo portable
 
 - [ ] Variables por perfil (`${USER}`, `${HOST}`, `${ENV}`) y plantillas para
   crear muchas sesiones sin duplicar configuración.
-- [ ] Importadores desde OpenSSH `config`, PuTTY y formatos comunes, con vista
-  previa y mapeo de campos.
+- [x] Importador desde OpenSSH `config`, con mapeo de host, usuario, puerto,
+  clave e indicación de ProxyJump. Pendiente: PuTTY y vista previa.
 - [ ] Exportación/importación de grupos, permisos de archivo documentados y
   separación clara entre configuración y secretos del keyring.
 - [ ] Sesiones compartidas opcionales mediante archivos versionables, sin

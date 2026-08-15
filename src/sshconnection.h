@@ -35,7 +35,9 @@ public:
 
 public slots:
     void connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
-                       const QString& password, const QList<TunnelConfig>& tunnels);
+                       const QString& password, const QList<TunnelConfig>& tunnels,
+                       const QString& jumpHost = QString(), int jumpPort = 22,
+                       const QString& jumpUser = QString(), const QString& jumpKeyPath = QString());
     void setX11Forwarding(bool enabled);
     void setKeepAliveSeconds(int seconds);
     void setCipherAlgorithms(const QString& ciphers);
@@ -67,12 +69,17 @@ signals:
 private slots:
     void onSocketActivity();
     void onKeepAlive();
+    void onStatsTimer();
 
 private:
     bool openSocket();
     void closeSocket();
     bool waitSocket(int timeoutMs);
     int retry(const std::function<int()>& fn);
+    bool authenticateSession(const QString& user, const QString& keyPath, const QString& password);
+    void configureSession(LIBSSH2_SESSION* session, bool enableX11);
+    static ssize_t proxySend(libssh2_socket_t socket, const void* buffer, size_t length, int flags, void** abstract);
+    static ssize_t proxyRecv(libssh2_socket_t socket, void* buffer, size_t length, int flags, void** abstract);
 
     template <typename Fn> auto retryPtr(Fn&& fn) -> decltype(fn()) {
         while (true) {
@@ -125,6 +132,10 @@ private:
     LIBSSH2_SESSION* m_session = nullptr;
     LIBSSH2_CHANNEL* m_channel = nullptr;
     LIBSSH2_SFTP* m_sftp = nullptr;
+    int m_jumpSock = -1;
+    LIBSSH2_SESSION* m_jumpSession = nullptr;
+    LIBSSH2_CHANNEL* m_jumpChannel = nullptr;
+    bool m_proxyTransport = false;
 
     QString m_host;
     int m_port = 22;

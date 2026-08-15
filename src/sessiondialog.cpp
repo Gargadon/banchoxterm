@@ -18,6 +18,7 @@
 #include <QTabWidget>
 #include <QDialogButtonBox>
 #include <QGroupBox>
+#include <QSerialPortInfo>
 
 class TunnelEditDialog : public QDialog {
 public:
@@ -184,6 +185,36 @@ void SessionDialog::setupUi() {
         if (!path.isEmpty()) {
             m_keyEdit->setText(path);
         }
+    });
+
+    auto* jumpLabel = new QLabel(tr("Optional SSH bastion (ProxyJump)"), connTab);
+    sshForm->addRow(QString(), jumpLabel);
+
+    m_jumpHostEdit = new QLineEdit(connTab);
+    m_jumpHostEdit->setPlaceholderText(tr("bastion.example.com (empty = direct)"));
+    sshForm->addRow(tr("Jump host:"), m_jumpHostEdit);
+
+    m_jumpPortSpin = new QSpinBox(connTab);
+    m_jumpPortSpin->setRange(1, 65535);
+    m_jumpPortSpin->setValue(22);
+    sshForm->addRow(tr("Jump port:"), m_jumpPortSpin);
+
+    m_jumpUserEdit = new QLineEdit(connTab);
+    m_jumpUserEdit->setPlaceholderText(tr("Optional (uses target user)"));
+    sshForm->addRow(tr("Jump user:"), m_jumpUserEdit);
+
+    auto* jumpKeyLayout = new QHBoxLayout();
+    m_jumpKeyEdit = new QLineEdit(connTab);
+    m_jumpKeyEdit->setPlaceholderText(tr("Optional (uses target key or agent)"));
+    auto* jumpKeyBrowseBtn = new QPushButton(tr("Browse..."), connTab);
+    jumpKeyLayout->addWidget(m_jumpKeyEdit);
+    jumpKeyLayout->addWidget(jumpKeyBrowseBtn);
+    sshForm->addRow(tr("Jump private key:"), jumpKeyLayout);
+
+    connect(jumpKeyBrowseBtn, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(this, tr("Select Jump Private Key"), QDir::homePath(), tr("All Files (*)"));
+        if (!path.isEmpty())
+            m_jumpKeyEdit->setText(path);
     });
 
     sshTabs->addTab(connTab, tr("SSH Connection"));
@@ -354,9 +385,20 @@ void SessionDialog::setupUi() {
     serialForm->setContentsMargins(0, 10, 0, 10);
     serialForm->setSpacing(10);
 
-    m_serialPortEdit = new QLineEdit(serialWidget);
-    m_serialPortEdit->setText("/dev/ttyUSB0");
-    serialForm->addRow(tr("Serial Port:"), m_serialPortEdit);
+    m_serialPortCombo = new QComboBox(serialWidget);
+    m_serialPortCombo->setEditable(true);
+    m_serialPortCombo->setInsertPolicy(QComboBox::NoInsert);
+    m_serialPortCombo->setPlaceholderText(tr("Select or enter a port (e.g. COM3 or /dev/ttyUSB0)"));
+    for (const QSerialPortInfo& info : QSerialPortInfo::availablePorts()) {
+        const QString name = info.portName();
+        QString label = name;
+        if (!info.description().isEmpty())
+            label += QStringLiteral(" — ") + info.description();
+        m_serialPortCombo->addItem(label, name);
+    }
+    if (m_serialPortCombo->count() == 0)
+        m_serialPortCombo->setCurrentText(QStringLiteral("COM3"));
+    serialForm->addRow(tr("Serial Port:"), m_serialPortCombo);
 
     m_serialBaudCombo = new QComboBox(serialWidget);
     m_serialBaudCombo->addItems({"9600", "19200", "38400", "57600", "115200"});
@@ -477,6 +519,14 @@ void SessionDialog::loadSession(const Session& session) {
         m_portSpin->setValue(session.port);
         m_userEdit->setText(session.user);
         m_keyEdit->setText(session.keyPath);
+        if (m_jumpHostEdit)
+            m_jumpHostEdit->setText(session.jumpHost);
+        if (m_jumpPortSpin)
+            m_jumpPortSpin->setValue(session.jumpPort > 0 ? session.jumpPort : 22);
+        if (m_jumpUserEdit)
+            m_jumpUserEdit->setText(session.jumpUser);
+        if (m_jumpKeyEdit)
+            m_jumpKeyEdit->setText(session.jumpKeyPath);
         if (m_x11ForwardCheck)
             m_x11ForwardCheck->setChecked(session.x11Forwarding);
         if (m_autoReconnectCheck)
@@ -530,11 +580,17 @@ void SessionDialog::loadSession(const Session& session) {
         }
         break;
     case SessionType::Serial:
+    {
         m_typeCombo->setCurrentIndex(5);
-        m_serialPortEdit->setText(session.serialPort);
+        const int portIndex = m_serialPortCombo->findData(session.serialPort);
+        if (portIndex >= 0)
+            m_serialPortCombo->setCurrentIndex(portIndex);
+        else
+            m_serialPortCombo->setCurrentText(session.serialPort);
         m_serialBaudCombo->setCurrentText(QString::number(session.baudRate));
         m_serialCmdCombo->setCurrentText(session.serialCmd);
         break;
+    }
     case SessionType::FTP:
         m_typeCombo->setCurrentIndex(6);
         m_ftpHostEdit->setText(session.host);
@@ -595,7 +651,7 @@ Session SessionDialog::getSession() const {
             s.name = QString("VNC: %1").arg(m_vncHostEdit->text());
             break;
         case 5:
-            s.name = QString("Serial: %1").arg(m_serialPortEdit->text());
+            s.name = QString("Serial: %1").arg(m_serialPortCombo->currentText());
             break;
         case 6:
             s.name = QString("FTP: %1").arg(m_ftpHostEdit->text());
@@ -610,6 +666,10 @@ Session SessionDialog::getSession() const {
         s.port = m_portSpin->value();
         s.user = m_userEdit->text().trimmed();
         s.keyPath = m_keyEdit->text().trimmed();
+        s.jumpHost = m_jumpHostEdit ? m_jumpHostEdit->text().trimmed() : QString();
+        s.jumpPort = m_jumpPortSpin ? m_jumpPortSpin->value() : 22;
+        s.jumpUser = m_jumpUserEdit ? m_jumpUserEdit->text().trimmed() : QString();
+        s.jumpKeyPath = m_jumpKeyEdit ? m_jumpKeyEdit->text().trimmed() : QString();
         s.x11Forwarding = m_x11ForwardCheck ? m_x11ForwardCheck->isChecked() : false;
         s.autoReconnect = m_autoReconnectCheck ? m_autoReconnectCheck->isChecked() : false;
         s.tunnels = m_tunnels;
@@ -635,11 +695,18 @@ Session SessionDialog::getSession() const {
         s.port = m_vncPortSpin->value();
         break;
     case 5:
+    {
         s.type = SessionType::Serial;
-        s.serialPort = m_serialPortEdit->text().trimmed();
+        const QString visiblePort = m_serialPortCombo->currentText().trimmed();
+        const int selectedPort = m_serialPortCombo->currentIndex();
+        if (selectedPort >= 0 && m_serialPortCombo->itemText(selectedPort) == visiblePort)
+            s.serialPort = m_serialPortCombo->itemData(selectedPort).toString().trimmed();
+        if (s.serialPort.isEmpty())
+            s.serialPort = visiblePort;
         s.baudRate = m_serialBaudCombo->currentText().toInt();
         s.serialCmd = m_serialCmdCombo->currentText();
         break;
+    }
     case 6:
         s.type = SessionType::FTP;
         s.host = m_ftpHostEdit->text().trimmed();

@@ -16,6 +16,8 @@
 #include <QSet>
 #include <QAbstractItemModel>
 #include <QLineEdit>
+#include <QCompleter>
+#include <QSettings>
 
 namespace {
 constexpr int kSessionIdRole = Qt::UserRole;
@@ -27,23 +29,40 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     layout->setContentsMargins(10, 10, 10, 10);
     layout->setSpacing(8);
 
+    auto* titleRow = new QHBoxLayout();
     auto* titleLabel = new QLabel(tr("SESSIONS"), this);
-    titleLabel->setStyleSheet(
-        "font-weight: bold; color: #787c99; font-size: 11px; letter-spacing: 1px; margin-bottom: 4px;");
-    layout->addWidget(titleLabel);
+    titleLabel->setObjectName("sidebarSectionTitle");
+    titleRow->addWidget(titleLabel);
+    m_sessionSummaryLabel = new QLabel(this);
+    m_sessionSummaryLabel->setObjectName("sidebarSectionMeta");
+    m_sessionSummaryLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    titleRow->addWidget(m_sessionSummaryLabel, 1);
+    layout->addLayout(titleRow);
 
+    auto* quickConnectRow = new QHBoxLayout();
+    quickConnectRow->setSpacing(6);
+    auto* quickConnectIcon = new QLabel(this);
+    quickConnectIcon->setPixmap(QIcon(":/icons/server.svg").pixmap(16, 16));
+    quickConnectIcon->setToolTip(tr("QuickConnect"));
+    quickConnectRow->addWidget(quickConnectIcon);
     m_quickConnectEdit = new QLineEdit(this);
     m_quickConnectEdit->setPlaceholderText(tr("QuickConnect: user@host[:port] or saved session"));
     m_quickConnectEdit->setClearButtonEnabled(true);
     m_quickConnectEdit->setToolTip(tr("Press Enter to connect directly or open a saved session."));
-    layout->addWidget(m_quickConnectEdit);
+    m_quickConnectEdit->setObjectName("quickConnectEdit");
+    quickConnectRow->addWidget(m_quickConnectEdit, 1);
+    layout->addLayout(quickConnectRow);
 
     auto* actionsLayout = new QHBoxLayout();
     auto* newRemoteBtn = new QPushButton(QIcon(":/icons/add.svg"), tr("New Remote Session"), this);
     newRemoteBtn->setObjectName("primaryButton");
+    newRemoteBtn->setProperty("sidebarAction", true);
+    newRemoteBtn->setToolTip(tr("Create a new SSH or remote session"));
     actionsLayout->addWidget(newRemoteBtn);
 
     auto* newLocalBtn = new QPushButton(QIcon(":/icons/terminal.svg"), tr("Local Session"), this);
+    newLocalBtn->setObjectName("sidebarAction");
+    newLocalBtn->setToolTip(tr("Open a local terminal session"));
     actionsLayout->addWidget(newLocalBtn);
 
     layout->addLayout(actionsLayout);
@@ -51,12 +70,26 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     auto* ioLayout = new QHBoxLayout();
     auto* importBtn = new QPushButton(QIcon(":/icons/upload.svg"), tr("Import"), this);
     auto* exportBtn = new QPushButton(QIcon(":/icons/download.svg"), tr("Export"), this);
+    importBtn->setObjectName("sidebarAction");
+    exportBtn->setObjectName("sidebarAction");
+    importBtn->setToolTip(tr("Import JSON or OpenSSH sessions"));
+    exportBtn->setToolTip(tr("Export saved sessions"));
     ioLayout->addWidget(importBtn);
     ioLayout->addWidget(exportBtn);
     layout->addLayout(ioLayout);
 
     m_treeWidget = new QTreeWidget(this);
-    m_treeWidget->setHeaderHidden(true);
+    m_treeWidget->setColumnCount(2);
+    m_treeWidget->setHeaderLabels({tr("Session"), tr("Endpoint")});
+    m_treeWidget->header()->setStretchLastSection(true);
+    m_treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_treeWidget->setObjectName("sessionTree");
+    m_treeWidget->setIconSize(QSize(18, 18));
+    m_treeWidget->setIndentation(18);
+    m_treeWidget->setAlternatingRowColors(true);
+    m_treeWidget->setUniformRowHeights(true);
+    m_treeWidget->setTextElideMode(Qt::ElideRight);
     m_treeWidget->setRootIsDecorated(true);
     m_treeWidget->setContextMenuPolicy(Qt::CustomContextMenu);
     m_treeWidget->setDragEnabled(true);
@@ -86,6 +119,7 @@ void SessionsSidebar::onQuickConnect() {
     for (const Session& session : m_sessions) {
         if (session.name.compare(input, Qt::CaseInsensitive) == 0 ||
             QStringLiteral("%1@%2").arg(session.user, session.host).compare(input, Qt::CaseInsensitive) == 0) {
+            recordRecent(session);
             emit connectSession(session);
             return;
         }
@@ -124,6 +158,24 @@ void SessionsSidebar::onQuickConnect() {
 void SessionsSidebar::loadSessions() {
     m_treeWidget->clear();
     m_sessions = SessionManager::loadSessions();
+    if (m_sessionSummaryLabel)
+        m_sessionSummaryLabel->setText(tr("%1 profiles").arg(m_sessions.size()));
+
+    QStringList completionItems;
+    for (const Session& session : m_sessions) {
+        completionItems.append(session.name);
+        if (!session.user.isEmpty() && !session.host.isEmpty())
+            completionItems.append(QStringLiteral("%1@%2").arg(session.user, session.host));
+    }
+    const QSettings settings;
+    completionItems.append(settings.value("sessions/recent").toStringList());
+    completionItems.removeDuplicates();
+    if (m_quickConnectCompleter)
+        m_quickConnectCompleter->deleteLater();
+    m_quickConnectCompleter = new QCompleter(completionItems, m_quickConnectEdit);
+    m_quickConnectCompleter->setCaseSensitivity(Qt::CaseInsensitive);
+    m_quickConnectCompleter->setFilterMode(Qt::MatchContains);
+    m_quickConnectEdit->setCompleter(m_quickConnectCompleter);
 
     // Map group -> tree item, preserving first-seen order.
     QMap<QString, QTreeWidgetItem*> groupItems;
@@ -135,6 +187,7 @@ void SessionsSidebar::loadSessions() {
             if (it == groupItems.end()) {
                 auto* groupItem = new QTreeWidgetItem();
                 groupItem->setText(0, session.group);
+                groupItem->setFirstColumnSpanned(true);
                 groupItem->setIcon(0, QIcon(":/icons/folder.svg"));
                 groupItem->setData(0, kIsGroupRole, true);
                 groupItem->setData(0, kSessionIdRole, QString());
@@ -148,29 +201,34 @@ void SessionsSidebar::loadSessions() {
         }
 
         auto* item = new QTreeWidgetItem();
-        item->setText(0, session.name);
+        item->setText(0, session.favorite ? QStringLiteral("★ %1").arg(session.name) : session.name);
         item->setData(0, kSessionIdRole, session.id);
         item->setData(0, kIsGroupRole, false);
 
         switch (session.type) {
         case SessionType::SSH:
             item->setIcon(0, QIcon(":/icons/server.svg"));
+            item->setText(1, QStringLiteral("SSH  %1@%2:%3").arg(session.user, session.host).arg(session.port));
             item->setToolTip(0, QString("%1@%2:%3").arg(session.user, session.host).arg(session.port));
             break;
         case SessionType::Telnet:
             item->setIcon(0, QIcon(":/icons/telnet.svg"));
+            item->setText(1, QStringLiteral("TELNET  %1:%2").arg(session.host).arg(session.port));
             item->setToolTip(0, QString("telnet://%1:%2").arg(session.host).arg(session.port));
             break;
         case SessionType::RDP:
             item->setIcon(0, QIcon(":/icons/rdp.svg"));
+            item->setText(1, QStringLiteral("RDP  %1:%2").arg(session.host).arg(session.port));
             item->setToolTip(0, QString("rdp://%1:%2").arg(session.host).arg(session.port));
             break;
         case SessionType::VNC:
             item->setIcon(0, QIcon(":/icons/vnc.svg"));
+            item->setText(1, QStringLiteral("VNC  %1:%2").arg(session.host).arg(session.port));
             item->setToolTip(0, QString("vnc://%1:%2").arg(session.host).arg(session.port));
             break;
         case SessionType::Serial:
             item->setIcon(0, QIcon(":/icons/serial.svg"));
+            item->setText(1, QStringLiteral("SERIAL  %1  %2 baud").arg(session.serialPort).arg(session.baudRate));
             item->setToolTip(0, tr("serial://%1 (%2 baud via %3)")
                                    .arg(session.serialPort)
                                    .arg(session.baudRate)
@@ -178,10 +236,12 @@ void SessionsSidebar::loadSessions() {
             break;
         case SessionType::FTP:
             item->setIcon(0, QIcon(":/icons/folder.svg"));
+            item->setText(1, QStringLiteral("FTP  %1:%2").arg(session.host).arg(session.port));
             item->setToolTip(0, QString("ftp://%1:%2").arg(session.host).arg(session.port));
             break;
         default:
             item->setIcon(0, QIcon(":/icons/terminal.svg"));
+            item->setText(1, tr("LOCAL TERMINAL"));
             item->setToolTip(0, session.shellPath);
             break;
         }
@@ -273,7 +333,7 @@ void SessionsSidebar::onDeleteSession() {
 
 void SessionsSidebar::onImportSessions() {
     QString path = QFileDialog::getOpenFileName(this, tr("Import Sessions"), QDir::homePath(),
-                                                tr("BanchoXterm Sessions (*.json);;All Files (*)"));
+                                                tr("Session files (*.json *.conf);;JSON (*.json);;OpenSSH config (*.conf);;All Files (*)"));
     if (path.isEmpty())
         return;
 
@@ -331,6 +391,7 @@ void SessionsSidebar::onItemDoubleClicked(QTreeWidgetItem* item, int column) {
 
     for (const Session& session : m_sessions) {
         if (session.id == id) {
+            recordRecent(session);
             emit connectSession(session);
             break;
         }
@@ -348,6 +409,9 @@ void SessionsSidebar::showContextMenu(const QPoint& pos) {
     menu.addSeparator();
     auto* editAction = menu.addAction(QIcon(":/icons/edit.svg"), tr("Edit"));
     auto* duplicateAction = menu.addAction(QIcon(":/icons/terminal.svg"), tr("Duplicate"));
+    auto* favoriteAction = menu.addAction(item->text(0).startsWith(QStringLiteral("★ "))
+                                             ? tr("Remove Favorite")
+                                             : tr("Add Favorite"));
     auto* deleteAction = menu.addAction(QIcon(":/icons/delete.svg"), tr("Delete"));
 
     auto* selectedAction = menu.exec(m_treeWidget->mapToGlobal(pos));
@@ -357,9 +421,35 @@ void SessionsSidebar::showContextMenu(const QPoint& pos) {
         onEditSession();
     } else if (selectedAction == duplicateAction) {
         onDuplicateSession();
+    } else if (selectedAction == favoriteAction) {
+        onToggleFavorite();
     } else if (selectedAction == deleteAction) {
         onDeleteSession();
     }
+}
+
+void SessionsSidebar::onToggleFavorite() {
+    const QString id = sessionIdForItem(m_treeWidget->currentItem());
+    if (id.isEmpty())
+        return;
+    for (Session& session : m_sessions) {
+        if (session.id == id) {
+            session.favorite = !session.favorite;
+            saveSessions();
+            loadSessions();
+            return;
+        }
+    }
+}
+
+void SessionsSidebar::recordRecent(const Session& session) {
+    QSettings settings;
+    QStringList recent = settings.value("sessions/recent").toStringList();
+    recent.removeAll(session.name);
+    recent.prepend(session.name);
+    while (recent.size() > 12)
+        recent.removeLast();
+    settings.setValue("sessions/recent", recent);
 }
 
 void SessionsSidebar::onDuplicateSession() {
