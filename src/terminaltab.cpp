@@ -744,10 +744,11 @@ void TerminalTab::launchExternalClient() {
         args << "/v:" + m_session.host + ":" + QString::number(m_session.port) << "/parent:" + QString::number(winId);
 #else
         program = "xfreerdp";
-        args << "/v:" + m_session.host + ":" + QString::number(m_session.port)
-             << "/parent-window:" + QString::number(winId) << "/cert:ignore"
-             << "/dynamic-resolution"
-             << "+decoration";
+        args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
+        args << "/parent-window:" + QString::number(winId);
+        args << "/cert:ignore";
+        args << "/dynamic-resolution";
+        args << "+decoration";
         if (!m_session.user.isEmpty()) {
             args << "/u:" + m_session.user;
         }
