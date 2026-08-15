@@ -22,7 +22,10 @@ jobs:
       - name: Install clang-format
         run: sudo apt-get install -y clang-format
       - name: Check formatting
-        run: cmake -B build -G Ninja && cmake --build build --target format-check
+        shell: bash
+        run: |
+          find src tests -type f \( -name '*.cpp' -o -name '*.h' \) -print0 \
+            | xargs -0 clang-format --dry-run --Werror
 
   build-windows:
     # Windows binaries, installers and portable archives are release-only.
