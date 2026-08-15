@@ -3,6 +3,7 @@ set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(banchoxterm VERSION 1.0.0 LANGUAGES C CXX)
 
 option(BANCHO_ENABLE_ASAN "Enable AddressSanitizer for memory debugging" OFF)
+option(BANCHO_ENABLE_IPO "Enable interprocedural optimization for release builds" ON)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -171,7 +172,7 @@ target_compile_definitions(banchoxterm PRIVATE BANCHO_VERSION="${BANCHO_VERSION}
 
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
-if(ipo_supported)
+if(ipo_supported AND BANCHO_ENABLE_IPO)
     set_property(TARGET banchoxterm PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 endif()
 

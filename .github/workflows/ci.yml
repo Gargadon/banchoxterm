@@ -83,10 +83,13 @@ jobs:
 
       - name: Configure
         shell: pwsh
-        run: cmake -B build -A ${{ matrix.arch.cmake_arch }} "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" -DBANCHO_ENABLE_VNC=ON
+        run: cmake -B build -A ${{ matrix.arch.cmake_arch }} "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" -DBANCHO_ENABLE_VNC=ON -DBANCHO_ENABLE_IPO=OFF
 
-      - name: Build
-        run: cmake --build build --config Release
+      - name: Build application
+        run: cmake --build build --config Release --target banchoxterm --parallel 2
+
+      - name: Build tests
+        run: cmake --build build --config Release --target banchoxterm_tests --parallel 2
 
       - name: Run tests
         run: ctest --test-dir build -C Release --output-on-failure
