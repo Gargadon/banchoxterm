@@ -106,10 +106,24 @@ jobs:
         run: choco install nsis -y --no-progress
 
       - name: Build NSIS installer
+        shell: pwsh
         run: |
           $dist = (Resolve-Path "pkg\banchoxterm").Path
           $nsh = Join-Path (Resolve-Path "build") "version.nsh"
-          makensis -DVERSION_NSH="$nsh" -DDIST_DIR="$dist" packaging\windows\installer.nsi
+          $nsisDir = Join-Path ${env:ProgramFiles(x86)} "NSIS"
+          $makensis = Join-Path $nsisDir "makensis.exe"
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            $nsisDir = Join-Path $env:ProgramFiles "NSIS"
+            $makensis = Join-Path $nsisDir "makensis.exe"
+          }
+          if (-not (Test-Path -LiteralPath $makensis)) {
+            throw "NSIS was installed but makensis.exe was not found at $makensis"
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value $nsisDir
+          & $makensis "-DVERSION_NSH=$nsh" "-DDIST_DIR=$dist" "packaging\windows\installer.nsi"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
           Copy-Item BanchoXterm-Setup.exe BanchoXterm-Setup-${{ matrix.arch.name }}.exe
 
       - name: Create portable ZIP
