@@ -51,11 +51,34 @@ configure_file(
         COPYONLY
     )
 else()
+    # libsodium is an Autotools project and does not generate this header when
+    # consumed through FetchContent.  Generate it from the pinned release's
+    # template so sodium.h can be included by the sources built below.
+    set(BANCHO_SODIUM_VERSION "1.0.20")
+    set(BANCHO_PROJECT_VERSION "${PROJECT_VERSION}")
+    set(VERSION "${BANCHO_SODIUM_VERSION}")
+    set(SODIUM_LIBRARY_VERSION_MAJOR 26)
+    set(SODIUM_LIBRARY_VERSION_MINOR 2)
+    set(SODIUM_LIBRARY_MINIMAL_DEF "")
     configure_file(
-        "${libsodium_BINARY_DIR}/src/libsodium/include/sodium/version.h"
+        "${libsodium_SOURCE_DIR}/src/libsodium/include/sodium/version.h.in"
         "${BANCHO_SODIUM_GENERATED_INCLUDE}/sodium/version.h"
         COPYONLY
     )
+    file(READ
+        "${BANCHO_SODIUM_GENERATED_INCLUDE}/sodium/version.h"
+        BANCHO_SODIUM_VERSION_HEADER
+    )
+    string(CONFIGURE "${BANCHO_SODIUM_VERSION_HEADER}"
+        BANCHO_SODIUM_VERSION_HEADER @ONLY
+    )
+    file(WRITE
+        "${BANCHO_SODIUM_GENERATED_INCLUDE}/sodium/version.h"
+        "${BANCHO_SODIUM_VERSION_HEADER}"
+    )
+    set(VERSION "${BANCHO_PROJECT_VERSION}")
+    set(PROJECT_VERSION "${BANCHO_PROJECT_VERSION}")
+    unset(BANCHO_PROJECT_VERSION)
 endif()
 configure_file(
     "${libsodium_SOURCE_DIR}/src/libsodium/include/sodium/export.h"
@@ -73,6 +96,7 @@ target_include_directories(sodium PUBLIC
 )
 target_include_directories(sodium PRIVATE ${libsodium_SOURCE_DIR}/src/libsodium)
 target_include_directories(sodium PRIVATE ${libsodium_SOURCE_DIR}/src/libsodium/include/sodium)
+target_include_directories(sodium PRIVATE ${BANCHO_SODIUM_GENERATED_INCLUDE}/sodium)
 if(WIN32)
     target_include_directories(sodium PRIVATE ${libsodium_SOURCE_DIR}/builds/msvc)
 endif()
@@ -376,6 +400,12 @@ target_compile_definitions(banchoxterm_tests PRIVATE SODIUM_STATIC)
 target_link_libraries(banchoxterm_tests PRIVATE sodium)
 
 add_test(NAME SessionTests COMMAND banchoxterm_tests)
+# The test binary creates QWidget-based terminal components.  Use Qt's
+# headless platform plugin so ctest is reproducible on CI and servers without
+# an X11/Wayland display.
+set_tests_properties(SessionTests PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
 
 # ── Formatting ──────────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 #pragma once
 #include <QMainWindow>
 #include <QMap>
+#include <QList>
 #include "session.h"
 
 class QTabWidget;
@@ -8,6 +9,8 @@ class QStackedWidget;
 class QToolButton;
 class QFrame;
 class QSplitter;
+class QGridLayout;
+class QWidget;
 class QComboBox;
 class QLabel;
 class QAction;
@@ -38,6 +41,7 @@ private slots:
     void onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
     void onReconnectRequested(const Session& session);
     void toggleSplitView();
+    void toggleGridView();
     void moveTabToOtherPane();
 
     void onCopy();
@@ -54,6 +58,9 @@ private:
     TerminalTab* currentTerminalTab() const;
     QTabWidget* activePane() const;
     QTabWidget* otherPane(QTabWidget* pane) const;
+    QList<QTabWidget*> allPanes() const;
+    QList<QTabWidget*> visiblePanes() const;
+    void setPaneLayout(int mode, bool moveCurrentTab = false);
 
     QString m_themeMode = "system";
     QSplitter* m_mainSplitter;
@@ -67,10 +74,14 @@ private:
     QToolButton* m_sftpTabBtn;
     QToolButton* m_multiInputBtn = nullptr;
 
-    QSplitter* m_tabSplitter = nullptr;
+    QWidget* m_tabSplitter = nullptr;
+    QGridLayout* m_tabGrid = nullptr;
     QTabWidget* m_tabWidget = nullptr;
     QTabWidget* m_tabWidget2 = nullptr;
+    QTabWidget* m_tabWidget3 = nullptr;
+    QTabWidget* m_tabWidget4 = nullptr;
     QTabWidget* m_activePane = nullptr;
+    int m_paneLayoutMode = 0; // 0 = single, 1 = split, 2 = 2x2 grid
 
     QWidget* m_multiInputBar;
     QComboBox* m_multiInputEdit;

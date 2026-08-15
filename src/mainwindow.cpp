@@ -8,6 +8,7 @@
 #include "updater.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QSplitter>
 #include <QTabWidget>
 #include <QStackedWidget>
@@ -75,6 +76,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         m_mainSplitter->setSizes({350, 850});
     }
 
+    setPaneLayout(settings.value("window/tabLayoutMode", 0).toInt());
+    const int savedPane = settings.value("window/activePane", 0).toInt();
+    const QList<QTabWidget*> panes = visiblePanes();
+    if (savedPane >= 0 && savedPane < panes.size())
+        m_activePane = panes[savedPane];
+
     setWindowTitle("BanchoXterm");
 }
 
@@ -83,7 +90,7 @@ MainWindow::~MainWindow() {
 
 void MainWindow::closeEvent(QCloseEvent* event) {
     bool hasActive = false;
-    for (QTabWidget* pane : {m_tabWidget, m_tabWidget2}) {
+    for (QTabWidget* pane : allPanes()) {
         for (int i = 0; i < pane->count(); ++i) {
             auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
             if (tab && tab->isSessionActive()) {
@@ -111,6 +118,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/state", saveState());
     settings.setValue("window/splitter", m_mainSplitter->saveState());
+    settings.setValue("window/tabLayoutMode", m_paneLayoutMode);
+    settings.setValue("window/activePane", qMax(0, visiblePanes().indexOf(activePane())));
     QMainWindow::closeEvent(event);
 }
 
@@ -192,17 +201,33 @@ void MainWindow::setupUi() {
     sidebarLayout->addWidget(m_sidebarStacked);
     m_mainSplitter->addWidget(m_sidebarContainer);
 
-    // 4. Tab widgets for terminals (split into two panes)
-    m_tabSplitter = new QSplitter(Qt::Horizontal, m_mainSplitter);
-    m_tabWidget = new QTabWidget(m_tabSplitter);
-    m_tabWidget->setTabsClosable(true);
-    m_tabWidget->setMovable(true);
-    m_tabWidget2 = new QTabWidget(m_tabSplitter);
-    m_tabWidget2->setTabsClosable(true);
-    m_tabWidget2->setMovable(true);
+    // 4. Terminal panes. The same four-pane container supports the default
+    // single view, a two-pane split, and a 2x2 grid without moving widgets
+    // between layouts when the user changes mode.
+    m_tabSplitter = new QWidget(m_mainSplitter);
+    m_tabGrid = new QGridLayout(m_tabSplitter);
+    m_tabGrid->setContentsMargins(0, 0, 0, 0);
+    m_tabGrid->setSpacing(1);
+
+    auto createPane = [this]() {
+        auto* pane = new QTabWidget(m_tabSplitter);
+        pane->setTabsClosable(true);
+        pane->setMovable(true);
+        return pane;
+    };
+    m_tabWidget = createPane();
+    m_tabWidget2 = createPane();
+    m_tabWidget3 = createPane();
+    m_tabWidget4 = createPane();
+    m_tabGrid->addWidget(m_tabWidget, 0, 0);
+    m_tabGrid->addWidget(m_tabWidget2, 0, 1);
+    m_tabGrid->addWidget(m_tabWidget3, 1, 0);
+    m_tabGrid->addWidget(m_tabWidget4, 1, 1);
+    m_tabGrid->setRowStretch(0, 1);
+    m_tabGrid->setColumnStretch(0, 1);
     m_tabWidget2->hide();
-    m_tabSplitter->addWidget(m_tabWidget);
-    m_tabSplitter->addWidget(m_tabWidget2);
+    m_tabWidget3->hide();
+    m_tabWidget4->hide();
     m_activePane = m_tabWidget;
     m_mainSplitter->addWidget(m_tabSplitter);
 
@@ -261,6 +286,12 @@ void MainWindow::setupUi() {
     connect(m_tabWidget2, &QTabWidget::tabCloseRequested, this,
             [this](int i) { onTabCloseRequested(m_tabWidget2, i); });
     connect(m_tabWidget2, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget2, i); });
+    connect(m_tabWidget3, &QTabWidget::tabCloseRequested, this,
+            [this](int i) { onTabCloseRequested(m_tabWidget3, i); });
+    connect(m_tabWidget3, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget3, i); });
+    connect(m_tabWidget4, &QTabWidget::tabCloseRequested, this,
+            [this](int i) { onTabCloseRequested(m_tabWidget4, i); });
+    connect(m_tabWidget4, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget4, i); });
     connect(m_sftpSidebar, &SftpSidebar::remoteStatsUpdated, this, &MainWindow::onRemoteStatsUpdated);
 
     // Atajo Ctrl+W para cerrar la pestaña activa
@@ -293,9 +324,9 @@ void MainWindow::setupUi() {
         icon->setFixedSize(16, 16);
         cardLayout->addWidget(icon);
 
-        auto* textLayout = new QVBoxLayout();
+        auto* textLayout = new QHBoxLayout();
         textLayout->setContentsMargins(0, 0, 0, 0);
-        textLayout->setSpacing(0);
+        textLayout->setSpacing(4);
         valueLabel = new QLabel("--", card);
         valueLabel->setObjectName("remoteStatsValue");
         valueLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -406,14 +437,12 @@ void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
     m_activePane = pane;
 
     if (index < 0) {
-        // If this pane has no tabs but the other does, switch active pane.
-        if (pane == m_tabWidget && m_tabWidget2->count() > 0) {
-            m_activePane = m_tabWidget2;
-            return;
-        }
-        if (pane == m_tabWidget2 && m_tabWidget->count() > 0) {
-            m_activePane = m_tabWidget;
-            return;
+        // If this pane has no tabs but another visible pane does, switch to it.
+        for (QTabWidget* candidate : visiblePanes()) {
+            if (candidate->count() > 0) {
+                m_activePane = candidate;
+                return;
+            }
         }
         m_sftpSidebar->stopSession();
         m_sftpTabBtn->setEnabled(false);
@@ -487,7 +516,7 @@ void MainWindow::onOpenSettings() {
         }
 
         // 2. Typography Configuration
-        for (QTabWidget* pane : {m_tabWidget, m_tabWidget2}) {
+        for (QTabWidget* pane : allPanes()) {
             for (int i = 0; i < pane->count(); ++i) {
                 auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
                 if (tab) {
@@ -515,7 +544,7 @@ void MainWindow::onSendMultiInput() {
         return;
 
     // Send to all tabs
-    for (QTabWidget* pane : {m_tabWidget, m_tabWidget2}) {
+    for (QTabWidget* pane : allPanes()) {
         for (int i = 0; i < pane->count(); ++i) {
             auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
             if (tab) {
@@ -546,8 +575,14 @@ void MainWindow::onReconnectRequested(const Session& session) {
         QTabWidget* pane = nullptr;
         if (m_tabWidget->indexOf(tab) != -1)
             pane = m_tabWidget;
-        else if (m_tabWidget2->indexOf(tab) != -1)
-            pane = m_tabWidget2;
+        else {
+            for (QTabWidget* candidate : allPanes()) {
+                if (candidate->indexOf(tab) != -1) {
+                    pane = candidate;
+                    break;
+                }
+            }
+        }
 
         if (pane) {
             int idx = pane->indexOf(tab);
@@ -563,18 +598,21 @@ void MainWindow::onReconnectRequested(const Session& session) {
 }
 
 void MainWindow::onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs) {
-    int seconds = static_cast<int>(uptimeSecs);
+    int seconds = qMax(0, static_cast<int>(uptimeSecs));
     int days = seconds / 86400;
     int hours = (seconds % 86400) / 3600;
     int mins = (seconds % 3600) / 60;
+    int secs = seconds % 60;
 
     QString uptimeStr;
     if (days > 0) {
-        uptimeStr = QString("%1d %2h %3m").arg(days).arg(hours).arg(mins);
+        uptimeStr = QString("%1d %2h %3m %4s").arg(days).arg(hours).arg(mins).arg(secs);
     } else if (hours > 0) {
-        uptimeStr = QString("%1h %2m").arg(hours).arg(mins);
+        uptimeStr = QString("%1h %2m %3s").arg(hours).arg(mins).arg(secs);
+    } else if (mins > 0) {
+        uptimeStr = QString("%1m %2s").arg(mins).arg(secs);
     } else {
-        uptimeStr = QString("%1m").arg(mins);
+        uptimeStr = QString("%1s").arg(secs);
     }
 
     m_remoteCpuValue->setText(QString("%1%").arg(cpu, 0, 'f', 0));
@@ -638,6 +676,10 @@ void MainWindow::setupMenuBar() {
     splitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
     connect(splitAction, &QAction::triggered, this, &MainWindow::toggleSplitView);
 
+    auto* gridAction = viewMenu->addAction(tr("Toggle 2x2 &Grid View"));
+    gridAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G));
+    connect(gridAction, &QAction::triggered, this, &MainWindow::toggleGridView);
+
     auto* moveTabAction = viewMenu->addAction(tr("Move Tab to &Other Pane"));
     moveTabAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_M));
     connect(moveTabAction, &QAction::triggered, this, &MainWindow::moveTabToOtherPane);
@@ -678,55 +720,101 @@ TerminalTab* MainWindow::currentTerminalTab() const {
     return qobject_cast<TerminalTab*>(pane->widget(idx));
 }
 
+QList<QTabWidget*> MainWindow::allPanes() const {
+    return {m_tabWidget, m_tabWidget2, m_tabWidget3, m_tabWidget4};
+}
+
+QList<QTabWidget*> MainWindow::visiblePanes() const {
+    QList<QTabWidget*> panes = allPanes();
+    if (m_paneLayoutMode == 0)
+        return {m_tabWidget};
+    if (m_paneLayoutMode == 1)
+        return {m_tabWidget, m_tabWidget2};
+    return panes;
+}
+
 QTabWidget* MainWindow::activePane() const {
-    if (m_activePane && (m_activePane == m_tabWidget || m_activePane == m_tabWidget2))
+    if (m_activePane && allPanes().contains(m_activePane) && visiblePanes().contains(m_activePane))
         return m_activePane;
     return m_tabWidget;
 }
 
 QTabWidget* MainWindow::otherPane(QTabWidget* pane) const {
-    return (pane == m_tabWidget) ? m_tabWidget2 : m_tabWidget;
+    const QList<QTabWidget*> panes = visiblePanes();
+    if (panes.size() < 2)
+        return m_tabWidget2;
+    const int index = panes.indexOf(pane);
+    return panes[(index + 1 + panes.size()) % panes.size()];
+}
+
+void MainWindow::setPaneLayout(int mode, bool moveCurrentTab) {
+    mode = qBound(0, mode, 2);
+
+    // A hidden pane must not retain tabs when collapsing the layout: moving
+    // them back keeps sessions reachable and makes the next layout switch
+    // predictable.
+    if (mode == 0 || mode == 1) {
+        const int firstHiddenPane = mode == 0 ? 1 : 2;
+        for (int i = firstHiddenPane; i < allPanes().size(); ++i) {
+            QTabWidget* from = allPanes()[i];
+            while (from->count() > 0) {
+                QWidget* widget = from->widget(0);
+                const QString title = from->tabText(0);
+                from->removeTab(0);
+                const int newIndex = m_tabWidget->addTab(widget, title);
+                m_tabWidget->setCurrentIndex(newIndex);
+            }
+        }
+    }
+
+    m_paneLayoutMode = mode;
+    const QList<QTabWidget*> panes = allPanes();
+    for (int i = 0; i < panes.size(); ++i)
+        panes[i]->setVisible(visiblePanes().contains(panes[i]));
+
+    // Give only active grid rows/columns stretch. Hidden panes then collapse
+    // completely, allowing the primary pane to occupy the full area.
+    m_tabGrid->setRowStretch(0, mode == 2 ? 1 : 1);
+    m_tabGrid->setRowStretch(1, mode == 2 ? 1 : 0);
+    m_tabGrid->setColumnStretch(0, 1);
+    m_tabGrid->setColumnStretch(1, mode == 0 ? 0 : 1);
+
+    if (mode == 1 && moveCurrentTab && m_tabWidget2->count() == 0 && m_tabWidget->count() > 0) {
+        const int index = m_tabWidget->currentIndex();
+        if (index >= 0) {
+            QWidget* widget = m_tabWidget->widget(index);
+            const QString title = m_tabWidget->tabText(index);
+            m_tabWidget->removeTab(index);
+            const int newIndex = m_tabWidget2->addTab(widget, title);
+            m_tabWidget2->setCurrentIndex(newIndex);
+            m_activePane = m_tabWidget2;
+        }
+    } else if (!visiblePanes().contains(m_activePane)) {
+        m_activePane = visiblePanes().first();
+    }
 }
 
 void MainWindow::toggleSplitView() {
-    const bool visible = !m_tabWidget2->isVisible();
-    m_tabWidget2->setVisible(visible);
-    if (visible) {
-        // Move the current tab of the active pane to the new pane if the new
-        // pane is empty, so the user sees two sessions side by side immediately.
-        QTabWidget* from = activePane();
-        if (from == m_tabWidget2 && m_tabWidget2->count() == 0)
-            from = m_tabWidget;
-        if (m_tabWidget2->count() == 0 && from == m_tabWidget && m_tabWidget->count() > 0) {
-            int idx = m_tabWidget->currentIndex();
-            if (idx >= 0) {
-                QWidget* w = m_tabWidget->widget(idx);
-                QString title = m_tabWidget->tabText(idx);
-                m_tabWidget->removeTab(idx);
-                m_tabWidget2->addTab(w, title);
-                m_tabWidget2->setCurrentIndex(m_tabWidget2->count() - 1);
-            }
-        }
-        m_tabSplitter->setSizes({1, 1});
-        m_activePane = m_tabWidget2;
-    } else {
-        // Move all tabs back to the primary pane.
-        while (m_tabWidget2->count() > 0) {
-            QWidget* w = m_tabWidget2->widget(0);
-            QString title = m_tabWidget2->tabText(0);
-            m_tabWidget2->removeTab(0);
-            int idx = m_tabWidget->addTab(w, title);
-            m_tabWidget->setCurrentIndex(idx);
-        }
-        m_activePane = m_tabWidget;
-    }
+    if (m_paneLayoutMode == 1)
+        setPaneLayout(0);
+    else
+        setPaneLayout(1, true);
+}
+
+void MainWindow::toggleGridView() {
+    if (m_paneLayoutMode == 2)
+        setPaneLayout(0);
+    else
+        setPaneLayout(2);
 }
 
 void MainWindow::moveTabToOtherPane() {
     QTabWidget* from = activePane();
     QTabWidget* to = otherPane(from);
-    if (!to->isVisible())
-        toggleSplitView();
+    if (!visiblePanes().contains(to)) {
+        setPaneLayout(1, true);
+        to = otherPane(from);
+    }
     int idx = from->currentIndex();
     if (idx < 0)
         return;
@@ -853,7 +941,9 @@ void MainWindow::onManageMacros() {
 }
 
 void MainWindow::onGlobalSearch() {
-    const int total = m_tabWidget->count() + m_tabWidget2->count();
+    int total = 0;
+    for (QTabWidget* pane : allPanes())
+        total += pane->count();
     if (total == 0)
         return;
 
@@ -889,7 +979,7 @@ void MainWindow::onGlobalSearch() {
 
         // Flatten both panes into an ordered list of tabs.
         QVector<QPair<QTabWidget*, int>> tabs;
-        for (QTabWidget* pane : {m_tabWidget, m_tabWidget2})
+        for (QTabWidget* pane : allPanes())
             for (int i = 0; i < pane->count(); ++i)
                 tabs.append(qMakePair(pane, i));
 
