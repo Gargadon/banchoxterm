@@ -501,9 +501,8 @@ void SftpSidebar::onPasswordRequired(const QString& prompt) {
     if (ok) {
         m_statusLabel->setText(tr("Connecting with password..."));
         emit requestConnect(m_currentSession.host, m_currentSession.port, m_currentSession.user,
-                            m_currentSession.keyPath, password, m_currentSession.tunnels,
-                            m_currentSession.jumpHost, m_currentSession.jumpPort,
-                            m_currentSession.jumpUser, m_currentSession.jumpKeyPath);
+                            m_currentSession.keyPath, password, m_currentSession.tunnels, m_currentSession.jumpHost,
+                            m_currentSession.jumpPort, m_currentSession.jumpUser, m_currentSession.jumpKeyPath);
     } else {
         stopSession();
     }
@@ -613,8 +612,8 @@ void SftpSidebar::onChmodClicked() {
 
     QString name = item->text(0);
     bool ok = false;
-    QString modeStr = QInputDialog::getText(this, tr("Permissions"), tr("Mode (octal, e.g. 755):"),
-                                            QLineEdit::Normal, "755", &ok);
+    QString modeStr =
+        QInputDialog::getText(this, tr("Permissions"), tr("Mode (octal, e.g. 755):"), QLineEdit::Normal, "755", &ok);
     if (!ok)
         return;
 

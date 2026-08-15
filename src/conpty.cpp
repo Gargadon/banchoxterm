@@ -98,8 +98,8 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
         CloseHandle(outWrite);
         return false;
     }
-    if (!UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-                                   m_hpc, sizeof(HPCON), nullptr, nullptr)) {
+    if (!UpdateProcThreadAttribute(si.lpAttributeList, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, m_hpc, sizeof(HPCON),
+                                   nullptr, nullptr)) {
         m_startError = GetLastError();
         DeleteProcThreadAttributeList(si.lpAttributeList);
         HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
@@ -115,9 +115,8 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     PROCESS_INFORMATION pi;
     memset(&pi, 0, sizeof(pi));
 
-    BOOL ok = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE,
-                             EXTENDED_STARTUPINFO_PRESENT, nullptr, nullptr, &si.StartupInfo, &pi);
-
+    BOOL ok = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE, EXTENDED_STARTUPINFO_PRESENT, nullptr,
+                             nullptr, &si.StartupInfo, &pi);
 
     DeleteProcThreadAttributeList(si.lpAttributeList);
     HeapFree(GetProcessHeap(), 0, si.lpAttributeList);

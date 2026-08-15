@@ -9,22 +9,22 @@ public:
 
     bool isEnabled() const;
     bool isUnlocked() const;
-    
+
     // Establecer una nueva contraseña maestra
     bool setMasterPassword(const QString& password);
-    
+
     // Desactivar la contraseña maestra (requiere la actual para descifrar y guardar en claro)
     bool disableMasterPassword(const QString& currentPassword);
 
     // Verificar y desbloquear
     bool unlock(const QString& password);
-    
+
     // Bloquear (limpiar clave en memoria)
     void lock();
 
     // Cifrar una contraseña
     QString encryptPassword(const QString& plaintext);
-    
+
     // Descifrar una contraseña (solicitará desbloqueo si no está activa la clave)
     QString decryptPassword(const QString& ciphertext);
 

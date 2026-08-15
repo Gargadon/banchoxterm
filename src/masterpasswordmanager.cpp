@@ -17,9 +17,10 @@ constexpr auto kFormat = "BANCHO2";
 bool sodiumReady() {
     return sodium_init() >= 0;
 }
-}
+} // namespace
 
-MasterPasswordManager::MasterPasswordManager() {}
+MasterPasswordManager::MasterPasswordManager() {
+}
 
 MasterPasswordManager::~MasterPasswordManager() {
     lock();
@@ -53,9 +54,8 @@ QByteArray MasterPasswordManager::deriveKey(const QString& password, const QByte
     QByteArray key(kKeyBytes, Qt::Uninitialized);
     const QByteArray pass = password.toUtf8();
     if (crypto_pwhash(reinterpret_cast<unsigned char*>(key.data()), key.size(), pass.constData(), pass.size(),
-                      reinterpret_cast<const unsigned char*>(salt.constData()),
-                      crypto_pwhash_OPSLIMIT_INTERACTIVE, crypto_pwhash_MEMLIMIT_INTERACTIVE,
-                      crypto_pwhash_ALG_ARGON2ID13) != 0)
+                      reinterpret_cast<const unsigned char*>(salt.constData()), crypto_pwhash_OPSLIMIT_INTERACTIVE,
+                      crypto_pwhash_MEMLIMIT_INTERACTIVE, crypto_pwhash_ALG_ARGON2ID13) != 0)
         return {};
     return key;
 }
@@ -166,23 +166,27 @@ QString MasterPasswordManager::decryptPassword(const QString& ciphertext) {
     // Solicitar desbloqueo interactivo si no está desbloqueado
     if (isEnabled() && !isUnlocked()) {
         if (QThread::currentThread() != qApp->thread()) {
-            QMetaObject::invokeMethod(qApp, [this]() {
-                if (isUnlocked()) return;
-                bool ok;
-                QString password = QInputDialog::getText(nullptr, 
-                    QObject::tr("Master Password Required"), 
-                    QObject::tr("Please enter your Master Password to unlock your credentials:"), 
-                    QLineEdit::Password, "", &ok);
-                if (ok && !password.isEmpty()) {
-                    unlock(password);
-                }
-            }, Qt::BlockingQueuedConnection);
+            QMetaObject::invokeMethod(
+                qApp,
+                [this]() {
+                    if (isUnlocked())
+                        return;
+                    bool ok;
+                    QString password = QInputDialog::getText(
+                        nullptr, QObject::tr("Master Password Required"),
+                        QObject::tr("Please enter your Master Password to unlock your credentials:"),
+                        QLineEdit::Password, "", &ok);
+                    if (ok && !password.isEmpty()) {
+                        unlock(password);
+                    }
+                },
+                Qt::BlockingQueuedConnection);
         } else {
             bool ok;
-            QString password = QInputDialog::getText(nullptr, 
-                QObject::tr("Master Password Required"), 
-                QObject::tr("Please enter your Master Password to unlock your credentials:"), 
-                QLineEdit::Password, "", &ok);
+            QString password =
+                QInputDialog::getText(nullptr, QObject::tr("Master Password Required"),
+                                      QObject::tr("Please enter your Master Password to unlock your credentials:"),
+                                      QLineEdit::Password, "", &ok);
             if (ok && !password.isEmpty()) {
                 unlock(password);
             }

@@ -33,7 +33,9 @@ public:
     QByteArray read();
     bool isRunning() const;
     DWORD exitCode() const;
-    DWORD startError() const { return m_startError; }
+    DWORD startError() const {
+        return m_startError;
+    }
     void close();
 
     HANDLE outputReadHandle() const {

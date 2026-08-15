@@ -3,10 +3,7 @@
 #include <QtEndian>
 
 SshTunnel::SshTunnel(LIBSSH2_SESSION* sshSession, const TunnelConfig& config, QObject* parent)
-    : QObject(parent)
-    , m_sshSession(sshSession)
-    , m_config(config)
-{
+    : QObject(parent), m_sshSession(sshSession), m_config(config) {
 }
 
 SshTunnel::~SshTunnel() {
@@ -17,7 +14,7 @@ bool SshTunnel::start() {
     if (m_config.type == TunnelConfig::Type::Local || m_config.type == TunnelConfig::Type::Dynamic) {
         m_tcpServer = new QTcpServer(this);
         connect(m_tcpServer, &QTcpServer::newConnection, this, &SshTunnel::onNewConnection);
-        
+
         // Escuchar localmente en el puerto configurado
         if (!m_tcpServer->listen(QHostAddress::LocalHost, m_config.localPort)) {
             m_tcpServer->deleteLater();
@@ -30,7 +27,7 @@ bool SshTunnel::start() {
         libssh2_session_set_blocking(m_sshSession, 1);
         m_listener = libssh2_channel_forward_listen_ex(m_sshSession, "0.0.0.0", m_config.remotePort, nullptr, 16);
         libssh2_session_set_blocking(m_sshSession, 0);
-        
+
         return m_listener != nullptr;
     }
     return false;
@@ -64,7 +61,7 @@ void SshTunnel::onNewConnection() {
 
         ChannelBridge* bridge = new ChannelBridge();
         bridge->socket = socket;
-        
+
         connect(socket, &QTcpSocket::readyRead, this, &SshTunnel::onSocketReadyRead);
         connect(socket, &QTcpSocket::disconnected, this, &SshTunnel::onSocketDisconnected);
 
@@ -151,7 +148,7 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
         if (socket->bytesAvailable() < 2 + numMethods)
             return;
 
-        socket->read(2); // Descartar los dos primeros bytes ya leídos
+        socket->read(2);          // Descartar los dos primeros bytes ya leídos
         socket->read(numMethods); // Descartar métodos
 
         // Responder con NO AUTHENTICATIONREQUIRED (0x05, 0x00)
@@ -179,7 +176,8 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
             char domainLenChar;
             // Peek de longitud de dominio (byte 4)
             socket->peek(&domainLenChar, 1);
-            int domainLen = static_cast<unsigned char>(domainLenChar); // Necesitamos leer la longitud del dominio del buffer real
+            int domainLen =
+                static_cast<unsigned char>(domainLenChar); // Necesitamos leer la longitud del dominio del buffer real
             // Para peek seguro con offset de 4:
             QByteArray peekBuf = socket->peek(5);
             domainLen = static_cast<unsigned char>(peekBuf[4]);
@@ -214,8 +212,7 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
 
         // Abrir canal direct-tcpip mediante el túnel SSH
         libssh2_session_set_blocking(m_sshSession, 1);
-        LIBSSH2_CHANNEL* channel = libssh2_channel_direct_tcpip(
-            m_sshSession, host.toLatin1().constData(), port);
+        LIBSSH2_CHANNEL* channel = libssh2_channel_direct_tcpip(m_sshSession, host.toLatin1().constData(), port);
         libssh2_session_set_blocking(m_sshSession, 0);
 
         if (channel) {
@@ -270,17 +267,17 @@ void SshTunnel::poll() {
         if (channel) {
             QTcpSocket* socket = new QTcpSocket(this);
             socket->connectToHost(m_config.remoteHost, m_config.remotePort);
-            
+
             // Esperar conexión brevemente de forma bloqueante
             if (socket->waitForConnected(100)) {
                 ChannelBridge* bridge = new ChannelBridge();
                 bridge->socket = socket;
                 bridge->channel = channel;
                 bridge->socksHandshakeDone = true;
-                
+
                 connect(socket, &QTcpSocket::readyRead, this, &SshTunnel::onSocketReadyRead);
                 connect(socket, &QTcpSocket::disconnected, this, &SshTunnel::onSocketDisconnected);
-                
+
                 m_bridges.append(bridge);
             } else {
                 socket->deleteLater();

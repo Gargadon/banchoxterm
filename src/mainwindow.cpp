@@ -40,17 +40,24 @@
 namespace {
 QString sessionTypeName(SessionType type) {
     switch (type) {
-    case SessionType::SSH: return QStringLiteral("SSH");
-    case SessionType::Local: return QStringLiteral("LOCAL");
-    case SessionType::Telnet: return QStringLiteral("TELNET");
-    case SessionType::Serial: return QStringLiteral("SERIAL");
-    case SessionType::RDP: return QStringLiteral("RDP");
-    case SessionType::VNC: return QStringLiteral("VNC");
-    case SessionType::FTP: return QStringLiteral("FTP");
+    case SessionType::SSH:
+        return QStringLiteral("SSH");
+    case SessionType::Local:
+        return QStringLiteral("LOCAL");
+    case SessionType::Telnet:
+        return QStringLiteral("TELNET");
+    case SessionType::Serial:
+        return QStringLiteral("SERIAL");
+    case SessionType::RDP:
+        return QStringLiteral("RDP");
+    case SessionType::VNC:
+        return QStringLiteral("VNC");
+    case SessionType::FTP:
+        return QStringLiteral("FTP");
     }
     return QStringLiteral("SESSION");
 }
-}
+} // namespace
 
 class DetachedTabWindow final : public QMainWindow {
 public:
@@ -460,8 +467,7 @@ void MainWindow::setupUi() {
     statsLayout->setContentsMargins(8, 2, 8, 2);
     statsLayout->setSpacing(5);
 
-    auto addStatCard = [this, statsLayout](const QString& iconPath, const QString& caption,
-                                            QLabel*& valueLabel) {
+    auto addStatCard = [this, statsLayout](const QString& iconPath, const QString& caption, QLabel*& valueLabel) {
         auto* card = new QFrame(m_remoteMonitorWidget);
         card->setObjectName("remoteStatsCard");
         auto* cardLayout = new QHBoxLayout(card);
@@ -748,10 +754,7 @@ void MainWindow::onSendMultiInput() {
                             (targetNames.size() > 8 ? tr("\n...and %1 more").arg(targetNames.size() - 8) : QString());
     const auto answer = QMessageBox::question(
         this, tr("Confirm Multi-Input"),
-        tr("Send this command to %1 terminal(s)?\n\n%2\n\nCommand:\n%3")
-            .arg(targets.size())
-            .arg(preview)
-            .arg(text),
+        tr("Send this command to %1 terminal(s)?\n\n%2\n\nCommand:\n%3").arg(targets.size()).arg(preview).arg(text),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
     if (answer != QMessageBox::Yes)
         return;

@@ -181,7 +181,8 @@ void SessionDialog::setupUi() {
     sshForm->addRow(tr("Private Key:"), keyLayout);
 
     connect(keyBrowseBtn, &QPushButton::clicked, this, [this]() {
-        QString path = QFileDialog::getOpenFileName(this, tr("Select Private Key"), QDir::homePath(), tr("All Files (*)"));
+        QString path =
+            QFileDialog::getOpenFileName(this, tr("Select Private Key"), QDir::homePath(), tr("All Files (*)"));
         if (!path.isEmpty()) {
             m_keyEdit->setText(path);
         }
@@ -212,7 +213,8 @@ void SessionDialog::setupUi() {
     sshForm->addRow(tr("Jump private key:"), jumpKeyLayout);
 
     connect(jumpKeyBrowseBtn, &QPushButton::clicked, this, [this]() {
-        const QString path = QFileDialog::getOpenFileName(this, tr("Select Jump Private Key"), QDir::homePath(), tr("All Files (*)"));
+        const QString path =
+            QFileDialog::getOpenFileName(this, tr("Select Jump Private Key"), QDir::homePath(), tr("All Files (*)"));
         if (!path.isEmpty())
             m_jumpKeyEdit->setText(path);
     });
@@ -246,16 +248,20 @@ void SessionDialog::setupUi() {
         if (dialog.exec() == QDialog::Accepted) {
             TunnelConfig config = dialog.getTunnelConfig();
             m_tunnels.append(config);
-            
+
             int row = m_tunnelsTable->rowCount();
             m_tunnelsTable->insertRow(row);
-            
-            QString typeStr = (config.type == TunnelConfig::Type::Local) ? tr("Local (L)") :
-                              (config.type == TunnelConfig::Type::Remote) ? tr("Remote (R)") : tr("Dynamic (D)");
+
+            QString typeStr = (config.type == TunnelConfig::Type::Local)    ? tr("Local (L)")
+                              : (config.type == TunnelConfig::Type::Remote) ? tr("Remote (R)")
+                                                                            : tr("Dynamic (D)");
             m_tunnelsTable->setItem(row, 0, new QTableWidgetItem(typeStr));
             m_tunnelsTable->setItem(row, 1, new QTableWidgetItem(QString::number(config.localPort)));
             m_tunnelsTable->setItem(row, 2, new QTableWidgetItem(config.remoteHost));
-            m_tunnelsTable->setItem(row, 3, new QTableWidgetItem(config.type == TunnelConfig::Type::Dynamic ? "-" : QString::number(config.remotePort)));
+            m_tunnelsTable->setItem(row, 3,
+                                    new QTableWidgetItem(config.type == TunnelConfig::Type::Dynamic
+                                                             ? "-"
+                                                             : QString::number(config.remotePort)));
         }
     });
 
@@ -537,13 +543,17 @@ void SessionDialog::loadSession(const Session& session) {
         for (const TunnelConfig& config : m_tunnels) {
             int row = m_tunnelsTable->rowCount();
             m_tunnelsTable->insertRow(row);
-            
-            QString typeStr = (config.type == TunnelConfig::Type::Local) ? tr("Local (L)") :
-                              (config.type == TunnelConfig::Type::Remote) ? tr("Remote (R)") : tr("Dynamic (D)");
+
+            QString typeStr = (config.type == TunnelConfig::Type::Local)    ? tr("Local (L)")
+                              : (config.type == TunnelConfig::Type::Remote) ? tr("Remote (R)")
+                                                                            : tr("Dynamic (D)");
             m_tunnelsTable->setItem(row, 0, new QTableWidgetItem(typeStr));
             m_tunnelsTable->setItem(row, 1, new QTableWidgetItem(QString::number(config.localPort)));
             m_tunnelsTable->setItem(row, 2, new QTableWidgetItem(config.remoteHost));
-            m_tunnelsTable->setItem(row, 3, new QTableWidgetItem(config.type == TunnelConfig::Type::Dynamic ? "-" : QString::number(config.remotePort)));
+            m_tunnelsTable->setItem(row, 3,
+                                    new QTableWidgetItem(config.type == TunnelConfig::Type::Dynamic
+                                                             ? "-"
+                                                             : QString::number(config.remotePort)));
         }
 
         {
@@ -579,8 +589,7 @@ void SessionDialog::loadSession(const Session& session) {
                 m_vncPasswordEdit->setText(password);
         }
         break;
-    case SessionType::Serial:
-    {
+    case SessionType::Serial: {
         m_typeCombo->setCurrentIndex(5);
         const int portIndex = m_serialPortCombo->findData(session.serialPort);
         if (portIndex >= 0)
@@ -694,8 +703,7 @@ Session SessionDialog::getSession() const {
         s.host = m_vncHostEdit->text().trimmed();
         s.port = m_vncPortSpin->value();
         break;
-    case 5:
-    {
+    case 5: {
         s.type = SessionType::Serial;
         const QString visiblePort = m_serialPortCombo->currentText().trimmed();
         const int selectedPort = m_serialPortCombo->currentIndex();

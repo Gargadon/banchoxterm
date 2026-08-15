@@ -356,9 +356,8 @@ bool SshConnection::verifyHostKey() {
     return ok;
 }
 
-void SshConnection::kbdIntResponseCallback(const char* name, int name_len, const char* instruction,
-                                           int instruction_len, int num_prompts,
-                                           const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
+void SshConnection::kbdIntResponseCallback(const char* name, int name_len, const char* instruction, int instruction_len,
+                                           int num_prompts, const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
                                            LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses, void** abstract) {
     SshConnection* self = static_cast<SshConnection*>(*abstract);
     if (!self) {
@@ -380,8 +379,8 @@ void SshConnection::handleKbdInt(const char* name, int name_len, const char* ins
     QList<QByteArray> promptTexts;
     QList<bool> echoFlags;
     for (int i = 0; i < num_prompts; ++i) {
-        promptTexts.append(QByteArray(reinterpret_cast<const char*>(prompts[i].text),
-                                      static_cast<int>(prompts[i].length)));
+        promptTexts.append(
+            QByteArray(reinterpret_cast<const char*>(prompts[i].text), static_cast<int>(prompts[i].length)));
         echoFlags.append(prompts[i].echo != 0);
     }
 
@@ -421,8 +420,7 @@ bool SshConnection::promptKbdInteractive(const QString& name, const QString& ins
         for (int i = 0; i < promptTexts.size(); ++i) {
             const QString prompt = QString::fromUtf8(promptTexts[i]);
             bool okOne = false;
-            QString answer = QInputDialog::getText(nullptr, tr("SSH Authentication"),
-                                                   header + prompt,
+            QString answer = QInputDialog::getText(nullptr, tr("SSH Authentication"), header + prompt,
                                                    echoFlags[i] ? QLineEdit::Password : QLineEdit::Normal, "", &okOne);
             if (!okOne) {
                 answers.clear();
@@ -544,9 +542,8 @@ ssize_t SshConnection::proxyRecv(libssh2_socket_t socket, void* buffer, size_t l
 }
 
 void SshConnection::connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
-                                  const QString& password, const QList<TunnelConfig>& tunnels,
-                                  const QString& jumpHost, int jumpPort, const QString& jumpUser,
-                                  const QString& jumpKeyPath) {
+                                  const QString& password, const QList<TunnelConfig>& tunnels, const QString& jumpHost,
+                                  int jumpPort, const QString& jumpUser, const QString& jumpKeyPath) {
     m_host = host;
     m_port = port;
     m_user = user;
@@ -594,7 +591,8 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
                                                    "127.0.0.1", 0);
         });
         if (!m_jumpChannel) {
-            emit connectionFailed(QStringLiteral("Bastion could not open a channel to %1:%2").arg(targetHost).arg(targetPort));
+            emit connectionFailed(
+                QStringLiteral("Bastion could not open a channel to %1:%2").arg(targetHost).arg(targetPort));
             disconnectFromHost();
             return;
         }
@@ -705,9 +703,8 @@ void SshConnection::openShell() {
         0                 // TTY_OP_END
     };
     int rc = retry([this]() {
-        return libssh2_channel_request_pty_ex(m_channel, "xterm-256color", 14,
-                                              pty_modes, sizeof(pty_modes),
-                                              m_ptyCols, m_ptyRows, 0, 0);
+        return libssh2_channel_request_pty_ex(m_channel, "xterm-256color", 14, pty_modes, sizeof(pty_modes), m_ptyCols,
+                                              m_ptyRows, 0, 0);
     });
     if (rc != 0) {
         emit connectionFailed("Failed to request PTY");
@@ -809,10 +806,8 @@ void SshConnection::onSocketActivity() {
     // machines actually consumed data in this pass. Once there is no buffered
     // progress left, stop kicking and let the always-armed read notifier wake us
     // when real network data arrives, instead of spinning the event loop.
-    if (m_connected && m_session &&
-        libssh2_session_block_directions(m_session) == 0 &&
-        m_statsState != StatsState::Idle &&
-        m_activityProgress && !m_socketKickPending) {
+    if (m_connected && m_session && libssh2_session_block_directions(m_session) == 0 &&
+        m_statsState != StatsState::Idle && m_activityProgress && !m_socketKickPending) {
         m_socketKickPending = true;
         QTimer::singleShot(0, this, [this]() {
             m_socketKickPending = false;
@@ -1126,9 +1121,9 @@ bool SshConnection::uploadOneFile(const QString& localPath, const QString& remot
         return false;
 
     LIBSSH2_SFTP_HANDLE* handle = retryPtr([this, &remotePath]() {
-        return libssh2_sftp_open(m_sftp, remotePath.toUtf8().constData(),
-                                 LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
-                                 LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR | LIBSSH2_SFTP_S_IRGRP | LIBSSH2_SFTP_S_IROTH);
+        return libssh2_sftp_open(
+            m_sftp, remotePath.toUtf8().constData(), LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
+            LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR | LIBSSH2_SFTP_S_IRGRP | LIBSSH2_SFTP_S_IROTH);
     });
     if (!handle) {
         f.close();
@@ -1254,18 +1249,20 @@ void SshConnection::pollStats() {
         }
         break;
     case StatsState::Execing: {
-        static const char* linuxCmd = "read cpu u n s id iw irq soft steal rest < /proc/stat; previdle=$((id + iw)); "
-                                      "prevtotal=$((u + n + s + id + iw + irq + soft + steal)); sleep 0.2; "
-                                      "read cpu u2 n2 s2 id2 iw2 irq2 soft2 steal2 rest < /proc/stat; idle=$((id2 + iw2)); "
-                                      "total=$((u2 + n2 + s2 + id2 + iw2 + irq2 + soft2 + steal2)); "
-                                      "diffidle=$((idle - previdle)); difftotal=$((total - prevtotal)); "
-                                      "if [ $difftotal -eq 0 ]; then echo 0; else echo \"$((100 * (difftotal - diffidle) / "
-                                      "difftotal))\"; fi; "
-                                      "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f\\n\", 100*(t-a)/t}' "
-                                      "/proc/meminfo; "
-                                      "df / | tail -n 1 | awk '{print $5}' | sed 's/%//'; "
-                                      "cat /proc/uptime | awk '{print $1}'";
-        static const char* winCmd = R"(powershell -NoProfile -Command "$cpu=(Get-CimInstance Win32_Processor).LoadPercentage; $os=Get-CimInstance Win32_OperatingSystem; $mem=[math]::round(100*($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/$os.TotalVisibleMemorySize); $d=Get-CimInstance Win32_LogicalDisk -Filter 'DeviceID=''C:'''; $disk=[math]::round(100*($d.Size-$d.FreeSpace)/$d.Size); $up=((Get-Date)-$os.LastBootUpTime).TotalSeconds; Write-Output $cpu; Write-Output $mem; Write-Output $disk; Write-Output $up")";
+        static const char* linuxCmd =
+            "read cpu u n s id iw irq soft steal rest < /proc/stat; previdle=$((id + iw)); "
+            "prevtotal=$((u + n + s + id + iw + irq + soft + steal)); sleep 0.2; "
+            "read cpu u2 n2 s2 id2 iw2 irq2 soft2 steal2 rest < /proc/stat; idle=$((id2 + iw2)); "
+            "total=$((u2 + n2 + s2 + id2 + iw2 + irq2 + soft2 + steal2)); "
+            "diffidle=$((idle - previdle)); difftotal=$((total - prevtotal)); "
+            "if [ $difftotal -eq 0 ]; then echo 0; else echo \"$((100 * (difftotal - diffidle) / "
+            "difftotal))\"; fi; "
+            "awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf \"%.0f\\n\", 100*(t-a)/t}' "
+            "/proc/meminfo; "
+            "df / | tail -n 1 | awk '{print $5}' | sed 's/%//'; "
+            "cat /proc/uptime | awk '{print $1}'";
+        static const char* winCmd =
+            R"(powershell -NoProfile -Command "$cpu=(Get-CimInstance Win32_Processor).LoadPercentage; $os=Get-CimInstance Win32_OperatingSystem; $mem=[math]::round(100*($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/$os.TotalVisibleMemorySize); $d=Get-CimInstance Win32_LogicalDisk -Filter 'DeviceID=''C:'''; $disk=[math]::round(100*($d.Size-$d.FreeSpace)/$d.Size); $up=((Get-Date)-$os.LastBootUpTime).TotalSeconds; Write-Output $cpu; Write-Output $mem; Write-Output $disk; Write-Output $up")";
         const char* cmd = m_remoteIsWindows ? winCmd : linuxCmd;
         int rc = libssh2_channel_exec(m_statsChannel, cmd);
         if (rc == 0) {

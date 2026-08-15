@@ -180,8 +180,9 @@ void FtpClient::openDataConnection(std::function<void(QTcpSocket*)> onConnected)
             ssl->setPeerVerifyName(m_host);
             data = ssl;
             connect(ssl, &QTcpSocket::connected, ssl, &QSslSocket::startClientEncryption);
-            connect(ssl, &QSslSocket::encrypted, this, [onConnected, data]() { onConnected(data); },
-                    Qt::SingleShotConnection);
+            connect(
+                ssl, &QSslSocket::encrypted, this, [onConnected, data]() { onConnected(data); },
+                Qt::SingleShotConnection);
         } else {
             data = new QTcpSocket(this);
             connect(data, &QTcpSocket::connected, this, [onConnected, data]() { onConnected(data); });
@@ -306,7 +307,8 @@ void FtpClient::renamePath(const QString& oldPath, const QString& newPath) {
 
 QList<SftpFile> FtpClient::parseListing(const QByteArray& data) {
     QList<SftpFile> files;
-    const QRegularExpression re(QStringLiteral(R"(^([\-d])[\-rwxstST]{9}\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(.+)$)"));
+    const QRegularExpression re(
+        QStringLiteral(R"(^([\-d])[\-rwxstST]{9}\s+\d+\s+\S+\s+\S+\s+(\d+)\s+\S+\s+\S+\s+\S+\s+(.+)$)"));
 
     const QList<QByteArray> lines = data.split('\n');
     for (const QByteArray& line : lines) {

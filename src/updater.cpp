@@ -178,11 +178,10 @@ void Updater::checkForUpdates(QWidget* parent) {
 
         const bool portable = AppPaths::isPortable();
         const QString architecture = QSysInfo::currentCpuArchitecture().contains("arm", Qt::CaseInsensitive)
-                                          ? QStringLiteral("arm64")
-                                          : QStringLiteral("x64");
-        const QString assetName = portable
-                                      ? QStringLiteral("BanchoXterm-windows-%1.zip").arg(architecture)
-                                      : QStringLiteral("BanchoXterm-Setup-%1.exe").arg(architecture);
+                                         ? QStringLiteral("arm64")
+                                         : QStringLiteral("x64");
+        const QString assetName = portable ? QStringLiteral("BanchoXterm-windows-%1.zip").arg(architecture)
+                                           : QStringLiteral("BanchoXterm-Setup-%1.exe").arg(architecture);
         const QString url = findAssetUrl(obj.value("assets").toArray(), assetName);
         const QString expectedDigest = findAssetDigest(obj.value("assets").toArray(), assetName);
         if (url.isEmpty()) {
@@ -223,8 +222,9 @@ void Updater::checkForUpdates(QWidget* parent) {
 
             const QString destPath = QDir::temp().filePath(assetName);
             const QByteArray payload = dreply->readAll();
-            const QString actualDigest = QStringLiteral("sha256:") +
-                                         QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex());
+            const QString actualDigest =
+                QStringLiteral("sha256:") +
+                QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Sha256).toHex());
             if (expectedDigest.isEmpty() || expectedDigest.compare(actualDigest, Qt::CaseInsensitive) != 0) {
                 QMessageBox::warning(parent, tr("Update Failed"),
                                      tr("The downloaded update failed its integrity check."));

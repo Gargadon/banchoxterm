@@ -15,82 +15,111 @@ namespace {
 
 VtPalette getPalette(const QString& schemeName) {
     static const QMap<QString, VtPalette> palettes = {
-        {"DarkPastels", {
-            QColor("#c0caf5"), QColor("#16161e"),
-            {QColor("#15161e"), QColor("#f7768e"), QColor("#9ece6a"), QColor("#e0af68"), QColor("#7aa2f7"), QColor("#bb9af7"), QColor("#7dcfff"), QColor("#a9b1d6")},
-            {QColor("#414868"), QColor("#ff8998"), QColor("#b9f27c"), QColor("#ff9e64"), QColor("#89b4fa"), QColor("#cba6f7"), QColor("#89ddff"), QColor("#c0caf5")}
-        }},
-        {"Tango", {
-            QColor("#d3d7cf"), QColor("#2e3436"),
-            {QColor("#2e3436"), QColor("#cc0000"), QColor("#4e9a06"), QColor("#c4a000"), QColor("#3465a4"), QColor("#75507b"), QColor("#06989a"), QColor("#d3d7cf")},
-            {QColor("#555753"), QColor("#ef2929"), QColor("#8ae234"), QColor("#fce94f"), QColor("#729fcf"), QColor("#ad7fa8"), QColor("#34e2e2"), QColor("#eeeeec")}
-        }},
-        {"Breeze", {
-            QColor("#fcfcfc"), QColor("#232629"),
-            {QColor("#232629"), QColor("#ed1515"), QColor("#11d116"), QColor("#f67400"), QColor("#1d99f3"), QColor("#9b59b6"), QColor("#1abc9c"), QColor("#fcfcfc")},
-            {QColor("#7f8c8d"), QColor("#c0392b"), QColor("#27ae60"), QColor("#f39c12"), QColor("#2980b9"), QColor("#8e44ad"), QColor("#16a085"), QColor("#ffffff")}
-        }},
-        {"Linux", {
-            QColor("#b2b2b2"), QColor("#000000"),
-            {QColor("#000000"), QColor("#aa0000"), QColor("#00aa00"), QColor("#aa5500"), QColor("#00aa00"), QColor("#aa00aa"), QColor("#00aaaa"), QColor("#aaaaaa")},
-            {QColor("#555555"), QColor("#ff5555"), QColor("#55ff55"), QColor("#ffff55"), QColor("#5555ff"), QColor("#ff55ff"), QColor("#55ffff"), QColor("#ffffff")}
-        }},
-        {"Solarized", {
-            QColor("#839496"), QColor("#002b36"),
-            {QColor("#073642"), QColor("#dc322f"), QColor("#859900"), QColor("#b58900"), QColor("#268bd2"), QColor("#d33682"), QColor("#2aa198"), QColor("#eee8d5")},
-            {QColor("#002b36"), QColor("#cb4b16"), QColor("#586e75"), QColor("#657b83"), QColor("#839496"), QColor("#6c71c4"), QColor("#93a1a1"), QColor("#fdf6e3")}
-        }},
-        {"Ubuntu", {
-            QColor("#eeeeec"), QColor("#300a24"),
-            {QColor("#2e3436"), QColor("#cc0000"), QColor("#4e9a06"), QColor("#c4a000"), QColor("#3465a4"), QColor("#75507b"), QColor("#06989a"), QColor("#d3d7cf")},
-            {QColor("#555753"), QColor("#ef2929"), QColor("#8ae234"), QColor("#fce94f"), QColor("#729fcf"), QColor("#ad7fa8"), QColor("#34e2e2"), QColor("#eeeeec")}
-        }},
-        {"WhiteOnBlack", {
-            QColor("#ffffff"), QColor("#000000"),
-            {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"), QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
-            {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"), QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}
-        }},
-        {"BlackOnWhite", {
-            QColor("#000000"), QColor("#ffffff"),
-            {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"), QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
-            {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"), QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}
-        }},
-        {"GreenOnBlack", {
-            QColor("#18f018"), QColor("#000000"),
-            {QColor("#000000"), QColor("#fa4b4b"), QColor("#18b218"), QColor("#b26818"), QColor("#5ca7fb"), QColor("#e11ee1"), QColor("#18b2b2"), QColor("#b2b2b2")},
-            {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"), QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}
-        }},
-        {"Nord", {
-            QColor("#d8dee9"), QColor("#2e3440"),
-            {QColor("#3b4252"), QColor("#bf616a"), QColor("#a3be8c"), QColor("#ebcb8b"), QColor("#81a1c1"), QColor("#b48ead"), QColor("#88c0d0"), QColor("#e5e9f0")},
-            {QColor("#4c566a"), QColor("#bf616a"), QColor("#a3be8c"), QColor("#ebcb8b"), QColor("#81a1c1"), QColor("#b48ead"), QColor("#8fbcbb"), QColor("#eceff4")}
-        }},
-        {"SolarizedLight", {
-            QColor("#657b83"), QColor("#fdf6e3"),
-            {QColor("#073642"), QColor("#dc322f"), QColor("#859900"), QColor("#b58900"), QColor("#268bd2"), QColor("#d33682"), QColor("#2aa198"), QColor("#eee8d5")},
-            {QColor("#002b36"), QColor("#cb4b16"), QColor("#586e75"), QColor("#657b83"), QColor("#839496"), QColor("#6c71c4"), QColor("#93a1a1"), QColor("#fdf6e3")}
-        }},
-        {"Falcon", {
-            QColor("#c2c2c2"), QColor("#223333"),
-            {QColor("#959595"), QColor("#ff6565"), QColor("#84c24e"), QColor("#cfbf29"), QColor("#6ed7ff"), QColor("#fcaf3e"), QColor("#b7b0e8"), QColor("#ffffff")},
-            {QColor("#959595"), QColor("#ff6565"), QColor("#84c24e"), QColor("#cfbf29"), QColor("#6ed7ff"), QColor("#fcaf3e"), QColor("#b7b0e8"), QColor("#ffffff")}
-        }},
-        {"BlackOnLightYellow", {
-            QColor("#000000"), QColor("#ffffdd"),
-            {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"), QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
-            {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"), QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}
-        }},
-        {"BlackOnRandomLight", {
-            QColor("#000000"), QColor("#f7f7d6"),
-            {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"), QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
-            {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"), QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}
-        }},
-        {"BreezeModified", {
-            QColor("#eff0f1"), QColor("#31363b"),
-            {QColor("#073642"), QColor("#ed1515"), QColor("#11d116"), QColor("#f67400"), QColor("#1d99f3"), QColor("#9b59b6"), QColor("#1abc9c"), QColor("#eff0f1")},
-            {QColor("#ff5500"), QColor("#c0392b"), QColor("#1cdc9a"), QColor("#fdbc4b"), QColor("#3daee9"), QColor("#8e44ad"), QColor("#16a085"), QColor("#fcfcfc")}
-        }}
-    };
+        {"DarkPastels",
+         {QColor("#c0caf5"),
+          QColor("#16161e"),
+          {QColor("#15161e"), QColor("#f7768e"), QColor("#9ece6a"), QColor("#e0af68"), QColor("#7aa2f7"),
+           QColor("#bb9af7"), QColor("#7dcfff"), QColor("#a9b1d6")},
+          {QColor("#414868"), QColor("#ff8998"), QColor("#b9f27c"), QColor("#ff9e64"), QColor("#89b4fa"),
+           QColor("#cba6f7"), QColor("#89ddff"), QColor("#c0caf5")}}},
+        {"Tango",
+         {QColor("#d3d7cf"),
+          QColor("#2e3436"),
+          {QColor("#2e3436"), QColor("#cc0000"), QColor("#4e9a06"), QColor("#c4a000"), QColor("#3465a4"),
+           QColor("#75507b"), QColor("#06989a"), QColor("#d3d7cf")},
+          {QColor("#555753"), QColor("#ef2929"), QColor("#8ae234"), QColor("#fce94f"), QColor("#729fcf"),
+           QColor("#ad7fa8"), QColor("#34e2e2"), QColor("#eeeeec")}}},
+        {"Breeze",
+         {QColor("#fcfcfc"),
+          QColor("#232629"),
+          {QColor("#232629"), QColor("#ed1515"), QColor("#11d116"), QColor("#f67400"), QColor("#1d99f3"),
+           QColor("#9b59b6"), QColor("#1abc9c"), QColor("#fcfcfc")},
+          {QColor("#7f8c8d"), QColor("#c0392b"), QColor("#27ae60"), QColor("#f39c12"), QColor("#2980b9"),
+           QColor("#8e44ad"), QColor("#16a085"), QColor("#ffffff")}}},
+        {"Linux",
+         {QColor("#b2b2b2"),
+          QColor("#000000"),
+          {QColor("#000000"), QColor("#aa0000"), QColor("#00aa00"), QColor("#aa5500"), QColor("#00aa00"),
+           QColor("#aa00aa"), QColor("#00aaaa"), QColor("#aaaaaa")},
+          {QColor("#555555"), QColor("#ff5555"), QColor("#55ff55"), QColor("#ffff55"), QColor("#5555ff"),
+           QColor("#ff55ff"), QColor("#55ffff"), QColor("#ffffff")}}},
+        {"Solarized",
+         {QColor("#839496"),
+          QColor("#002b36"),
+          {QColor("#073642"), QColor("#dc322f"), QColor("#859900"), QColor("#b58900"), QColor("#268bd2"),
+           QColor("#d33682"), QColor("#2aa198"), QColor("#eee8d5")},
+          {QColor("#002b36"), QColor("#cb4b16"), QColor("#586e75"), QColor("#657b83"), QColor("#839496"),
+           QColor("#6c71c4"), QColor("#93a1a1"), QColor("#fdf6e3")}}},
+        {"Ubuntu",
+         {QColor("#eeeeec"),
+          QColor("#300a24"),
+          {QColor("#2e3436"), QColor("#cc0000"), QColor("#4e9a06"), QColor("#c4a000"), QColor("#3465a4"),
+           QColor("#75507b"), QColor("#06989a"), QColor("#d3d7cf")},
+          {QColor("#555753"), QColor("#ef2929"), QColor("#8ae234"), QColor("#fce94f"), QColor("#729fcf"),
+           QColor("#ad7fa8"), QColor("#34e2e2"), QColor("#eeeeec")}}},
+        {"WhiteOnBlack",
+         {QColor("#ffffff"),
+          QColor("#000000"),
+          {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"),
+           QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
+          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
+           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
+        {"BlackOnWhite",
+         {QColor("#000000"),
+          QColor("#ffffff"),
+          {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"),
+           QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
+          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
+           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
+        {"GreenOnBlack",
+         {QColor("#18f018"),
+          QColor("#000000"),
+          {QColor("#000000"), QColor("#fa4b4b"), QColor("#18b218"), QColor("#b26818"), QColor("#5ca7fb"),
+           QColor("#e11ee1"), QColor("#18b2b2"), QColor("#b2b2b2")},
+          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
+           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
+        {"Nord",
+         {QColor("#d8dee9"),
+          QColor("#2e3440"),
+          {QColor("#3b4252"), QColor("#bf616a"), QColor("#a3be8c"), QColor("#ebcb8b"), QColor("#81a1c1"),
+           QColor("#b48ead"), QColor("#88c0d0"), QColor("#e5e9f0")},
+          {QColor("#4c566a"), QColor("#bf616a"), QColor("#a3be8c"), QColor("#ebcb8b"), QColor("#81a1c1"),
+           QColor("#b48ead"), QColor("#8fbcbb"), QColor("#eceff4")}}},
+        {"SolarizedLight",
+         {QColor("#657b83"),
+          QColor("#fdf6e3"),
+          {QColor("#073642"), QColor("#dc322f"), QColor("#859900"), QColor("#b58900"), QColor("#268bd2"),
+           QColor("#d33682"), QColor("#2aa198"), QColor("#eee8d5")},
+          {QColor("#002b36"), QColor("#cb4b16"), QColor("#586e75"), QColor("#657b83"), QColor("#839496"),
+           QColor("#6c71c4"), QColor("#93a1a1"), QColor("#fdf6e3")}}},
+        {"Falcon",
+         {QColor("#c2c2c2"),
+          QColor("#223333"),
+          {QColor("#959595"), QColor("#ff6565"), QColor("#84c24e"), QColor("#cfbf29"), QColor("#6ed7ff"),
+           QColor("#fcaf3e"), QColor("#b7b0e8"), QColor("#ffffff")},
+          {QColor("#959595"), QColor("#ff6565"), QColor("#84c24e"), QColor("#cfbf29"), QColor("#6ed7ff"),
+           QColor("#fcaf3e"), QColor("#b7b0e8"), QColor("#ffffff")}}},
+        {"BlackOnLightYellow",
+         {QColor("#000000"),
+          QColor("#ffffdd"),
+          {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"),
+           QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
+          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
+           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
+        {"BlackOnRandomLight",
+         {QColor("#000000"),
+          QColor("#f7f7d6"),
+          {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"),
+           QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
+          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
+           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
+        {"BreezeModified",
+         {QColor("#eff0f1"),
+          QColor("#31363b"),
+          {QColor("#073642"), QColor("#ed1515"), QColor("#11d116"), QColor("#f67400"), QColor("#1d99f3"),
+           QColor("#9b59b6"), QColor("#1abc9c"), QColor("#eff0f1")},
+          {QColor("#ff5500"), QColor("#c0392b"), QColor("#1cdc9a"), QColor("#fdbc4b"), QColor("#3daee9"),
+           QColor("#8e44ad"), QColor("#16a085"), QColor("#fcfcfc")}}}};
 
     return palettes.value(schemeName, palettes.value("DarkPastels"));
 }
@@ -109,8 +138,6 @@ QColor color256(int idx, const VtPalette& pal) {
     int v = 8 + (idx - 232) * 10;
     return QColor(v, v, v);
 }
-
-
 
 ushort decodeUtf8(const QByteArray& data, int& i) {
     unsigned char c = static_cast<unsigned char>(data[i]);
@@ -143,7 +170,6 @@ ushort decodeUtf8(const QByteArray& data, int& i) {
 VtPalette VtTerminalWidget::currentPalette() const {
     return getPalette(m_colorScheme);
 }
-
 
 void VtTerminalWidget::setColorScheme(const QString& name) {
     m_colorScheme = name.isEmpty() ? "DarkPastels" : name;
@@ -295,7 +321,6 @@ void VtTerminalWidget::setChar(int x, int y, ushort ch) {
     cell.bgSet = m_attrs.bgSet;
 }
 
-
 void VtTerminalWidget::writeData(const QByteArray& data) {
     m_parseBuffer.append(data);
     parseBuffer();
@@ -411,9 +436,12 @@ void VtTerminalWidget::parseBuffer() {
         } else {
             // Check UTF-8 character length completeness
             int neededBytes = 1;
-            if (c >= 0xC0 && c < 0xE0) neededBytes = 2;
-            else if (c >= 0xE0 && c < 0xF0) neededBytes = 3;
-            else if (c >= 0xF0) neededBytes = 4;
+            if (c >= 0xC0 && c < 0xE0)
+                neededBytes = 2;
+            else if (c >= 0xE0 && c < 0xF0)
+                neededBytes = 3;
+            else if (c >= 0xF0)
+                neededBytes = 4;
 
             if (i + neededBytes > m_parseBuffer.size()) {
                 // Partial UTF-8 byte sequence at end of buffer, wait for next chunk
@@ -437,7 +465,6 @@ void VtTerminalWidget::parseBuffer() {
         m_parseBuffer.remove(0, i);
     }
 }
-
 
 void VtTerminalWidget::parseCsi(const QByteArray& data, int& i) {
     QString params;
@@ -741,7 +768,6 @@ void VtTerminalWidget::keyPressEvent(QKeyEvent* e) {
 
     QByteArray out;
 
-
     switch (e->key()) {
     case Qt::Key_Return:
     case Qt::Key_Enter:
@@ -821,11 +847,15 @@ static QVector<HighlightRule> getHighlightRules() {
     static QVector<HighlightRule> rules = {
         {QRegularExpression(R"(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)"), QColor("#9ece6a"), true},
         {QRegularExpression(R"(\b\d+\b)"), QColor("#ff9e64"), false},
-        {QRegularExpression(R"(\b(error|failed|failure|critical|fatal|exception)\b)", QRegularExpression::CaseInsensitiveOption), QColor("#f7768e"), true},
-        {QRegularExpression(R"(\b(success|ok|connected|accepted|established|online)\b)", QRegularExpression::CaseInsensitiveOption), QColor("#9ece6a"), true},
-        {QRegularExpression(R"(\b(warning|warn|attention)\b)", QRegularExpression::CaseInsensitiveOption), QColor("#e0af68"), true},
-        {QRegularExpression(R"(\b(https?://\S+|/[a-zA-Z0-9_\-\./]+)\b)"), QColor("#7dcfff"), false}
-    };
+        {QRegularExpression(R"(\b(error|failed|failure|critical|fatal|exception)\b)",
+                            QRegularExpression::CaseInsensitiveOption),
+         QColor("#f7768e"), true},
+        {QRegularExpression(R"(\b(success|ok|connected|accepted|established|online)\b)",
+                            QRegularExpression::CaseInsensitiveOption),
+         QColor("#9ece6a"), true},
+        {QRegularExpression(R"(\b(warning|warn|attention)\b)", QRegularExpression::CaseInsensitiveOption),
+         QColor("#e0af68"), true},
+        {QRegularExpression(R"(\b(https?://\S+|/[a-zA-Z0-9_\-\./]+)\b)"), QColor("#7dcfff"), false}};
     return rules;
 }
 
@@ -927,7 +957,6 @@ void VtTerminalWidget::paintEvent(QPaintEvent* event) {
             painter.drawRect(cx, cy, m_charWidth - 1, m_charHeight - 1);
         }
     }
-
 }
 
 void VtTerminalWidget::drawCell(QPainter& painter, int x, int y, const Cell& c) {
@@ -961,7 +990,6 @@ void VtTerminalWidget::drawCell(QPainter& painter, int x, int y, const Cell& c) 
     if (bg != currentPalette().bg) {
         painter.fillRect(x * m_charWidth, y * m_charHeight, m_charWidth, m_charHeight, bg);
     }
-
 
     painter.setPen(fg);
     if (c.bold) {

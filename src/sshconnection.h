@@ -35,9 +35,8 @@ public:
 
 public slots:
     void connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
-                       const QString& password, const QList<TunnelConfig>& tunnels,
-                       const QString& jumpHost = QString(), int jumpPort = 22,
-                       const QString& jumpUser = QString(), const QString& jumpKeyPath = QString());
+                       const QString& password, const QList<TunnelConfig>& tunnels, const QString& jumpHost = QString(),
+                       int jumpPort = 22, const QString& jumpUser = QString(), const QString& jumpKeyPath = QString());
     void setX11Forwarding(bool enabled);
     void setKeepAliveSeconds(int seconds);
     void setCipherAlgorithms(const QString& ciphers);
@@ -118,13 +117,11 @@ private:
     QString hostKeyFingerprint(const QByteArray& key) const;
     QString knownHostsPath() const;
 
-    static void kbdIntResponseCallback(const char* name, int name_len, const char* instruction,
-                                       int instruction_len, int num_prompts,
-                                       const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
+    static void kbdIntResponseCallback(const char* name, int name_len, const char* instruction, int instruction_len,
+                                       int num_prompts, const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
                                        LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses, void** abstract);
-    void handleKbdInt(const char* name, int name_len, const char* instruction, int instruction_len,
-                      int num_prompts, const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts,
-                      LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses);
+    void handleKbdInt(const char* name, int name_len, const char* instruction, int instruction_len, int num_prompts,
+                      const LIBSSH2_USERAUTH_KBDINT_PROMPT* prompts, LIBSSH2_USERAUTH_KBDINT_RESPONSE* responses);
     bool promptKbdInteractive(const QString& name, const QString& instruction, const QList<QByteArray>& promptTexts,
                               const QList<bool>& echoFlags, QStringList& answers);
 

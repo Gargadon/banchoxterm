@@ -318,8 +318,7 @@ QList<Session> SessionManager::importOpenSshConfig(const QString& path, bool* ok
             const int port = value.toInt(&valid);
             if (valid && port > 0 && port <= 65535)
                 current.port = port;
-        }
-        else if (key == "identityfile")
+        } else if (key == "identityfile")
             current.keyPath = expandPath(value);
         else if (key == "proxyjump") {
             current.jumpHost = value;

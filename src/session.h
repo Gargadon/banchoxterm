@@ -66,7 +66,7 @@ struct Session {
     QString macAlgo;          // empty = libssh2 default
 
     // FTP
-    bool ftpTls = true;       // explicit FTPS by default
+    bool ftpTls = true; // explicit FTPS by default
 
     QList<TunnelConfig> tunnels;
 

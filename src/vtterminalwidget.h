@@ -33,15 +33,18 @@ public:
     void setTerminalFont(const QFont& font);
     void setColorScheme(const QString& name);
 
-
-
     QSize sizeHint() const override;
 
     // Debug accessors
-    int rows() const { return m_rows; }
-    int cols() const { return m_cols; }
+    int rows() const {
+        return m_rows;
+    }
+    int cols() const {
+        return m_cols;
+    }
     QChar cellChar(int col, int row) const {
-        if (col < 0 || col >= m_cols || row < 0 || row >= m_rows) return QChar(' ');
+        if (col < 0 || col >= m_cols || row < 0 || row >= m_rows)
+            return QChar(' ');
         return QChar(m_cells[row * m_cols + col].ch);
     }
 
@@ -64,7 +67,6 @@ protected:
     void focusInEvent(QFocusEvent* e) override;
     void focusOutEvent(QFocusEvent* e) override;
 
-
 private:
     struct Cell {
         ushort ch = u' ';
@@ -81,7 +83,6 @@ private:
         bool bgSet = false;
     };
 
-
     void ensureSize();
     void recomputeMetrics();
     void scrollUp();
@@ -92,15 +93,11 @@ private:
     VtPalette currentPalette() const;
     void rebuildHighlightCache(int firstLine);
 
-
-
-
     void parse(const QByteArray& data);
     void parseBuffer();
     void parseCsi(const QByteArray& data, int& i);
     void parseOsc(const QByteArray& data, int& i);
     void applySgr(const QVector<int>& params);
-
 
     int totalLines() const;
     int firstVisibleLine() const;
@@ -118,7 +115,6 @@ private:
     Cell m_attrs;
     QString m_colorScheme = "DarkPastels";
     bool m_darkBackground = true;
-
 
     QFont m_font;
     int m_charWidth = 8;
@@ -160,5 +156,3 @@ private:
     bool m_cursorBlinkState = true;
     QTimer* m_cursorBlinkTimer = nullptr;
 };
-
-

@@ -230,9 +230,9 @@ void SessionsSidebar::loadSessions() {
             item->setIcon(0, QIcon(":/icons/serial.svg"));
             item->setText(1, QStringLiteral("SERIAL  %1  %2 baud").arg(session.serialPort).arg(session.baudRate));
             item->setToolTip(0, tr("serial://%1 (%2 baud via %3)")
-                                   .arg(session.serialPort)
-                                   .arg(session.baudRate)
-                                   .arg(session.serialCmd));
+                                    .arg(session.serialPort)
+                                    .arg(session.baudRate)
+                                    .arg(session.serialCmd));
             break;
         case SessionType::FTP:
             item->setIcon(0, QIcon(":/icons/folder.svg"));
@@ -332,8 +332,9 @@ void SessionsSidebar::onDeleteSession() {
 }
 
 void SessionsSidebar::onImportSessions() {
-    QString path = QFileDialog::getOpenFileName(this, tr("Import Sessions"), QDir::homePath(),
-                                                tr("Session files (*.json *.conf);;JSON (*.json);;OpenSSH config (*.conf);;All Files (*)"));
+    QString path = QFileDialog::getOpenFileName(
+        this, tr("Import Sessions"), QDir::homePath(),
+        tr("Session files (*.json *.conf);;JSON (*.json);;OpenSSH config (*.conf);;All Files (*)"));
     if (path.isEmpty())
         return;
 
@@ -361,23 +362,21 @@ void SessionsSidebar::onImportSessions() {
 
     saveSessions();
     loadSessions();
-    QMessageBox::information(this, tr("Import Complete"),
-                             tr("Imported %1 session(s) (%2 skipped as duplicates).")
-                                 .arg(added)
-                                 .arg(imported.size() - added));
+    QMessageBox::information(
+        this, tr("Import Complete"),
+        tr("Imported %1 session(s) (%2 skipped as duplicates).").arg(added).arg(imported.size() - added));
 }
 
 void SessionsSidebar::onExportSessions() {
-    QString defaultName = QString("banchoxterm_sessions_%1.json")
-                              .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+    QString defaultName =
+        QString("banchoxterm_sessions_%1.json").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
     QString path = QFileDialog::getSaveFileName(this, tr("Export Sessions"), QDir::homePath() + "/" + defaultName,
                                                 tr("BanchoXterm Sessions (*.json)"));
     if (path.isEmpty())
         return;
 
     if (SessionManager::exportSessions(m_sessions, path)) {
-        QMessageBox::information(this, tr("Export Complete"),
-                                 tr("Exported %1 session(s).").arg(m_sessions.size()));
+        QMessageBox::information(this, tr("Export Complete"), tr("Exported %1 session(s).").arg(m_sessions.size()));
     } else {
         QMessageBox::critical(this, tr("Export Failed"), tr("Could not write sessions to the selected file."));
     }
@@ -409,9 +408,8 @@ void SessionsSidebar::showContextMenu(const QPoint& pos) {
     menu.addSeparator();
     auto* editAction = menu.addAction(QIcon(":/icons/edit.svg"), tr("Edit"));
     auto* duplicateAction = menu.addAction(QIcon(":/icons/terminal.svg"), tr("Duplicate"));
-    auto* favoriteAction = menu.addAction(item->text(0).startsWith(QStringLiteral("★ "))
-                                             ? tr("Remove Favorite")
-                                             : tr("Add Favorite"));
+    auto* favoriteAction =
+        menu.addAction(item->text(0).startsWith(QStringLiteral("★ ")) ? tr("Remove Favorite") : tr("Add Favorite"));
     auto* deleteAction = menu.addAction(QIcon(":/icons/delete.svg"), tr("Delete"));
 
     auto* selectedAction = menu.exec(m_treeWidget->mapToGlobal(pos));

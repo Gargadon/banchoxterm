@@ -140,7 +140,8 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
             });
             if (!m_serialPort->open(QIODevice::ReadWrite)) {
-                feedTerminalData(tr("\r\n[Unable to open serial port: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
+                feedTerminalData(
+                    tr("\r\n[Unable to open serial port: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
                 m_isActive = false;
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
             }
