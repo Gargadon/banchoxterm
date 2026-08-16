@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(banchoxterm VERSION 1.0.0 LANGUAGES C CXX)
+project(banchoxterm VERSION 1.0.1 LANGUAGES C CXX)
 
 option(BANCHO_ENABLE_ASAN "Enable AddressSanitizer for memory debugging" OFF)
 option(BANCHO_ENABLE_IPO "Enable interprocedural optimization for release builds" ON)
@@ -158,7 +158,13 @@ if(BANCHO_ENABLE_VNC)
     )
 endif()
 
-add_executable(banchoxterm ${SOURCES})
+if(WIN32)
+    # Use the Windows GUI subsystem so launching the installed application
+    # does not create an extra console window behind the Qt interface.
+    add_executable(banchoxterm WIN32 ${SOURCES})
+else()
+    add_executable(banchoxterm ${SOURCES})
+endif()
 
 target_include_directories(banchoxterm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_include_directories(banchoxterm PRIVATE
