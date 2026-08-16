@@ -137,7 +137,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
-          Copy-Item BanchoXterm-Setup.exe BanchoXterm-Setup-${{ matrix.arch.name }}.exe
+          $installer = Join-Path (Split-Path -Parent $script) "BanchoXterm-Setup.exe"
+          $artifact = Join-Path $env:GITHUB_WORKSPACE "BanchoXterm-Setup-${{ matrix.arch.name }}.exe"
+          Copy-Item -LiteralPath $installer -Destination $artifact
 
       - name: Create portable ZIP
         run: |
