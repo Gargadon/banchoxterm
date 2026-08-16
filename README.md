@@ -105,8 +105,10 @@ without KPty, so local shells are bridged through ConPTY).
   when Qt ActiveQt is available (falls back to `mstsc.exe` otherwise). On Linux
   it uses `xfreerdp`.
 - **VNC** supports a limited set of encodings (Raw, Hextile, CopyRect; Tight and
-  ZRLE are disabled because the embedded libvncclient builds without zlib) and
-  does not support complex key modifiers (e.g. Ctrl+letter).
+  ZRLE are disabled because the embedded libvncclient builds without zlib).
+  VNC is not currently available in the Windows ARM64 build because the bundled
+  libvncclient dependency does not yet support MSVC ARM64, and it does not
+  support complex key modifiers (e.g. Ctrl+letter).
 - **Remote monitoring** is implemented for Windows hosts but has not been tested
   against a real Windows SSH server.
 - **Auto-update** checks GitHub Releases and downloads the matching edition

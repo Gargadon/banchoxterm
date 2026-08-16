@@ -31,6 +31,9 @@ jobs:
     # Windows binaries, installers and portable archives are release-only.
     if: github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
     strategy:
+      # Let x64 and ARM64 finish independently so a failure in one matrix
+      # entry does not hide the actual error from the other architecture.
+      fail-fast: false
       matrix:
         arch:
           - name: x64
@@ -38,12 +41,16 @@ jobs:
             qt_arch: win64_msvc2022_64
             cmake_arch: x64
             python_arch: x64
+            vnc: ON
           - name: arm64
             # Native ARM64 runner is required to execute ARM64 tests.
             runner: windows-11-vs2026-arm
             qt_arch: win64_msvc2022_arm64
             cmake_arch: ARM64
             python_arch: arm64
+            # The bundled libvncserver/minilzo code does not support MSVC
+            # ARM64 (it requires the missing LZO_OS_WIN64 define).
+            vnc: OFF
 
     runs-on: ${{ matrix.arch.runner }}
 
@@ -83,7 +90,7 @@ jobs:
 
       - name: Configure
         shell: pwsh
-        run: cmake -B build -A ${{ matrix.arch.cmake_arch }} "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" -DBANCHO_ENABLE_VNC=ON -DBANCHO_ENABLE_IPO=OFF
+        run: cmake -B build -A ${{ matrix.arch.cmake_arch }} "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" -DBANCHO_ENABLE_VNC=${{ matrix.arch.vnc }} -DBANCHO_ENABLE_IPO=OFF
 
       - name: Build application
         run: cmake --build build --config Release --target banchoxterm --parallel 2
