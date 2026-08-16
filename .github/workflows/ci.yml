@@ -120,6 +120,7 @@ jobs:
         run: |
           $dist = (Resolve-Path "pkg\banchoxterm").Path
           $nsh = Join-Path (Resolve-Path "build") "version.nsh"
+          $script = (Resolve-Path "packaging\windows\installer.nsi").Path
           $nsisDir = Join-Path ${env:ProgramFiles(x86)} "NSIS"
           $makensis = Join-Path $nsisDir "makensis.exe"
           if (-not (Test-Path -LiteralPath $makensis)) {
@@ -130,7 +131,9 @@ jobs:
             throw "NSIS was installed but makensis.exe was not found at $makensis"
           }
           Add-Content -Path $env:GITHUB_PATH -Value $nsisDir
-          & $makensis "-DVERSION_NSH=$nsh" "-DDIST_DIR=$dist" "packaging\windows\installer.nsi"
+          # Use an absolute script path so NSIS resolves __FILEDIR__ to the
+          # actual packaging directory instead of prefixing it twice.
+          & $makensis "-DVERSION_NSH=$nsh" "-DDIST_DIR=$dist" $script
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
