@@ -25,7 +25,9 @@
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Configuration"));
-    setMinimumSize(420, 320);
+    // Keep the complete settings form visible and prevent accidental layout
+    // changes caused by resizing the dialog.
+    setFixedSize(640, 520);
 
     loadSettings();
 

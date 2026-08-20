@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QUuid>
 #include <QRegularExpression>
+#include <QUrl>
 
 static QString tunnelTypeToString(TunnelConfig::Type type) {
     switch (type) {
@@ -92,6 +93,7 @@ QJsonObject Session::toJson() const {
     json["user"] = user;
     json["port"] = port;
     json["keyPath"] = keyPath;
+    json["remoteDirectory"] = remoteDirectory;
     json["jumpHost"] = jumpHost;
     json["jumpUser"] = jumpUser;
     json["jumpPort"] = jumpPort;
@@ -134,6 +136,7 @@ Session Session::fromJson(const QJsonObject& json) {
     s.user = json["user"].toString();
     s.port = json["port"].toInt(22);
     s.keyPath = json["keyPath"].toString();
+    s.remoteDirectory = json["remoteDirectory"].toString();
     s.jumpHost = json["jumpHost"].toString();
     s.jumpUser = json["jumpUser"].toString();
     s.jumpPort = json["jumpPort"].toInt(22);
@@ -236,6 +239,8 @@ QList<Session> SessionManager::importSessions(const QString& path, bool* ok) {
     QByteArray data = file.readAll();
     QJsonDocument doc = QJsonDocument::fromJson(data);
     if (!doc.isArray()) {
+        if (path.endsWith(".reg", Qt::CaseInsensitive))
+            return importPuTTYRegistry(path, ok);
         return importOpenSshConfig(path, ok);
     }
     const QJsonArray arr = doc.array();
@@ -338,6 +343,89 @@ QList<Session> SessionManager::importOpenSshConfig(const QString& path, bool* ok
         }
     }
     finishHost();
+    if (ok)
+        *ok = !sessions.isEmpty();
+    return sessions;
+}
+
+QList<Session> SessionManager::importPuTTYRegistry(const QString& path, bool* ok) {
+    QList<Session> sessions;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        if (ok)
+            *ok = false;
+        return sessions;
+    }
+
+    Session current;
+    bool inSession = false;
+    const auto finishSession = [&]() {
+        if (!inSession || current.host.isEmpty())
+            return;
+        if (current.id.isEmpty())
+            current.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (current.name.isEmpty())
+            current.name = current.host;
+        current.type = SessionType::SSH;
+        sessions.append(current);
+    };
+
+    const auto decodeValue = [](QString value) {
+        value = value.trimmed();
+        if (value.startsWith('"') && value.endsWith('"') && value.size() >= 2) {
+            value = value.mid(1, value.size() - 2);
+            value.replace("\\\\", "\\");
+            value.replace("\\\"", "\"");
+        }
+        return QUrl::fromPercentEncoding(value.toUtf8());
+    };
+
+    const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
+    const QRegularExpression sectionPattern(R"(^\[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\(.+)\]$)");
+    for (QString line : lines) {
+        line = line.trimmed();
+        const QRegularExpressionMatch section = sectionPattern.match(line);
+        if (section.hasMatch()) {
+            finishSession();
+            current = Session();
+            current.name = QUrl::fromPercentEncoding(section.captured(1).toUtf8());
+            current.type = SessionType::SSH;
+            current.port = 22;
+            inSession = true;
+            continue;
+        }
+        if (!inSession || line.isEmpty() || line.startsWith(';') || !line.startsWith('"'))
+            continue;
+
+        const int separator = line.indexOf("\"=");
+        if (separator < 0)
+            continue;
+        const QString key = line.mid(1, separator - 1);
+        const QString value = line.mid(separator + 2);
+        if (key == "HostName") {
+            current.host = decodeValue(value);
+        } else if (key == "UserName") {
+            current.user = decodeValue(value);
+        } else if (key == "PortNumber") {
+            const QString number = value.trimmed();
+            bool valid = false;
+            int port = 0;
+            if (number.startsWith("dword:", Qt::CaseInsensitive))
+                port = number.mid(6).toInt(&valid, 16);
+            else
+                port = number.toInt(&valid);
+            if (valid && port > 0 && port <= 65535)
+                current.port = port;
+        } else if (key == "PublicKeyFile") {
+            current.keyPath = decodeValue(value);
+        } else if (key == "Compression") {
+            // PuTTY stores this as a DWORD. Preserve the setting by using the
+            // libssh2 default when compression is disabled; no password data
+            // is imported from registry exports.
+            Q_UNUSED(value);
+        }
+    }
+    finishSession();
     if (ok)
         *ok = !sessions.isEmpty();
     return sessions;

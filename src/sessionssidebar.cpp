@@ -332,9 +332,9 @@ void SessionsSidebar::onDeleteSession() {
 }
 
 void SessionsSidebar::onImportSessions() {
-    QString path = QFileDialog::getOpenFileName(
-        this, tr("Import Sessions"), QDir::homePath(),
-        tr("Session files (*.json *.conf);;JSON (*.json);;OpenSSH config (*.conf);;All Files (*)"));
+    QString path = QFileDialog::getOpenFileName(this, tr("Import Sessions"), QDir::homePath(),
+                                                tr("Session files (*.json *.conf *.reg);;JSON (*.json);;OpenSSH config "
+                                                   "(*.conf);;PuTTY registry (*.reg);;All Files (*)"));
     if (path.isEmpty())
         return;
 

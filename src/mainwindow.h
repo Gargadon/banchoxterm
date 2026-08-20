@@ -17,6 +17,7 @@ class QComboBox;
 class QLabel;
 class QAction;
 class QMenu;
+class QSettings;
 class SessionsSidebar;
 class SftpSidebar;
 class TerminalTab;
@@ -53,6 +54,7 @@ private slots:
     void showAbout();
     void onManageMacros();
     void onGlobalSearch();
+    void showCommandPalette();
 
 private:
     void setupUi();
@@ -65,6 +67,8 @@ private:
     QList<QTabWidget*> allPanes() const;
     QList<QTabWidget*> visiblePanes() const;
     void setPaneLayout(int mode, bool moveCurrentTab = false);
+    void saveOpenTabs(QSettings& settings) const;
+    void restoreOpenTabs(const QSettings& settings);
     void updateSessionContext();
     void reattachDetachedTabs();
 
@@ -77,7 +81,7 @@ private:
 
     QToolButton* m_sessionsTabBtn;
     QToolButton* m_sftpTabBtn;
-    QToolButton* m_multiInputBtn = nullptr;
+    QAction* m_multiInputAction = nullptr;
 
     QWidget* m_tabSplitter = nullptr;
     QGridLayout* m_tabGrid = nullptr;

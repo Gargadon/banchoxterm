@@ -27,6 +27,9 @@ public:
     const Session& getSession() const {
         return m_session;
     }
+    void setRemoteDirectory(const QString& path) {
+        m_session.remoteDirectory = path;
+    }
     QTermWidget* getTerminalWidget() const {
         return m_terminal;
     }

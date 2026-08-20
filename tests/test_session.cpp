@@ -43,6 +43,7 @@ private slots:
         original.user = "admin";
         original.port = 2222;
         original.keyPath = "/home/user/.ssh/id_rsa";
+        original.remoteDirectory = "/var/log";
         original.jumpHost = "bastion.example.com";
         original.jumpUser = "jumpadmin";
         original.jumpPort = 2200;
@@ -76,6 +77,7 @@ private slots:
         QCOMPARE(restored.user, original.user);
         QCOMPARE(restored.port, original.port);
         QCOMPARE(restored.keyPath, original.keyPath);
+        QCOMPARE(restored.remoteDirectory, original.remoteDirectory);
         QCOMPARE(restored.favorite, original.favorite);
         QCOMPARE(restored.jumpHost, original.jumpHost);
         QCOMPARE(restored.jumpUser, original.jumpUser);
@@ -235,6 +237,32 @@ private slots:
         QCOMPARE(sessions[1].name, QString("staging"));
         QCOMPARE(sessions[1].host, QString("staging.example.com"));
         QCOMPARE(sessions[1].port, 22);
+    }
+
+    void testPuTTYRegistryImport() {
+        QTemporaryFile registry;
+        QVERIFY(registry.open());
+        const QByteArray contents = "Windows Registry Editor Version 5.00\n\n"
+                                    "[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\Production%20SSH]\n"
+                                    "\"HostName\"=\"prod.example.com\"\n"
+                                    "\"PortNumber\"=dword:000008ae\n"
+                                    "\"UserName\"=\"deploy\"\n"
+                                    "\"PublicKeyFile\"=\"C:\\\\Users\\\\deploy\\\\.ssh\\\\id_ed25519.ppk\"\n\n"
+                                    "[HKEY_CURRENT_USER\\Software\\SimonTatham\\PuTTY\\Sessions\\Staging]\n"
+                                    "\"HostName\"=\"staging.example.com\"\n";
+        QVERIFY(registry.write(contents) == contents.size());
+        QVERIFY(registry.flush());
+
+        bool ok = false;
+        const QList<Session> sessions = SessionManager::importPuTTYRegistry(registry.fileName(), &ok);
+        QVERIFY(ok);
+        QCOMPARE(sessions.size(), 2);
+        QCOMPARE(sessions[0].name, QString("Production SSH"));
+        QCOMPARE(sessions[0].host, QString("prod.example.com"));
+        QCOMPARE(sessions[0].port, 2222);
+        QCOMPARE(sessions[0].user, QString("deploy"));
+        QVERIFY(sessions[0].keyPath.contains(QStringLiteral("id_ed25519.ppk")));
+        QCOMPARE(sessions[1].host, QString("staging.example.com"));
     }
 
     void testToJsonOmitsIrrelevantFields() {

@@ -28,6 +28,7 @@
 #include <QAction>
 #include <QStatusBar>
 #include <QFontDialog>
+#include <QInputDialog>
 #include <QSettings>
 #include <QLineEdit>
 #include <QComboBox>
@@ -94,10 +95,14 @@ private:
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QDialog>
+#include <QDialogButtonBox>
 #include <QCheckBox>
 #include <QVBoxLayout>
 #include <QPushButton>
 #include <QPair>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     setWindowIcon(QIcon(":/icons/logo.svg"));
@@ -139,6 +144,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     const QList<QTabWidget*> panes = visiblePanes();
     if (savedPane >= 0 && savedPane < panes.size())
         m_activePane = panes[savedPane];
+    restoreOpenTabs(settings);
 
     setWindowTitle("BanchoXterm");
 }
@@ -184,6 +190,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     settings.setValue("window/splitter", m_mainSplitter->saveState());
     settings.setValue("window/tabLayoutMode", m_paneLayoutMode);
     settings.setValue("window/activePane", qMax(0, visiblePanes().indexOf(activePane())));
+    saveOpenTabs(settings);
     QMainWindow::closeEvent(event);
 }
 
@@ -263,14 +270,14 @@ void MainWindow::setupUi() {
     auto* multiAction = toolBar->addAction(QIcon(":/icons/multiinput.svg"), tr("Multi-Input"));
     multiAction->setCheckable(true);
     multiAction->setToolTip(tr("Send input to all terminal sessions"));
-    connect(multiAction, &QAction::triggered, this, [this]() {
-        if (m_multiInputBtn)
-            m_multiInputBtn->setChecked(!m_multiInputBtn->isChecked());
-        toggleMultiInputBar();
-    });
+    m_multiInputAction = multiAction;
+    connect(multiAction, &QAction::triggered, this, &MainWindow::toggleMultiInputBar);
 
     auto* settingsAction = toolBar->addAction(QIcon(":/icons/gear.svg"), tr("Settings"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onOpenSettings);
+
+    auto* paletteShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_K), this);
+    connect(paletteShortcut, &QShortcut::activated, this, &MainWindow::showCommandPalette);
 
     m_sessionContextBar = new QFrame(centralWidget);
     m_sessionContextBar->setFrameShape(QFrame::StyledPanel);
@@ -327,21 +334,6 @@ void MainWindow::setupUi() {
     stripLayout->addWidget(m_sftpTabBtn);
 
     stripLayout->addStretch();
-
-    auto* settingsBtn = new QToolButton(verticalTabStrip);
-    settingsBtn->setIcon(QIcon(":/icons/gear.svg"));
-    settingsBtn->setToolTip(tr("Settings"));
-    settingsBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    settingsBtn->setFixedSize(60, 50);
-    stripLayout->addWidget(settingsBtn);
-
-    m_multiInputBtn = new QToolButton(verticalTabStrip);
-    m_multiInputBtn->setIcon(QIcon(":/icons/multiinput.svg"));
-    m_multiInputBtn->setToolTip(tr("Multi-Input (send commands to all terminals)"));
-    m_multiInputBtn->setCheckable(true);
-    m_multiInputBtn->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    m_multiInputBtn->setFixedSize(60, 50);
-    stripLayout->addWidget(m_multiInputBtn);
 
     sidebarLayout->addWidget(verticalTabStrip);
 
@@ -427,9 +419,6 @@ void MainWindow::setupUi() {
 
     // Connections
     connect(m_sessionsSidebar, &SessionsSidebar::newLocalSessionRequested, this, &MainWindow::onNewLocalTerminal);
-    connect(settingsBtn, &QToolButton::clicked, this, &MainWindow::onOpenSettings);
-    connect(m_multiInputBtn, &QToolButton::clicked, this, &MainWindow::toggleMultiInputBar);
-
     connect(m_multiInputEdit->lineEdit(), &QLineEdit::returnPressed, this, &MainWindow::onSendMultiInput);
     connect(sendMultiBtn, &QPushButton::clicked, this, &MainWindow::onSendMultiInput);
 
@@ -532,7 +521,10 @@ void MainWindow::onConnectSession(const Session& session) {
         switchSidebarTab(1); // Switch sidebar to SFTP files
 
         // Keep the SFTP browser in sync with the terminal's working directory
-        connect(tab, &TerminalTab::remoteDirChanged, m_sftpSidebar, &SftpSidebar::navigateTo);
+        connect(tab, &TerminalTab::remoteDirChanged, this, [this, tab](const QString& path) {
+            tab->setRemoteDirectory(path);
+            m_sftpSidebar->navigateTo(path);
+        });
     } else if (session.type == SessionType::Telnet) {
         pane->setTabIcon(index, QIcon(":/icons/telnet.svg"));
     } else if (session.type == SessionType::RDP) {
@@ -723,9 +715,8 @@ void MainWindow::onOpenSettings() {
 void MainWindow::toggleMultiInputBar() {
     bool visible = !m_multiInputBar->isVisible();
     m_multiInputBar->setVisible(visible);
-    if (m_multiInputBtn) {
-        m_multiInputBtn->setChecked(visible);
-    }
+    if (m_multiInputAction)
+        m_multiInputAction->setChecked(visible);
     if (visible) {
         m_multiInputEdit->setFocus();
     }
@@ -750,16 +741,39 @@ void MainWindow::onSendMultiInput() {
     if (targets.isEmpty())
         return;
 
-    const QString preview = targetNames.mid(0, 8).join("\n") +
-                            (targetNames.size() > 8 ? tr("\n...and %1 more").arg(targetNames.size() - 8) : QString());
-    const auto answer = QMessageBox::question(
-        this, tr("Confirm Multi-Input"),
-        tr("Send this command to %1 terminal(s)?\n\n%2\n\nCommand:\n%3").arg(targets.size()).arg(preview).arg(text),
-        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-    if (answer != QMessageBox::Yes)
+    QDialog targetDialog(this);
+    targetDialog.setWindowTitle(tr("Confirm Multi-Input"));
+    auto* targetLayout = new QVBoxLayout(&targetDialog);
+    targetLayout->addWidget(
+        new QLabel(tr("Select the terminal sessions that should receive this command:"), &targetDialog));
+    auto* targetList = new QListWidget(&targetDialog);
+    for (const QString& name : targetNames) {
+        auto* item = new QListWidgetItem(name, targetList);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(Qt::Checked);
+    }
+    targetLayout->addWidget(targetList);
+    auto* commandLabel = new QLabel(tr("Command: %1").arg(text), &targetDialog);
+    commandLabel->setWordWrap(true);
+    targetLayout->addWidget(commandLabel);
+    auto* targetButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &targetDialog);
+    targetLayout->addWidget(targetButtons);
+    connect(targetButtons, &QDialogButtonBox::accepted, &targetDialog, &QDialog::accept);
+    connect(targetButtons, &QDialogButtonBox::rejected, &targetDialog, &QDialog::reject);
+
+    if (targetDialog.exec() != QDialog::Accepted)
         return;
 
-    for (TerminalTab* tab : targets)
+    QList<TerminalTab*> selectedTargets;
+    for (int i = 0; i < targets.size(); ++i) {
+        if (targetList->item(i)->checkState() == Qt::Checked) {
+            selectedTargets.append(targets.at(i));
+        }
+    }
+    if (selectedTargets.isEmpty())
+        return;
+
+    for (TerminalTab* tab : selectedTargets)
         tab->sendInputText(text);
 
     // Add to dropdown history and save
@@ -923,6 +937,44 @@ void MainWindow::showAbout() {
     QMessageBox::about(this, tr("About BanchoXterm"), content);
 }
 
+void MainWindow::showCommandPalette() {
+    const QStringList commands = {
+        tr("New Remote Session"),     tr("Open Local Terminal"), tr("Toggle Split View"), tr("Toggle 2x2 Grid View"),
+        tr("Move Tab to Other Pane"), tr("Toggle Multi-Input"),  tr("Open Settings"),     tr("Manage Macros"),
+        tr("Find in All Sessions"),   tr("Toggle Theme"),
+    };
+
+    bool accepted = false;
+    const QString command =
+        QInputDialog::getItem(this, tr("Command Palette"), tr("Action:"), commands, 0, true, &accepted);
+    if (!accepted || command.isEmpty())
+        return;
+
+    if (command == tr("New Remote Session")) {
+        SessionDialog dialog(this);
+        if (dialog.exec() == QDialog::Accepted)
+            onConnectSession(dialog.getSession());
+    } else if (command == tr("Open Local Terminal")) {
+        onNewLocalTerminal();
+    } else if (command == tr("Toggle Split View")) {
+        toggleSplitView();
+    } else if (command == tr("Toggle 2x2 Grid View")) {
+        toggleGridView();
+    } else if (command == tr("Move Tab to Other Pane")) {
+        moveTabToOtherPane();
+    } else if (command == tr("Toggle Multi-Input")) {
+        toggleMultiInputBar();
+    } else if (command == tr("Open Settings")) {
+        onOpenSettings();
+    } else if (command == tr("Manage Macros")) {
+        onManageMacros();
+    } else if (command == tr("Find in All Sessions")) {
+        onGlobalSearch();
+    } else if (command == tr("Toggle Theme")) {
+        toggleTheme();
+    }
+}
+
 TerminalTab* MainWindow::currentTerminalTab() const {
     QTabWidget* pane = activePane();
     if (!pane)
@@ -1005,6 +1057,74 @@ void MainWindow::setPaneLayout(int mode, bool moveCurrentTab) {
     } else if (!visiblePanes().contains(m_activePane)) {
         m_activePane = visiblePanes().first();
     }
+}
+
+void MainWindow::saveOpenTabs(QSettings& settings) const {
+    QJsonArray tabs;
+    const QTabWidget* active = activePane();
+    for (int paneIndex = 0; paneIndex < allPanes().size(); ++paneIndex) {
+        QTabWidget* pane = allPanes().at(paneIndex);
+        for (int tabIndex = 0; tabIndex < pane->count(); ++tabIndex) {
+            auto* tab = qobject_cast<TerminalTab*>(pane->widget(tabIndex));
+            if (!tab)
+                continue;
+            QJsonObject entry;
+            entry["pane"] = paneIndex;
+            entry["active"] = pane == active && tabIndex == pane->currentIndex();
+            entry["session"] = tab->getSession().toJson();
+            tabs.append(entry);
+        }
+    }
+    settings.setValue("window/openTabs", QJsonDocument(tabs).toJson(QJsonDocument::Compact));
+}
+
+void MainWindow::restoreOpenTabs(const QSettings& settings) {
+    if (!settings.contains("window/openTabs"))
+        return;
+
+    const QJsonDocument document = QJsonDocument::fromJson(settings.value("window/openTabs").toByteArray());
+    if (!document.isArray())
+        return;
+
+    // setupUi creates one local tab for a first launch. If a saved workspace
+    // exists, replace that bootstrap tab with exactly the saved workspace.
+    for (QTabWidget* pane : allPanes()) {
+        while (pane->count() > 0) {
+            QWidget* widget = pane->widget(0);
+            pane->removeTab(0);
+            delete widget;
+        }
+    }
+
+    QList<QPair<QTabWidget*, bool>> restored;
+    for (const QJsonValue& value : document.array()) {
+        if (!value.isObject())
+            continue;
+        const QJsonObject entry = value.toObject();
+        const int paneIndex = entry.value("pane").toInt(0);
+        if (paneIndex < 0 || paneIndex >= allPanes().size())
+            continue;
+        const QJsonObject sessionObject = entry.value("session").toObject();
+        if (sessionObject.isEmpty())
+            continue;
+
+        QTabWidget* target = allPanes().at(paneIndex);
+        if (!visiblePanes().contains(target))
+            target = m_tabWidget;
+        m_activePane = target;
+        onConnectSession(Session::fromJson(sessionObject));
+        restored.append({target, entry.value("active").toBool(false)});
+    }
+
+    for (const auto& item : restored) {
+        if (item.second) {
+            m_activePane = item.first;
+            item.first->setCurrentIndex(item.first->count() - 1);
+            break;
+        }
+    }
+    if (restored.isEmpty())
+        m_activePane = visiblePanes().first();
 }
 
 void MainWindow::toggleSplitView() {

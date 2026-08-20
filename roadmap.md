@@ -26,8 +26,9 @@ Ya implementado:
 
 - [x] **Split-view / multi-terminal en rejilla**: cuatro grupos de pestañas
       independientes, modos simple/split/2x2, movimiento entre paneles y
-      persistencia del modo/panel activo. Pendiente: restauración completa de
-      cada sesión y mejoras de acoplamiento.
+      persistencia del modo/panel activo y restauración de las sesiones abiertas
+      sin secretos. Pendiente: restauración del directorio remoto y mejoras de
+      acoplamiento.
 - [x] **SSH gateway / jump host (ProxyJump)**: el bastión se autentica y
       verifica por separado; el destino usa una sesión libssh2 sobre un canal
       `direct-tcpip`, conservando SFTP, shell, túneles y monitorización.
@@ -152,8 +153,8 @@ con componentes libres y una arquitectura mantenible.
 
 - [x] Rejilla 2x2 con cuatro grupos de pestañas independientes.
 - [x] Desmontar una pestaña en ventana propia y volver a acoplarla.
-- [ ] Guardar/restaurar el layout al iniciar, incluyendo sesión, panel y
-  directorio remoto.
+- [x] Guardar/restaurar el layout al iniciar, incluyendo las sesiones abiertas
+      y el panel activo. Pendiente: directorio remoto.
 - [x] MultiExec con confirmación visible y lista de destinos; la ejecución
   masiva es explícita para evitar comandos accidentales. Pendiente: exclusiones
   y selección individual de destinos.

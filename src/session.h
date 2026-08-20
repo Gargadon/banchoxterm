@@ -37,6 +37,7 @@ struct Session {
     QString user;
     int port = 22;
     QString keyPath;
+    QString remoteDirectory;
     // Optional OpenSSH-style bastion configuration. The transport wiring is
     // added independently so imported profiles can preserve this data.
     QString jumpHost;
@@ -81,6 +82,7 @@ public:
     static bool exportSessions(const QList<Session>& sessions, const QString& path);
     static QList<Session> importSessions(const QString& path, bool* ok = nullptr);
     static QList<Session> importOpenSshConfig(const QString& path, bool* ok = nullptr);
+    static QList<Session> importPuTTYRegistry(const QString& path, bool* ok = nullptr);
 
 private:
     static QString getFilePath();

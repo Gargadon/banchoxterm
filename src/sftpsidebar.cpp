@@ -305,6 +305,8 @@ void SftpSidebar::startSession(const Session& session) {
     if (m_connection && m_connection->isConnected()) {
         // Already connected: just refresh the current directory listing.
         onConnectionSuccess();
+        if (!session.remoteDirectory.isEmpty())
+            navigateTo(session.remoteDirectory);
         return;
     }
 
@@ -358,7 +360,7 @@ void SftpSidebar::onConnectionSuccess() {
     m_chmodBtn->setEnabled(true);
     m_treeWidget->setEnabled(true);
 
-    m_currentPath = ".";
+    m_currentPath = m_currentSession.remoteDirectory.isEmpty() ? "." : m_currentSession.remoteDirectory;
     emit requestList(m_currentPath);
 }
 
