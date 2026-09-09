@@ -906,10 +906,21 @@ void SshConnection::listDirectory(const QString& path) {
         return;
     }
 
+    // Resolve relative paths (especially the initial ".") so the SFTP
+    // browser can display the complete remote path instead of a placeholder.
+    const QString requestedPath = path.isEmpty() ? QStringLiteral(".") : path;
+    char resolvedPath[4096] = {};
+    const int canonicalPathLength = retry([this, &requestedPath, &resolvedPath]() {
+        return libssh2_sftp_realpath(m_sftp, requestedPath.toUtf8().constData(), resolvedPath,
+                                     static_cast<unsigned int>(sizeof(resolvedPath)));
+    });
+    const QString listingPath = canonicalPathLength > 0 ? QString::fromUtf8(resolvedPath, canonicalPathLength)
+                                                        : requestedPath;
+
     LIBSSH2_SFTP_HANDLE* handle =
-        retryPtr([this, &path]() { return libssh2_sftp_opendir(m_sftp, path.toUtf8().constData()); });
+        retryPtr([this, &listingPath]() { return libssh2_sftp_opendir(m_sftp, listingPath.toUtf8().constData()); });
     if (!handle) {
-        emit operationFinished(false, "Failed to open remote directory: " + path);
+        emit operationFinished(false, "Failed to open remote directory: " + listingPath);
         return;
     }
 
@@ -940,7 +951,7 @@ void SshConnection::listDirectory(const QString& path) {
     }
 
     libssh2_sftp_closedir(handle);
-    emit directoryListed(path, files);
+    emit directoryListed(listingPath, files);
 }
 
 void SshConnection::downloadFile(const QString& remotePath, const QString& localPath) {
