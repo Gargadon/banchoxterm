@@ -38,6 +38,24 @@ cd banchoxterm
 git submodule update --init --recursive
 ```
 
+On Windows, VcXsrv is packaged as a separate companion process; it is not
+linked into `banchoxterm.exe`. To include local VcXsrv builds in the Windows
+package, configure with the package directories before building:
+
+```powershell
+cmake -B build -A x64 `
+  -DCMAKE_PREFIX_PATH=C:\Qt\6.8.3\msvc2022_64 `
+  -DBANCHO_VCXSRV_DIR=C:\path\to\vcxsrv-package `
+  -DBANCHO_VCXSRV_ARM64_DIR=C:\path\to\vcxsrv-package-arm64
+cmake --build build --config Release --target banchoxterm
+```
+
+The configure step copies them to `build/xservers/vcxsrv-x64` and
+`build/xservers/vcxsrv-arm64`. The Windows packaging workflow then places the
+matching directory under `xservers/` in both the NSIS installer and portable
+ZIP. If a package is not supplied, the application is still packaged and can
+use an installed X server such as Xming or X410.
+
 ### Requirements
 
 - CMake 3.16+
@@ -99,8 +117,12 @@ without KPty, so local shells are bridged through ConPTY).
   sidebar are uploaded, and remote files can be dragged out of the sidebar to a
   chosen local folder. Dragging remote files to another application (e.g.
   Explorer) is not supported.
-- **X11 forwarding** on Windows requires a local X server (e.g. VcXsrv, X410 or
-  Xming) listening on `127.0.0.1:6000`.
+- **X11 forwarding** on Windows can use an external X server. BanchoXterm
+  auto-starts VcXsrv when `vcxsrv.exe` is installed or placed in
+  `xservers/vcxsrv-x64/` (or `xservers/vcxsrv-arm64/`) next to the application.
+  A custom executable can be selected with the `x11/vcxsrvPath` setting or the
+  `BANCHOTERM_VCXSRV` environment variable. X410 and Xming remain compatible
+  when already running on `127.0.0.1:6000`.
 - **RDP** on Windows is embedded via the native Remote Desktop ActiveX control
   when Qt ActiveQt is available (falls back to `mstsc.exe` otherwise). On Linux
   it uses `xfreerdp`.

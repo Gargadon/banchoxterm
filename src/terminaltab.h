@@ -93,6 +93,7 @@ private:
     void startLogging();
     void logData(const QByteArray& data);
     void maybeScheduleReconnect();
+    void requestReconnect();
     void applyTerminalSize(int rows, int cols);
     void feedTerminalData(const QByteArray& data);
     QWidget* terminalView() const;
@@ -109,6 +110,7 @@ private:
     Session m_session;
     QTermWidget* m_terminal = nullptr;
     QLabel* m_statusLabel = nullptr;
+    QPushButton* m_reconnectButton = nullptr;
     QWidget* m_embeddedContainer = nullptr;
     QProcess* m_externalProcess = nullptr;
     SshConnection* m_connection = nullptr;

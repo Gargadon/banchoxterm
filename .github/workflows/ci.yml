@@ -107,9 +107,46 @@ jobs:
           modules: 'qtserialport'
           cache: true
 
+      - name: Download VcXsrv companion
+        shell: pwsh
+        run: |
+          # VcXsrv is built and released by Gargadon/vcxsrv, never by this
+          # repository. Keep this version pinned for reproducible app builds.
+          $version = 'v21.1.16.1'
+          $arch = '${{ matrix.arch.name }}'
+          $archive = Join-Path $env:RUNNER_TEMP "vcxsrv-windows-$arch.zip"
+          $root = Join-Path $env:GITHUB_WORKSPACE "third_party\vcxsrv-$arch-package"
+          $url = "https://github.com/Gargadon/vcxsrv/releases/download/$version/vcxsrv-windows-$arch.zip"
+          try {
+            Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+            Expand-Archive -LiteralPath $archive -DestinationPath $root -Force
+            if ($arch -eq 'arm64') {
+              Add-Content -Path $env:GITHUB_ENV -Value "BANCHO_VCXSRV_ARM64_DIR=$root"
+            } else {
+              Add-Content -Path $env:GITHUB_ENV -Value "BANCHO_VCXSRV_DIR=$root"
+            }
+            Write-Host "Using VcXsrv companion $version from $url"
+          } catch {
+            Write-Warning "VcXsrv companion $version is not available; packaging without a bundled X server. $($_.Exception.Message)"
+          }
+
       - name: Configure
         shell: pwsh
-        run: cmake -B build -A ${{ matrix.arch.cmake_arch }} "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" -DBANCHO_ENABLE_VNC=${{ matrix.arch.vnc }} -DBANCHO_ENABLE_IPO=OFF
+        run: |
+          $cmakeArgs = @(
+            '-B', 'build',
+            '-A', '${{ matrix.arch.cmake_arch }}',
+            "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR",
+            '-DBANCHO_ENABLE_VNC=${{ matrix.arch.vnc }}',
+            '-DBANCHO_ENABLE_IPO=OFF'
+          )
+          if ($env:BANCHO_VCXSRV_ARM64_DIR) {
+            $cmakeArgs += "-DBANCHO_VCXSRV_ARM64_DIR=$env:BANCHO_VCXSRV_ARM64_DIR"
+          }
+          if ($env:BANCHO_VCXSRV_DIR) {
+            $cmakeArgs += "-DBANCHO_VCXSRV_DIR=$env:BANCHO_VCXSRV_DIR"
+          }
+          cmake @cmakeArgs
 
       - name: Build application
         run: cmake --build build --config Release --target banchoxterm --parallel 2
@@ -129,6 +166,18 @@ jobs:
           Copy-Item -Path "third_party\qtermwidget\lib\color-schemes" -Destination "pkg\banchoxterm\" -Recurse -Force
           Copy-Item -Path "third_party\qtermwidget\lib\kb-layouts" -Destination "pkg\banchoxterm\" -Recurse -Force
           Copy-Item -Path "third_party\qtermwidget\lib\translations" -Destination "pkg\banchoxterm\" -Recurse -Force
+          # VcXsrv is an external companion process. If the configure step
+          # copied an architecture-specific bundle into build\xservers, put
+          # that tree in both the installer payload and the portable ZIP.
+          $vcxBuildDir = Join-Path $env:GITHUB_WORKSPACE "build\xservers\vcxsrv-${{ matrix.arch.name }}"
+          $vcxPackageDir = Join-Path $env:GITHUB_WORKSPACE "pkg\banchoxterm\xservers\vcxsrv-${{ matrix.arch.name }}"
+          if (Test-Path -LiteralPath (Join-Path $vcxBuildDir "vcxsrv.exe")) {
+            New-Item -ItemType Directory -Path $vcxPackageDir -Force | Out-Null
+            Copy-Item -Path (Join-Path $vcxBuildDir "*") -Destination $vcxPackageDir -Recurse -Force
+            Write-Host "Bundled VcXsrv from $vcxBuildDir"
+          } else {
+            Write-Host "No VcXsrv ${{ matrix.arch.name }} bundle found; continuing without bundled X server."
+          }
           windeployqt --release --compiler-runtime pkg\banchoxterm\banchoxterm.exe
 
       - name: Install NSIS

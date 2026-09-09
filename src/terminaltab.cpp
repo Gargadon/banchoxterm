@@ -1,4 +1,5 @@
 #include "terminaltab.h"
+#include "xservermanager.h"
 #include "sshconnection.h"
 #include "keyring.h"
 #include <qtermwidget.h>
@@ -57,6 +58,11 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         m_statusLabel->setFont(statusFont);
 
         layout->addWidget(m_statusLabel);
+
+        m_reconnectButton = new QPushButton(tr("Reconnect"), this);
+        m_reconnectButton->setVisible(false);
+        layout->addWidget(m_reconnectButton, 0, Qt::AlignHCenter);
+        connect(m_reconnectButton, &QPushButton::clicked, this, &TerminalTab::requestReconnect);
 
         m_embeddedContainer = new QWidget(this);
         m_embeddedContainer->hide();
@@ -426,6 +432,17 @@ void TerminalTab::setupSshTerminal() {
     // external mode and bridge bytes with the SSH connection.
     m_terminal->startExternal();
 
+    bool enableX11 = m_session.x11Forwarding;
+#ifdef Q_OS_WIN
+    if (enableX11) {
+        QString x11Error;
+        if (!XServerManager::instance()->ensureVcXsrvRunning(&x11Error)) {
+            feedTerminalData(tr("\r\n[X11 forwarding desactivado: %1]\r\n").arg(x11Error).toUtf8());
+            enableX11 = false;
+        }
+    }
+#endif
+
     m_connection = new SshConnection();
     m_connectionThread = new QThread(this);
     m_connection->moveToThread(m_connectionThread);
@@ -448,7 +465,7 @@ void TerminalTab::setupSshTerminal() {
         maybeScheduleReconnect();
     });
 
-    if (m_session.x11Forwarding) {
+    if (enableX11) {
         QMetaObject::invokeMethod(m_connection, "setX11Forwarding", Qt::QueuedConnection, Q_ARG(bool, true));
     }
     applySshOptions();
@@ -512,6 +529,12 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
     auto* zoomOutAct = menu.addAction(tr("Zoom &Out"));
     zoomOutAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Minus));
 
+    QAction* reconnectAct = nullptr;
+    if (!m_isActive) {
+        menu.addSeparator();
+        reconnectAct = menu.addAction(tr("Reconnect"));
+    }
+
     auto* selected = menu.exec(view->mapToGlobal(pos));
     if (selected == copyAct) {
         doCopy();
@@ -523,6 +546,8 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
         doZoomIn();
     } else if (selected == zoomOutAct) {
         doZoomOut();
+    } else if (selected == reconnectAct) {
+        requestReconnect();
     }
 }
 
@@ -612,6 +637,19 @@ void TerminalTab::maybeScheduleReconnect() {
     m_reconnectTimer->start();
 }
 
+void TerminalTab::requestReconnect() {
+    if (m_isActive)
+        return;
+    if (m_reconnectTimer) {
+        m_reconnectTimer->stop();
+        m_reconnectTimer->deleteLater();
+        m_reconnectTimer = nullptr;
+    }
+    if (m_reconnectButton)
+        m_reconnectButton->setEnabled(false);
+    emit reconnectRequested(m_session);
+}
+
 #ifdef BANCHO_HAVE_RDP_AX
 void TerminalTab::setupWindowsRdpActiveX() {
     m_rdpWidget = new QAxWidget(m_embeddedContainer);
@@ -659,6 +697,8 @@ void TerminalTab::setupWindowsRdpActiveX() {
 
     if (m_statusLabel)
         m_statusLabel->hide();
+    if (m_reconnectButton)
+        m_reconnectButton->setVisible(false);
     m_embeddedContainer->show();
     m_isActive = true;
 
@@ -682,6 +722,8 @@ void TerminalTab::setupWindowsRdpActiveX() {
                 m_statusLabel->show();
                 m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
             }
+            if (m_reconnectButton)
+                m_reconnectButton->setVisible(true);
             emit titleChanged(tr("[Closed] %1").arg(m_session.name));
         }
     });
@@ -702,6 +744,8 @@ void TerminalTab::setupEmbeddedVnc() {
 
     connect(m_vncWidget, &VncClientWidget::connected, this, [this]() {
         m_isActive = true;
+        if (m_reconnectButton)
+            m_reconnectButton->setVisible(false);
         if (m_statusLabel)
             m_statusLabel->hide();
         if (m_embeddedContainer)
@@ -715,6 +759,8 @@ void TerminalTab::setupEmbeddedVnc() {
             m_statusLabel->show();
             m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
         }
+        if (m_reconnectButton)
+            m_reconnectButton->setVisible(true);
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     });
     connect(m_vncWidget, &VncClientWidget::errorOccurred, this, [this](const QString& msg) {
@@ -725,6 +771,8 @@ void TerminalTab::setupEmbeddedVnc() {
             m_statusLabel->show();
             m_statusLabel->setText(tr("VNC error: %1").arg(msg));
         }
+        if (m_reconnectButton)
+            m_reconnectButton->setVisible(true);
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     });
 
@@ -765,6 +813,9 @@ void TerminalTab::launchExternalClient() {
     m_externalProcess->setProcessChannelMode(QProcess::ForwardedChannels);
 
     connect(m_externalProcess, &QProcess::started, this, [this]() {
+        m_isActive = true;
+        if (m_reconnectButton)
+            m_reconnectButton->setVisible(false);
         if (m_statusLabel)
             m_statusLabel->hide();
         if (m_embeddedContainer)
@@ -781,6 +832,8 @@ void TerminalTab::launchExternalClient() {
                     m_statusLabel->show();
                     m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
                 }
+                if (m_reconnectButton)
+                    m_reconnectButton->setVisible(true);
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
             });
 
@@ -795,6 +848,10 @@ void TerminalTab::launchExternalClient() {
                                    (m_session.type == SessionType::RDP ? tr("RDP: xfreerdp (Linux) or mstsc (Windows)")
                                                                        : tr("VNC: vncviewer")));
         }
+        m_isActive = false;
+        if (m_reconnectButton)
+            m_reconnectButton->setVisible(true);
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     });
 
     m_externalProcess->start(program, args);

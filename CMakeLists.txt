@@ -5,6 +5,21 @@ project(banchoxterm VERSION 1.0.1 LANGUAGES C CXX)
 option(BANCHO_ENABLE_ASAN "Enable AddressSanitizer for memory debugging" OFF)
 option(BANCHO_ENABLE_IPO "Enable interprocedural optimization for release builds" ON)
 
+if(WIN32)
+    # Optional directory containing a VcXsrv build (vcxsrv.exe and its DLLs).
+    # It is copied next to the application as a separate companion process.
+    set(BANCHO_VCXSRV_DIR "" CACHE PATH "Directory containing the VcXsrv Windows build")
+    set(BANCHO_VCXSRV_ARM64_DIR "" CACHE PATH "Directory containing the ARM64 VcXsrv Windows build")
+    if(BANCHO_VCXSRV_DIR AND EXISTS "${BANCHO_VCXSRV_DIR}/vcxsrv.exe")
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/xservers/vcxsrv-x64")
+        file(COPY "${BANCHO_VCXSRV_DIR}/" DESTINATION "${CMAKE_BINARY_DIR}/xservers/vcxsrv-x64")
+    endif()
+    if(BANCHO_VCXSRV_ARM64_DIR AND EXISTS "${BANCHO_VCXSRV_ARM64_DIR}/vcxsrv.exe")
+        file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/xservers/vcxsrv-arm64")
+        file(COPY "${BANCHO_VCXSRV_ARM64_DIR}/" DESTINATION "${CMAKE_BINARY_DIR}/xservers/vcxsrv-arm64")
+    endif()
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -138,6 +153,8 @@ set(SOURCES
     src/settingsdialog.h
     src/sshconnection.cpp
     src/sshconnection.h
+    src/xservermanager.cpp
+    src/xservermanager.h
     src/ftpclient.cpp
     src/ftpclient.h
     src/sshtunnel.cpp
