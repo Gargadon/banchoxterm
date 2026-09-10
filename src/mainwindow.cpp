@@ -423,6 +423,7 @@ void MainWindow::setupUi() {
     // alive as an action container for compatibility, but remove the native
     // menu bar from the window layout entirely after all actions are created.
     if (auto* legacyMenuBar = menuBar()) {
+        legacyMenuBar->setNativeMenuBar(false);
         legacyMenuBar->hide();
         legacyMenuBar->setFixedHeight(0);
         legacyMenuBar->setMaximumHeight(0);

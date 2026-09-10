@@ -25,6 +25,10 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // BanchoXterm uses the Ribbon as its only visible command surface. Do not
+    // export the legacy QMenuBar to desktop global-menu providers such as
+    // KDE Plasma's appmenu.
+    QApplication::setAttribute(Qt::AA_DontUseNativeMenuBar);
     QApplication app(argc, argv);
     app.setApplicationName("BanchoXterm");
     app.setApplicationDisplayName("BanchoXterm");
