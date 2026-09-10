@@ -37,7 +37,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build \
-            qt6-base-dev qt6-serialport-dev qt6-tools-dev-tools \
+            qt6-base-dev qt6-serialport-dev qt6-tools-dev qt6-tools-dev-tools \
             libssl-dev zlib1g-dev
       - name: Configure
         run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBANCHO_ENABLE_VNC=ON
