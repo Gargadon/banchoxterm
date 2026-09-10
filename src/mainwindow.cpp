@@ -306,8 +306,8 @@ void MainWindow::setupUi() {
     auto* settingsAction = toolBar->addAction(QIcon(":/icons/gear.svg"), tr("Settings"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onOpenSettings);
 
-    const QList<QAction*> ribbonActions = {newRemoteAction, localAction, splitAction, gridAction,
-                                           moveAction, multiAction, settingsAction};
+    const QList<QAction*> ribbonActions = {newRemoteAction, localAction, splitAction,   gridAction,
+                                           moveAction,      multiAction, settingsAction};
     for (QAction* action : ribbonActions) {
         if (auto* button = qobject_cast<QToolButton*>(toolBar->widgetForAction(action))) {
             button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
@@ -321,8 +321,8 @@ void MainWindow::setupUi() {
     // menus remain as the source of the shared actions and keyboard shortcuts,
     // while the Ribbon provides the primary mouse-oriented interface.
     menuBar()->setVisible(false);
-    const QList<QAction*> persistentRibbonActions = {newRemoteAction, localAction, splitAction, gridAction,
-                                                     moveAction, multiAction, settingsAction};
+    const QList<QAction*> persistentRibbonActions = {newRemoteAction, localAction, splitAction,   gridAction,
+                                                     moveAction,      multiAction, settingsAction};
     for (QAction* action : persistentRibbonActions)
         action->setParent(this);
     removeToolBar(toolBar);
@@ -607,11 +607,10 @@ void MainWindow::setupUi() {
             auto* recentButton = new QPushButton(
                 recentSession.favorite ? QStringLiteral("★  %1").arg(recentName) : recentName, m_welcomeWidget);
             recentButton->setObjectName("welcomeRecentButton");
-            recentButton->setIcon(QIcon(recentSession.type == SessionType::SSH ? ":/icons/server.svg"
-                                                                                : ":/icons/terminal.svg"));
-            recentButton->setToolTip(QStringLiteral("%1@%2:%3")
-                                         .arg(recentSession.user, recentSession.host)
-                                         .arg(recentSession.port));
+            recentButton->setIcon(
+                QIcon(recentSession.type == SessionType::SSH ? ":/icons/server.svg" : ":/icons/terminal.svg"));
+            recentButton->setToolTip(
+                QStringLiteral("%1@%2:%3").arg(recentSession.user, recentSession.host).arg(recentSession.port));
             welcomeLayout->addWidget(recentButton, 0, Qt::AlignHCenter);
             connect(recentButton, &QPushButton::clicked, this,
                     [this, recentSession]() { onConnectSession(recentSession); });
@@ -870,7 +869,7 @@ void MainWindow::updateSessionContext() {
     m_contextSessionLabel->setText(QStringLiteral("%1  ·  %2").arg(session.name, endpoint));
     m_contextStateLabel->setText(active ? tr("Connected") : tr("Disconnected"));
     m_contextStateLabel->setStyleSheet(active ? QStringLiteral("color: #36b37e; font-weight: 600;")
-                                               : QStringLiteral("color: #e06c75; font-weight: 600;"));
+                                              : QStringLiteral("color: #e06c75; font-weight: 600;"));
     if (m_statusConnectionLabel)
         m_statusConnectionLabel->setText(QStringLiteral("%1  |  %2").arg(sessionTypeName(session.type), endpoint));
 }

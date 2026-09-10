@@ -916,8 +916,8 @@ void SshConnection::listDirectory(const QString& path) {
         return libssh2_sftp_realpath(m_sftp, requestedPath.toUtf8().constData(), resolvedPath,
                                      static_cast<unsigned int>(sizeof(resolvedPath)));
     });
-    const QString listingPath = canonicalPathLength > 0 ? QString::fromUtf8(resolvedPath, canonicalPathLength)
-                                                        : requestedPath;
+    const QString listingPath =
+        canonicalPathLength > 0 ? QString::fromUtf8(resolvedPath, canonicalPathLength) : requestedPath;
 
     LIBSSH2_SFTP_HANDLE* handle =
         retryPtr([this, &listingPath]() { return libssh2_sftp_opendir(m_sftp, listingPath.toUtf8().constData()); });

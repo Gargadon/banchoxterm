@@ -36,9 +36,9 @@ QString XServerManager::findVcXsrv() const {
     }
     candidates << QDir(appDir).filePath(QStringLiteral("vcxsrv.exe"));
     candidates << QDir::fromNativeSeparators(qEnvironmentVariable("ProgramFiles") +
-                                              QStringLiteral("/VcXsrv/vcxsrv.exe"));
+                                             QStringLiteral("/VcXsrv/vcxsrv.exe"));
     candidates << QDir::fromNativeSeparators(qEnvironmentVariable("ProgramFiles(x86)") +
-                                              QStringLiteral("/VcXsrv/vcxsrv.exe"));
+                                             QStringLiteral("/VcXsrv/vcxsrv.exe"));
 
     for (const QString& candidate : candidates) {
         if (QFileInfo::exists(candidate))
@@ -79,8 +79,8 @@ bool XServerManager::ensureVcXsrvRunning(QString* error) {
     // -ac is required by the current Windows X11 bridge, which does not yet
     // create an MIT-MAGIC-COOKIE file. Keep the server on the local machine;
     // cookie authentication should replace this compatibility mode later.
-    const QStringList arguments = {QStringLiteral(":0"), QStringLiteral("-multiwindow"),
-                                   QStringLiteral("-clipboard"), QStringLiteral("-ac")};
+    const QStringList arguments = {QStringLiteral(":0"), QStringLiteral("-multiwindow"), QStringLiteral("-clipboard"),
+                                   QStringLiteral("-ac")};
     m_process->start(m_executablePath, arguments);
     if (!m_process->waitForStarted(3000)) {
         if (error)

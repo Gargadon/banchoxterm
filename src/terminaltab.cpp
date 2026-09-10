@@ -692,12 +692,10 @@ void TerminalTab::showStoppedPrompt() {
         return;
 
     m_stopPromptShown = true;
-    feedTerminalData((QByteArray("\r\n\x1b[38;5;214m")
-                      + tr("Session stopped\r\n").toUtf8()
-                      + tr(" - Press <return> to exit tab\r\n").toUtf8()
-                      + tr(" - Press R to restart session\r\n").toUtf8()
-                      + tr(" - Press S to save terminal output to file\r\n").toUtf8()
-                      + QByteArray("\x1b[0m")));
+    feedTerminalData((QByteArray("\r\n\x1b[38;5;214m") + tr("Session stopped\r\n").toUtf8() +
+                      tr(" - Press <return> to exit tab\r\n").toUtf8() +
+                      tr(" - Press R to restart session\r\n").toUtf8() +
+                      tr(" - Press S to save terminal output to file\r\n").toUtf8() + QByteArray("\x1b[0m")));
 }
 
 void TerminalTab::saveTerminalOutput() {

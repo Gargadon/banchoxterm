@@ -8,9 +8,7 @@
 // Windows installation. Translate the standard labels through BanchoXterm's
 // active application translator instead.
 inline void localizeMessageBoxButtons(QMessageBox& box) {
-    const auto translate = [](const char* source) {
-        return QCoreApplication::translate("QMessageBox", source);
-    };
+    const auto translate = [](const char* source) { return QCoreApplication::translate("QMessageBox", source); };
 
     if (auto* button = box.button(QMessageBox::Yes))
         button->setText(translate("Yes"));

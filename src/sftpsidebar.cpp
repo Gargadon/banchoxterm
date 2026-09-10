@@ -137,8 +137,7 @@ protected:
             return;
 
         auto* mime = new QMimeData;
-        mime->setData("application/x-banchoxterm-sftp-local",
-                      QJsonDocument(paths).toJson(QJsonDocument::Compact));
+        mime->setData("application/x-banchoxterm-sftp-local", QJsonDocument(paths).toJson(QJsonDocument::Compact));
         mime->setUrls([&paths]() {
             QList<QUrl> urls;
             for (const QJsonValue& value : paths)
