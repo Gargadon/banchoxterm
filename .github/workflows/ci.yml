@@ -120,6 +120,10 @@ jobs:
           try {
             Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
             Expand-Archive -LiteralPath $archive -DestinationPath $root -Force
+            $vcxsrvExe = Join-Path $root 'vcxsrv.exe'
+            if (-not (Test-Path -LiteralPath $vcxsrvExe)) {
+              throw "The VcXsrv archive was extracted but vcxsrv.exe was not found at $vcxsrvExe"
+            }
             if ($arch -eq 'arm64') {
               Add-Content -Path $env:GITHUB_ENV -Value "BANCHO_VCXSRV_ARM64_DIR=$root"
             } else {
@@ -127,7 +131,8 @@ jobs:
             }
             Write-Host "Using VcXsrv companion $version from $url"
           } catch {
-            Write-Warning "VcXsrv companion $version is not available; packaging without a bundled X server. $($_.Exception.Message)"
+            Write-Error "VcXsrv companion $version could not be downloaded or validated: $($_.Exception.Message)"
+            exit 1
           }
 
       - name: Configure
