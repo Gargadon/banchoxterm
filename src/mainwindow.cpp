@@ -419,6 +419,15 @@ void MainWindow::setupUi() {
     connect(updateRibbonAction, &QAction::triggered, this, [this]() { Updater::checkForUpdates(this); });
     addRibbonAction(helpPage.second, updateRibbonAction);
 
+    // The Ribbon is the only visible command surface. Keep the legacy menus
+    // alive as an action container for compatibility, but remove the native
+    // menu bar from the window layout entirely after all actions are created.
+    if (auto* legacyMenuBar = menuBar()) {
+        legacyMenuBar->hide();
+        legacyMenuBar->setFixedHeight(0);
+        legacyMenuBar->setMaximumHeight(0);
+    }
+
     ribbonTabs->setFixedHeight(94);
 
     auto* sessionContext = new QWidget(ribbonTabs);
