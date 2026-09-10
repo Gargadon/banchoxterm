@@ -1173,14 +1173,18 @@ void MainWindow::setupMenuBar() {
 
     m_copyAction = editMenu->addAction(tr("&Copy"));
     m_copyAction->setIcon(QIcon(":/icons/copy.svg"));
-    m_copyAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+    // TerminalTab handles Ctrl+Shift+C through its application event filter.
+    // Keeping a global shortcut here would execute the copy path twice when
+    // the focused widget is a QTermWidget terminal.
     m_copyAction->setToolTip(tr("Copy selection (Ctrl+Shift+C)"));
     m_copyAction->setStatusTip(tr("Copy selection (Ctrl+Shift+C)"));
     connect(m_copyAction, &QAction::triggered, this, &MainWindow::onCopy);
 
     m_pasteAction = editMenu->addAction(tr("&Paste"));
     m_pasteAction->setIcon(QIcon(":/icons/paste.svg"));
-    m_pasteAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+    // Same reasoning as Copy: the terminal event filter is the sole keyboard
+    // path, preventing one paste through the filter and another through this
+    // global QAction (which is especially visible with bracketed paste).
     m_pasteAction->setToolTip(tr("Paste (Ctrl+Shift+V)"));
     m_pasteAction->setStatusTip(tr("Paste (Ctrl+Shift+V)"));
     connect(m_pasteAction, &QAction::triggered, this, &MainWindow::onPaste);

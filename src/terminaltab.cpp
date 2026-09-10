@@ -440,6 +440,11 @@ void TerminalTab::setupLocalTerminal() {
 void TerminalTab::setupSshTerminal() {
     // No local PTY needed: libssh2 owns the remote pty. Run the emulator in
     // external mode and bridge bytes with the SSH connection.
+    // The Linux/default keymap emits BS (0x08), while the SSH PTY below is
+    // configured with DEL (0x7f) as TTY_OP_ERASE. Use the Linux terminal
+    // binding explicitly so Backspace matches the requested remote setting.
+    if (QTermWidget::availableKeyBindings().contains(QStringLiteral("linux")))
+        m_terminal->setKeyBindings(QStringLiteral("linux"));
     m_terminal->startExternal();
 
     bool enableX11 = m_session.x11Forwarding;
