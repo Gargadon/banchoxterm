@@ -25,7 +25,9 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 Pre-built binaries are published on the [Releases](https://github.com/Gargadon/banchoxterm/releases) page:
 
 - **Windows**: NSIS installer (`BanchoXterm-Setup.exe`) or a portable ZIP.
-- **Linux**: a standalone binary (requires Qt 6 and QTermWidget installed).
+
+Linux packages are not currently published by the project; build from source
+using the instructions below.
 
 ## Build from source
 
@@ -71,10 +73,14 @@ use an installed X server such as Xming or X410.
 
 ```bash
 # Install dependencies (Ubuntu/Debian)
-sudo apt install build-essential cmake qt6-base-dev libssh2-1-dev ninja-build
+sudo apt install build-essential cmake ninja-build \
+  qt6-base-dev qt6-serialport-dev qt6-tools-dev qt6-tools-dev-tools \
+  libssl-dev zlib1g-dev
 
 # Install dependencies (Fedora)
-sudo dnf install cmake qt6-qtbase-devel libssh2-devel ninja-build
+sudo dnf install cmake ninja-build \
+  qt6-qtbase-devel qt6-qtserialport-devel qt6-qttools-devel \
+  openssl-devel zlib-devel
 
 # Build
 cmake -B build -G Ninja
