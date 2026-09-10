@@ -22,7 +22,6 @@
 #include <QPalette>
 #include <QStyle>
 #include <QStyleFactory>
-#include <QStyleHints>
 #include <QGuiApplication>
 #include <QShortcut>
 #include <QToolBar>
@@ -123,13 +122,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     applyThemeMode(m_themeMode);
     m_ribbonPinned = settings.value("window/ribbonPinned", true).toBool();
     setRibbonExpanded(m_ribbonPinned);
-
-    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this]() {
-        if (m_themeMode == "system") {
-            m_systemPalette = qApp->palette();
-            applyThemeMode("system");
-        }
-    });
 
     // Restore window layout geometry & state
     if (settings.contains("window/geometry")) {
@@ -1605,6 +1597,11 @@ void MainWindow::setRibbonExpanded(bool expanded) {
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::ApplicationPaletteChange && m_themeMode == "system") {
+        m_systemPalette = qApp->palette();
+        applyThemeMode("system");
+    }
+
     if (!m_ribbonPinned && m_ribbonToolBar && m_ribbonTabs && event->type() == QEvent::MouseButtonPress) {
         auto* widget = qobject_cast<QWidget*>(watched);
         if (widget && !m_ribbonToolBar->isAncestorOf(widget) && widget != m_ribbonToolBar) {
