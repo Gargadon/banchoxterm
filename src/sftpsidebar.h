@@ -12,6 +12,9 @@ class QLineEdit;
 class QPushButton;
 class QLabel;
 class QProgressBar;
+class QTreeView;
+class QFileSystemModel;
+class QSplitter;
 class FtpClient;
 
 class SftpSidebar : public QWidget {
@@ -28,6 +31,7 @@ public:
 
     void startSession(const Session& session);
     void stopSession();
+    void saveLayout();
 
 public slots:
     void navigateTo(const QString& path);
@@ -86,6 +90,7 @@ private:
     };
     void enqueueUpload(const QStringList& localPaths);
     void enqueueDownload(const QStringList& remotePaths);
+    void enqueueDownloadTo(const QStringList& remotePaths, const QString& destinationDir);
     void startNextTransfer();
     void finishTransferQueue(bool success, const QString& error);
     void setTransferUi(bool active);
@@ -99,6 +104,10 @@ private:
     QPushButton* m_renameBtn;
     QPushButton* m_chmodBtn;
     QTreeWidget* m_treeWidget;
+    QTreeView* m_localTree = nullptr;
+    QFileSystemModel* m_localModel = nullptr;
+    QLineEdit* m_localPathEdit = nullptr;
+    QSplitter* m_fileSplitter = nullptr;
     QLabel* m_statusLabel;
     QProgressBar* m_progressBar;
     QLabel* m_progressLabel;

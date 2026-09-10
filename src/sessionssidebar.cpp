@@ -6,6 +6,7 @@
 #include <QTreeWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include "localizedmessagebox.h"
 #include <QLabel>
 #include <QIcon>
 #include <QFileDialog>
@@ -87,7 +88,9 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     m_treeWidget->setObjectName("sessionTree");
     m_treeWidget->setIconSize(QSize(18, 18));
     m_treeWidget->setIndentation(18);
-    m_treeWidget->setAlternatingRowColors(true);
+    // Keep every row on the same background.  Alternating rows are especially
+    // distracting with the application's dark palette on Windows.
+    m_treeWidget->setAlternatingRowColors(false);
     m_treeWidget->setUniformRowHeights(true);
     m_treeWidget->setTextElideMode(Qt::ElideRight);
     m_treeWidget->setRootIsDecorated(true);
@@ -260,6 +263,10 @@ void SessionsSidebar::saveSessions() {
     SessionManager::saveSessions(m_sessions);
 }
 
+void SessionsSidebar::saveCurrentOrder() {
+    onSessionsReordered();
+}
+
 QTreeWidgetItem* SessionsSidebar::findSessionItem(const QString& id) const {
     const int top = m_treeWidget->topLevelItemCount();
     for (int i = 0; i < top; ++i) {
@@ -317,8 +324,8 @@ void SessionsSidebar::onDeleteSession() {
     if (id.isEmpty())
         return;
 
-    auto result = QMessageBox::question(this, tr("Delete Session"), tr("Are you sure you want to delete this session?"),
-                                        QMessageBox::Yes | QMessageBox::No);
+    auto result = localizedQuestion(this, tr("Delete Session"), tr("Are you sure you want to delete this session?"),
+                                    QMessageBox::Yes | QMessageBox::No);
     if (result == QMessageBox::Yes) {
         for (int i = 0; i < m_sessions.size(); ++i) {
             if (m_sessions[i].id == id) {

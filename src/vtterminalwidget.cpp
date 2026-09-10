@@ -766,6 +766,23 @@ void VtTerminalWidget::keyPressEvent(QKeyEvent* e) {
     if (m_cursorBlinkTimer)
         m_cursorBlinkTimer->start(500);
 
+    // Handle terminal clipboard shortcuts before translating Ctrl+key into
+    // control characters.  Otherwise Ctrl+Shift+C/V are reduced to Ctrl+C/V
+    // and reach the shell as ^C/^V instead of performing the UI action.
+    const Qt::KeyboardModifiers modifiers = e->modifiers();
+    const bool clipboardShortcut = (modifiers & Qt::ControlModifier) && (modifiers & Qt::ShiftModifier) &&
+                                   !(modifiers & Qt::AltModifier) && !(modifiers & Qt::MetaModifier);
+    if (clipboardShortcut && e->key() == Qt::Key_C) {
+        copyClipboard();
+        e->accept();
+        return;
+    }
+    if (clipboardShortcut && e->key() == Qt::Key_V) {
+        pasteClipboard();
+        e->accept();
+        return;
+    }
+
     QByteArray out;
 
     switch (e->key()) {

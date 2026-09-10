@@ -5,14 +5,19 @@
 #include <QPushButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
+#include <QTreeView>
+#include <QFileSystemModel>
+#include <QSplitter>
 #include <QLabel>
 #include <QProgressBar>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QMessageBox>
+#include "localizedmessagebox.h"
 #include <QMenu>
 #include <QHeaderView>
 #include <QIcon>
+#include <QFont>
 #include <QDir>
 #include <QFileInfo>
 #include <QDesktopServices>
@@ -104,61 +109,116 @@ protected:
     }
 };
 
+// Local counterpart of SftpTreeWidget.  The QFileSystemModel keeps the native
+// file metadata, while this MIME payload lets the remote pane recognize a
+// drag without depending on platform-specific file URLs.
+class SftpLocalTreeView : public QTreeView {
+public:
+    using QTreeView::QTreeView;
+
+protected:
+    void startDrag(Qt::DropActions supportedActions) override {
+        Q_UNUSED(supportedActions);
+        if (!selectionModel())
+            return;
+
+        auto* model = qobject_cast<QFileSystemModel*>(this->model());
+        if (!model)
+            return;
+
+        QJsonArray paths;
+        const QModelIndexList indexes = selectionModel()->selectedRows(0);
+        for (const QModelIndex& index : indexes) {
+            const QString path = model->filePath(index);
+            if (!path.isEmpty())
+                paths.append(path);
+        }
+        if (paths.isEmpty())
+            return;
+
+        auto* mime = new QMimeData;
+        mime->setData("application/x-banchoxterm-sftp-local",
+                      QJsonDocument(paths).toJson(QJsonDocument::Compact));
+        mime->setUrls([&paths]() {
+            QList<QUrl> urls;
+            for (const QJsonValue& value : paths)
+                urls.append(QUrl::fromLocalFile(value.toString()));
+            return urls;
+        }());
+
+        auto* drag = new QDrag(this);
+        drag->setMimeData(mime);
+        drag->exec(Qt::CopyAction);
+    }
+};
+
 SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(10, 10, 10, 10);
     mainLayout->setSpacing(8);
 
-    auto* titleLabel = new QLabel(tr("SFTP FILES"), this);
-    mainLayout->addWidget(titleLabel);
+    auto* remotePanel = new QWidget(this);
+    auto* remoteLayout = new QVBoxLayout(remotePanel);
+    remoteLayout->setContentsMargins(0, 0, 0, 0);
+    remoteLayout->setSpacing(6);
+
+    auto* titleLabel = new QLabel(tr("Remote files"), remotePanel);
+    titleLabel->setObjectName("sftpPaneTitle");
+    QFont titleFont = titleLabel->font();
+    titleFont.setCapitalization(QFont::AllUppercase);
+    titleLabel->setFont(titleFont);
+    remoteLayout->addWidget(titleLabel);
 
     auto* navLayout = new QHBoxLayout();
     navLayout->setSpacing(4);
 
-    m_upBtn = new QPushButton(QIcon(":/icons/up.svg"), "", this);
+    m_upBtn = new QPushButton(QIcon(":/icons/up.svg"), "", remotePanel);
     m_upBtn->setToolTip(tr("Go to parent directory"));
     m_upBtn->setFixedWidth(32);
     navLayout->addWidget(m_upBtn);
 
-    m_pathEdit = new QLineEdit(this);
+    m_pathEdit = new QLineEdit(remotePanel);
+    m_pathEdit->setObjectName("remotePathEdit");
     m_pathEdit->setPlaceholderText("/");
     navLayout->addWidget(m_pathEdit);
 
-    m_refreshBtn = new QPushButton(QIcon(":/icons/refresh.svg"), "", this);
+    m_refreshBtn = new QPushButton(QIcon(":/icons/refresh.svg"), "", remotePanel);
     m_refreshBtn->setToolTip(tr("Refresh folder"));
     m_refreshBtn->setFixedWidth(32);
     navLayout->addWidget(m_refreshBtn);
 
-    mainLayout->addLayout(navLayout);
+    remoteLayout->addLayout(navLayout);
 
     auto* toolsLayout = new QHBoxLayout();
     toolsLayout->setSpacing(6);
 
-    m_uploadBtn = new QPushButton(QIcon(":/icons/upload.svg"), tr("Upload"), this);
+    m_uploadBtn = new QPushButton(QIcon(":/icons/upload.svg"), tr("Upload"), remotePanel);
     toolsLayout->addWidget(m_uploadBtn);
 
-    m_uploadDirBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("Upload Folder"), this);
+    m_uploadDirBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("Upload Folder"), remotePanel);
     toolsLayout->addWidget(m_uploadDirBtn);
 
-    mainLayout->addLayout(toolsLayout);
+    remoteLayout->addLayout(toolsLayout);
 
     auto* fileOpsLayout = new QHBoxLayout();
     fileOpsLayout->setSpacing(6);
 
-    m_newFolderBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("New Folder"), this);
+    m_newFolderBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("New Folder"), remotePanel);
     fileOpsLayout->addWidget(m_newFolderBtn);
 
-    m_renameBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Rename"), this);
+    m_renameBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Rename"), remotePanel);
     fileOpsLayout->addWidget(m_renameBtn);
 
-    m_chmodBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Permissions"), this);
+    m_chmodBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Permissions"), remotePanel);
     fileOpsLayout->addWidget(m_chmodBtn);
 
-    mainLayout->addLayout(fileOpsLayout);
+    remoteLayout->addLayout(fileOpsLayout);
 
-    m_treeWidget = new SftpTreeWidget(this);
+    m_treeWidget = new SftpTreeWidget(remotePanel);
     m_treeWidget->setHeaderLabels({tr("Name"), tr("Size"), tr("Modified")});
     m_treeWidget->setRootIsDecorated(false);
+    m_treeWidget->setAlternatingRowColors(false);
+    m_treeWidget->setObjectName("sftpTree");
     m_treeWidget->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_treeWidget->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_treeWidget->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
@@ -169,22 +229,97 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     m_treeWidget->setDragDropMode(QAbstractItemView::DragDrop);
     m_treeWidget->setDropIndicatorShown(true);
     m_treeWidget->viewport()->installEventFilter(this);
-    mainLayout->addWidget(m_treeWidget);
+    remoteLayout->addWidget(m_treeWidget);
 
-    m_progressLabel = new QLabel(this);
+    auto* fileSplitter = new QSplitter(Qt::Vertical, this);
+    m_fileSplitter = fileSplitter;
+    fileSplitter->setObjectName("sftpFileSplitter");
+
+    auto* localPanel = new QWidget(fileSplitter);
+    auto* localLayout = new QVBoxLayout(localPanel);
+    localLayout->setContentsMargins(0, 4, 0, 0);
+    auto* localTitle = new QLabel(tr("Local files"), localPanel);
+    localTitle->setObjectName("sftpPaneTitle");
+    QFont localTitleFont = localTitle->font();
+    localTitleFont.setCapitalization(QFont::AllUppercase);
+    localTitle->setFont(localTitleFont);
+    localLayout->addWidget(localTitle);
+
+    auto* localPathLayout = new QHBoxLayout();
+    localPathLayout->setSpacing(4);
+    auto* localPathIcon = new QLabel(localPanel);
+    localPathIcon->setPixmap(QIcon(":/icons/folder.svg").pixmap(16, 16));
+    localPathLayout->addWidget(localPathIcon);
+    m_localPathEdit = new QLineEdit(localPanel);
+    m_localPathEdit->setObjectName("localPathEdit");
+    m_localPathEdit->setPlaceholderText(tr("Local path"));
+    m_localPathEdit->setText(QDir::homePath());
+    localPathLayout->addWidget(m_localPathEdit);
+    localLayout->addLayout(localPathLayout);
+
+    m_localTree = new SftpLocalTreeView(localPanel);
+    m_localTree->setObjectName("localFileTree");
+    m_localTree->setHeaderHidden(false);
+    m_localTree->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_localTree->setDragEnabled(true);
+    m_localTree->setAcceptDrops(true);
+    m_localTree->setDragDropMode(QAbstractItemView::DragDrop);
+    m_localTree->setDropIndicatorShown(true);
+    m_localModel = new QFileSystemModel(m_localTree);
+    m_localModel->setRootPath(QDir::homePath());
+    m_localModel->setHeaderData(0, Qt::Horizontal, tr("Name"));
+    m_localModel->setHeaderData(1, Qt::Horizontal, tr("Size"));
+    m_localModel->setHeaderData(3, Qt::Horizontal, tr("Modified"));
+    m_localTree->setModel(m_localModel);
+    m_localTree->setRootIndex(m_localModel->index(QDir::homePath()));
+    m_localTree->hideColumn(2); // Type is not shown in the remote pane.
+    for (int column = 4; column < m_localModel->columnCount(); ++column)
+        m_localTree->hideColumn(column);
+    m_localTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_localTree->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_localTree->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_localTree->viewport()->installEventFilter(this);
+    localLayout->addWidget(m_localTree);
+
+    fileSplitter->addWidget(remotePanel);
+    fileSplitter->addWidget(localPanel);
+    fileSplitter->setStretchFactor(0, 2);
+    fileSplitter->setStretchFactor(1, 1);
+    QSettings layoutSettings;
+    if (layoutSettings.contains("sftp/fileSplitter"))
+        fileSplitter->restoreState(layoutSettings.value("sftp/fileSplitter").toByteArray());
+    mainLayout->addWidget(fileSplitter);
+
+    connect(m_localPathEdit, &QLineEdit::returnPressed, this, [this]() {
+        const QString path = QDir::fromNativeSeparators(m_localPathEdit->text().trimmed());
+        if (QFileInfo(path).isDir()) {
+            m_localTree->setRootIndex(m_localModel->setRootPath(QDir::toNativeSeparators(path)));
+            m_localPathEdit->setText(QDir::toNativeSeparators(path));
+        }
+    });
+    connect(m_localTree, &QTreeView::doubleClicked, this, [this](const QModelIndex& index) {
+        if (!m_localModel || !m_localModel->isDir(index))
+            return;
+        const QString path = m_localModel->filePath(index);
+        m_localTree->setRootIndex(m_localModel->setRootPath(path));
+        m_localPathEdit->setText(QDir::toNativeSeparators(path));
+    });
+
+    m_progressLabel = new QLabel(remotePanel);
     m_progressLabel->hide();
-    mainLayout->addWidget(m_progressLabel);
+    remoteLayout->addWidget(m_progressLabel);
 
-    m_progressBar = new QProgressBar(this);
+    m_progressBar = new QProgressBar(remotePanel);
     m_progressBar->setTextVisible(false);
     m_progressBar->setFixedHeight(6);
     m_progressBar->setRange(0, 100);
     m_progressBar->setValue(0);
     m_progressBar->hide();
-    mainLayout->addWidget(m_progressBar);
+    remoteLayout->addWidget(m_progressBar);
 
-    m_statusLabel = new QLabel(tr("Disconnected"), this);
-    mainLayout->addWidget(m_statusLabel);
+    m_statusLabel = new QLabel(tr("Disconnected"), remotePanel);
+    m_statusLabel->setObjectName("sftpStatus");
+    remoteLayout->addWidget(m_statusLabel);
 
     m_upBtn->setEnabled(false);
     m_pathEdit->setEnabled(false);
@@ -212,7 +347,15 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
 }
 
 SftpSidebar::~SftpSidebar() {
+    saveLayout();
     detachConnection();
+}
+
+void SftpSidebar::saveLayout() {
+    if (!m_fileSplitter)
+        return;
+    QSettings settings;
+    settings.setValue("sftp/fileSplitter", m_fileSplitter->saveState());
 }
 
 void SftpSidebar::setConnection(SshConnection* connection) {
@@ -677,8 +820,8 @@ void SftpSidebar::onDeleteClicked() {
         remotePath += "/";
     remotePath += name;
 
-    auto result = QMessageBox::question(this, tr("Delete File"), tr("Are you sure you want to delete '%1'?").arg(name),
-                                        QMessageBox::Yes | QMessageBox::No);
+    auto result = localizedQuestion(this, tr("Delete File"), tr("Are you sure you want to delete '%1'?").arg(name),
+                                    QMessageBox::Yes | QMessageBox::No);
     if (result == QMessageBox::Yes) {
         m_statusLabel->setText(tr("Deleting %1...").arg(name));
         emit requestDelete(remotePath, isDir);
@@ -883,14 +1026,24 @@ void SftpSidebar::enqueueDownload(const QStringList& remotePaths) {
     if (destDir.isEmpty())
         return;
 
+    enqueueDownloadTo(remotePaths, destDir);
+}
+
+void SftpSidebar::enqueueDownloadTo(const QStringList& remotePaths, const QString& destinationDir) {
+    if (!m_isConnected || destinationDir.isEmpty())
+        return;
+
     int added = 0;
     for (const QString& remotePath : remotePaths) {
         QString fileName = QFileInfo(remotePath).fileName();
-        QString localPath = destDir + "/" + fileName;
+        if (fileName.isEmpty())
+            fileName = remotePath.section('/', -1);
+        QString localPath = QDir(destinationDir).filePath(fileName);
         int n = 1;
         while (QFile::exists(localPath)) {
             QFileInfo fi(remotePath);
-            localPath = destDir + "/" + fi.completeBaseName() + QString(" (%1).").arg(n) + fi.suffix();
+            const QString suffix = fi.suffix().isEmpty() ? QString() : "." + fi.suffix();
+            localPath = QDir(destinationDir).filePath(fi.completeBaseName() + QString(" (%1)").arg(n) + suffix);
             ++n;
         }
 
@@ -982,6 +1135,10 @@ bool SftpSidebar::eventFilter(QObject* watched, QEvent* event) {
                 dragEvent->acceptProposedAction();
                 return true;
             }
+            if (mime->hasFormat("application/x-banchoxterm-sftp-local")) {
+                dragEvent->acceptProposedAction();
+                return true;
+            }
             if (mime->hasUrls()) {
                 bool localOnly = true;
                 const QList<QUrl> urls = mime->urls();
@@ -999,6 +1156,19 @@ bool SftpSidebar::eventFilter(QObject* watched, QEvent* event) {
         } else if (event->type() == QEvent::Drop) {
             auto* dropEvent = static_cast<QDropEvent*>(event);
             const QMimeData* mime = dropEvent->mimeData();
+            if (mime->hasFormat("application/x-banchoxterm-sftp-local")) {
+                const QByteArray payload = mime->data("application/x-banchoxterm-sftp-local");
+                const QJsonArray arr = QJsonDocument::fromJson(payload).array();
+                QStringList localPaths;
+                for (const QJsonValue& value : arr) {
+                    if (!value.toString().isEmpty())
+                        localPaths.append(value.toString());
+                }
+                if (!localPaths.isEmpty())
+                    enqueueUpload(localPaths);
+                dropEvent->acceptProposedAction();
+                return true;
+            }
             if (mime->hasFormat("application/x-banchoxterm-sftp-remote")) {
                 const QByteArray payload = mime->data("application/x-banchoxterm-sftp-remote");
                 const QJsonArray arr = QJsonDocument::fromJson(payload).array();
@@ -1019,6 +1189,35 @@ bool SftpSidebar::eventFilter(QObject* watched, QEvent* event) {
                 }
                 if (!localPaths.isEmpty())
                     enqueueUpload(localPaths);
+                dropEvent->acceptProposedAction();
+                return true;
+            }
+        }
+    } else if (watched == m_localTree->viewport()) {
+        if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
+            auto* dragEvent = static_cast<QDropEvent*>(event);
+            if (dragEvent->mimeData()->hasFormat("application/x-banchoxterm-sftp-remote")) {
+                dragEvent->acceptProposedAction();
+                return true;
+            }
+        } else if (event->type() == QEvent::Drop) {
+            auto* dropEvent = static_cast<QDropEvent*>(event);
+            const QMimeData* mime = dropEvent->mimeData();
+            if (mime->hasFormat("application/x-banchoxterm-sftp-remote")) {
+                const QByteArray payload = mime->data("application/x-banchoxterm-sftp-remote");
+                const QJsonArray arr = QJsonDocument::fromJson(payload).array();
+                QStringList remotePaths;
+                for (const QJsonValue& value : arr) {
+                    if (!value.toString().isEmpty())
+                        remotePaths.append(value.toString());
+                }
+
+                QString destinationDir = m_localModel->filePath(m_localTree->rootIndex());
+                const QModelIndex target = m_localTree->indexAt(dropEvent->position().toPoint());
+                if (target.isValid() && m_localModel->isDir(target))
+                    destinationDir = m_localModel->filePath(target);
+                if (!remotePaths.isEmpty() && !destinationDir.isEmpty())
+                    enqueueDownloadTo(remotePaths, destinationDir);
                 dropEvent->acceptProposedAction();
                 return true;
             }

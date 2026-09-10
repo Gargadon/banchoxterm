@@ -8,6 +8,14 @@
     <file>icons/font.svg</file>
     <file>icons/multiinput.svg</file>
     <file>icons/theme.svg</file>
+    <file>icons/palette.svg</file>
+    <file>icons/copy.svg</file>
+    <file>icons/paste.svg</file>
+    <file>icons/macros.svg</file>
+    <file>icons/split.svg</file>
+    <file>icons/grid.svg</file>
+    <file>icons/move.svg</file>
+    <file>icons/detach.svg</file>
     <file>icons/add.svg</file>
     <file>icons/refresh.svg</file>
     <file>icons/up.svg</file>

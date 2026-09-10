@@ -12,16 +12,19 @@ class QToolButton;
 class QFrame;
 class QSplitter;
 class QGridLayout;
+class QHBoxLayout;
 class QWidget;
 class QComboBox;
 class QLabel;
 class QAction;
 class QMenu;
 class QSettings;
+class QToolBar;
 class SessionsSidebar;
 class SftpSidebar;
 class TerminalTab;
 class QMainWindow;
+class QEvent;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -61,6 +64,7 @@ private:
     void setupMenuBar();
     void applyThemeMode(const QString& mode);
     void rebuildMacrosMenu();
+    void rebuildMacrosRibbon();
     TerminalTab* currentTerminalTab() const;
     QTabWidget* activePane() const;
     QTabWidget* otherPane(QTabWidget* pane) const;
@@ -70,7 +74,10 @@ private:
     void saveOpenTabs(QSettings& settings) const;
     void restoreOpenTabs(const QSettings& settings);
     void updateSessionContext();
+    void updateWelcomeScreen();
     void reattachDetachedTabs();
+    void setRibbonExpanded(bool expanded);
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
     QSplitter* m_mainSplitter;
 
@@ -90,6 +97,13 @@ private:
     QTabWidget* m_tabWidget3 = nullptr;
     QTabWidget* m_tabWidget4 = nullptr;
     QTabWidget* m_activePane = nullptr;
+    QWidget* m_welcomeWidget = nullptr;
+    QTabWidget* m_ribbonTabs = nullptr;
+    QToolBar* m_ribbonToolBar = nullptr;
+    QToolButton* m_ribbonToggle = nullptr;
+    bool m_ribbonPinned = true;
+    QWidget* m_macrosRibbonPage = nullptr;
+    QHBoxLayout* m_macrosRibbonLayout = nullptr;
     int m_paneLayoutMode = 0; // 0 = single, 1 = split, 2 = 2x2 grid
 
     QWidget* m_multiInputBar;

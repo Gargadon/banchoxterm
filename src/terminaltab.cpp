@@ -23,6 +23,7 @@
 #include <QKeyEvent>
 #include <QShortcut>
 #include <QFile>
+#include <QFileDialog>
 #include <QDateTime>
 #include <QDir>
 #include <QStandardPaths>
@@ -99,6 +100,11 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         m_terminal->setScrollBarPosition(QTermWidget::ScrollBarRight);
 
         m_terminal->setContextMenuPolicy(Qt::CustomContextMenu);
+        // QTermWidget forwards keyboard input through an internal child
+        // widget, so filtering only m_terminal would miss the focused view.
+        // Install at application level and limit handling to this terminal's
+        // widget hierarchy.
+        qApp->installEventFilter(this);
         connect(m_terminal, &QWidget::customContextMenuRequested, this, &TerminalTab::showTerminalContextMenu);
         connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
         connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
@@ -144,12 +150,14 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                 feedTerminalData(tr("\r\n[Serial error: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
                 m_isActive = false;
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+                showStoppedPrompt();
             });
             if (!m_serialPort->open(QIODevice::ReadWrite)) {
                 feedTerminalData(
                     tr("\r\n[Unable to open serial port: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
                 m_isActive = false;
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+                showStoppedPrompt();
             }
 #else
             QString tool = m_session.serialCmd;
@@ -332,6 +340,7 @@ void TerminalTab::applyTerminalSize(int rows, int cols) {
                                  .toUtf8());
             m_isActive = false;
             emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+            showStoppedPrompt();
             return;
         }
         startConPtyPolling();
@@ -393,6 +402,7 @@ void TerminalTab::pollConPtyOutput() {
         m_isActive = false;
         feedTerminalData(tr("\r\n[Process exited with code %1]\r\n").arg(exitCode).toUtf8());
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+        showStoppedPrompt();
     }
 }
 
@@ -456,12 +466,14 @@ void TerminalTab::setupSshTerminal() {
         m_isActive = false;
         feedTerminalData(tr("\r\n[Connection closed]\r\n").toUtf8());
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+        showStoppedPrompt();
         maybeScheduleReconnect();
     });
     connect(m_connection, &SshConnection::connectionFailed, this, [this](const QString& error) {
         feedTerminalData(tr("\r\n[Connection failed: %1]\r\n").arg(error).toUtf8());
         m_isActive = false;
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+        showStoppedPrompt();
         maybeScheduleReconnect();
     });
 
@@ -472,6 +484,25 @@ void TerminalTab::setupSshTerminal() {
 }
 
 void TerminalTab::onSendData(const char* data, int size) {
+    if (!m_isActive) {
+        const QByteArray input(data, size);
+        for (const char ch : input) {
+            if (ch == '\r' || ch == '\n') {
+                emit exitRequested();
+                return;
+            }
+            if (ch == 'r' || ch == 'R') {
+                requestReconnect();
+                return;
+            }
+            if (ch == 's' || ch == 'S') {
+                saveTerminalOutput();
+                return;
+            }
+        }
+        return;
+    }
+
     if (m_connection && m_session.type == SessionType::SSH) {
         QMetaObject::invokeMethod(m_connection, "sendToShell", Qt::QueuedConnection,
                                   Q_ARG(QByteArray, QByteArray(data, size)));
@@ -554,6 +585,7 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
 void TerminalTab::onTerminalFinished() {
     m_isActive = false;
     emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+    showStoppedPrompt();
     maybeScheduleReconnect();
 }
 
@@ -648,6 +680,41 @@ void TerminalTab::requestReconnect() {
     if (m_reconnectButton)
         m_reconnectButton->setEnabled(false);
     emit reconnectRequested(m_session);
+}
+
+void TerminalTab::showStoppedPrompt() {
+    if (m_stopPromptShown || !m_terminal)
+        return;
+
+    m_stopPromptShown = true;
+    feedTerminalData((QByteArray("\r\n\x1b[38;5;214m")
+                      + tr("Session stopped\r\n").toUtf8()
+                      + tr(" - Press <return> to exit tab\r\n").toUtf8()
+                      + tr(" - Press R to restart session\r\n").toUtf8()
+                      + tr(" - Press S to save terminal output to file\r\n").toUtf8()
+                      + QByteArray("\x1b[0m")));
+}
+
+void TerminalTab::saveTerminalOutput() {
+    if (m_outputBuffer.isEmpty())
+        return;
+
+    QString safeName = m_session.name;
+    safeName.replace(QRegularExpression("[^A-Za-z0-9_-]"), "_");
+    if (safeName.isEmpty())
+        safeName = QStringLiteral("terminal");
+
+    const QString path = QFileDialog::getSaveFileName(
+        this, tr("Save Terminal Output"),
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/" + safeName + ".log",
+        tr("Text files (*.txt *.log);;All files (*)"));
+    if (path.isEmpty())
+        return;
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+    file.write(m_outputBuffer);
 }
 
 #ifdef BANCHO_HAVE_RDP_AX
@@ -889,6 +956,29 @@ void TerminalTab::onSearchPrev() {
     // QTermWidget provides its own search bar (Ctrl+F); no programmatic search.
 }
 
+bool TerminalTab::eventFilter(QObject* watched, QEvent* event) {
+    if (m_terminal && event->type() == QEvent::KeyPress) {
+        auto* widget = qobject_cast<QWidget*>(watched);
+        if (widget && (widget == m_terminal || m_terminal->isAncestorOf(widget))) {
+            auto* keyEvent = static_cast<QKeyEvent*>(event);
+            const Qt::KeyboardModifiers modifiers = keyEvent->modifiers();
+            const bool clipboardShortcut = (modifiers & Qt::ControlModifier) && (modifiers & Qt::ShiftModifier) &&
+                                           !(modifiers & Qt::AltModifier) && !(modifiers & Qt::MetaModifier);
+            if (clipboardShortcut && keyEvent->key() == Qt::Key_C) {
+                doCopy();
+                keyEvent->accept();
+                return true;
+            }
+            if (clipboardShortcut && keyEvent->key() == Qt::Key_V) {
+                doPaste();
+                keyEvent->accept();
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void TerminalTab::sendInputText(const QString& text) {
     doSendText(text + "\n");
 }
@@ -926,6 +1016,8 @@ bool TerminalTab::hasSelection() const {
 }
 
 void TerminalTab::feedTerminalData(const QByteArray& data) {
+    if (!data.isEmpty())
+        m_outputBuffer.append(data);
     if (m_terminal) {
         m_terminal->feedData(data);
     }

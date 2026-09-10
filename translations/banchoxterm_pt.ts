@@ -109,6 +109,152 @@
 <context>
     <name>MainWindow</name>
     <message>
+        <source>Session</source>
+        <translation>Sessão</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="349"/>
+        <source>View</source>
+        <translation>Visualização</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="365"/>
+        <source>Tools</source>
+        <translation>Ferramentas</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="389"/>
+        <source>Macros</source>
+        <translation>Macros</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="378"/>
+        <source>Help</source>
+        <translation>Ajuda</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="407"/>
+        <source>Collapse Ribbon</source>
+        <translation>Recolher Ribbon</translation>
+    </message>
+    <message>
+        <source>Keep Ribbon expanded</source>
+        <translation>Manter Ribbon expandido</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="415"/>
+        <source>Expand Ribbon</source>
+        <translation>Expandir Ribbon</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="375"/>
+        <source>Search</source>
+        <translation>Buscar</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="376"/>
+        <source>Find in all sessions</source>
+        <translation>Buscar em todas as sessões</translation>
+    </message>
+    <message>
+        <source>Copy selection (Ctrl+Shift+C)</source>
+        <translation>Copiar seleção (Ctrl+Shift+C)</translation>
+    </message>
+    <message>
+        <source>Paste (Ctrl+Shift+V)</source>
+        <translation>Colar (Ctrl+Shift+V)</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="382"/>
+        <source>Theme</source>
+        <translation>Tema</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="383"/>
+        <source>Toggle light and dark theme</source>
+        <translation>Alternar tema claro e escuro</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="389"/>
+        <source>MACROS</source>
+        <translation>MACROS</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="349"/>
+        <source>HELP</source>
+        <translation>AJUDA</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="330"/>
+        <source>Exit</source>
+        <translation>Sair</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="331"/>
+        <source>Close BanchoXterm</source>
+        <translation>Fechar o BanchoXterm</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="343"/>
+        <source>Detach</source>
+        <translation>Desanexar</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="344"/>
+        <source>Detach current tab</source>
+        <translation>Desanexar a aba atual</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="358"/>
+        <source>Clear</source>
+        <translation>Limpar</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="359"/>
+        <source>Clear terminal scrollback</source>
+        <translation>Limpar o histórico do terminal</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="365"/>
+        <source>About</source>
+        <translation>Sobre</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="368"/>
+        <source>Updates</source>
+        <translation>Atualizações</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="246"/>
+        <source>SESSION</source>
+        <translation>SESSÃO</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="263"/>
+        <source>VIEW</source>
+        <translation>VISUALIZAÇÃO</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="280"/>
+        <source>TOOLS</source>
+        <translation>FERRAMENTAS</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="405"/>
+        <source>Recent sessions</source>
+        <translation>Sessões recentes</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="382"/>
+        <source>Welcome to BanchoXterm</source>
+        <translation>Bem-vindo ao BanchoXterm</translation>
+    </message>
+    <message>
+        <location filename="../src/mainwindow.cpp" line="387"/>
+        <source>Open a saved session or start a new terminal to begin.</source>
+        <translation>Abra uma sessão salva ou inicie um novo terminal para começar.</translation>
+    </message>
+    <message>
         <source>  Settings</source>
         <translation type="vanished">  Configurações</translation>
     </message>
@@ -1451,6 +1597,29 @@ Command:
 <context>
     <name>SftpSidebar</name>
     <message>
+        <source>Remote files</source>
+        <translation>Arquivos remotos</translation>
+    </message>
+    <message>
+        <source>Local files</source>
+        <translation>Arquivos locais</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="153"/>
+        <source>Local path</source>
+        <translation>Caminho local</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="171"/>
+        <source>LOCAL FILES</source>
+        <translation>ARQUIVOS LOCAIS</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="186"/>
+        <source>REMOTE FILES</source>
+        <translation>ARQUIVOS REMOTOS</translation>
+    </message>
+    <message>
         <location filename="../src/sftpsidebar.cpp" line="112"/>
         <source>SFTP FILES</source>
         <translation>ARQUIVOS SFTP</translation>
@@ -1787,6 +1956,49 @@ Tem certeza de que deseja continuar conectando e lembrar desta chave?</translati
 </context>
 <context>
     <name>TerminalTab</name>
+    <message>
+        <location filename="../src/terminaltab.cpp" line="686"/>
+        <source>Session stopped<byte value="xd"/>
+</source>
+        <translation>Sessão interrompida<byte value="xd"/>
+</translation>
+    </message>
+    <message>
+        <location filename="../src/terminaltab.cpp" line="687"/>
+        <source> - Press &lt;return&gt; to exit tab<byte value="xd"/>
+</source>
+        <translation> - Pressione &lt;Enter&gt; para fechar a aba<byte value="xd"/>
+</translation>
+    </message>
+    <message>
+        <location filename="../src/terminaltab.cpp" line="688"/>
+        <source> - Press R to restart session<byte value="xd"/>
+</source>
+        <translation> - Pressione R para reiniciar a sessão<byte value="xd"/>
+</translation>
+    </message>
+    <message>
+        <location filename="../src/terminaltab.cpp" line="689"/>
+        <source> - Press S to save terminal output to file<byte value="xd"/>
+</source>
+        <translation> - Pressione S para salvar a saída do terminal em um arquivo<byte value="xd"/>
+</translation>
+    </message>
+    <message>
+        <location filename="../src/terminaltab.cpp" line="703"/>
+        <source>Save Terminal Output</source>
+        <translation>Salvar saída do terminal</translation>
+    </message>
+    <message>
+        <location filename="../src/terminaltab.cpp" line="707"/>
+        <source>Text files (*.txt *.log);;All files (*)</source>
+        <translation>Arquivos de texto (*.txt *.log);;Todos os arquivos (*)</translation>
+    </message>
+    <message>
+        <location filename="../src/terminaltab.cpp" line="681"/>
+        <source>Reconnect</source>
+        <translation>Reconectar</translation>
+    </message>
     <message>
         <source>%1 session to %2 launched in an external window.
 
@@ -2151,4 +2363,23 @@ Versão atual: %2</translation>
         <translation>Falha na conexão VNC</translation>
     </message>
 </context>
+  <context>
+    <name>QMessageBox</name>
+    <message>
+      <source>Yes</source>
+      <translation>Sim</translation>
+    </message>
+    <message>
+      <source>No</source>
+      <translation>Não</translation>
+    </message>
+    <message>
+      <source>OK</source>
+      <translation>OK</translation>
+    </message>
+    <message>
+      <source>Cancel</source>
+      <translation>Cancelar</translation>
+    </message>
+  </context>
 </TS>

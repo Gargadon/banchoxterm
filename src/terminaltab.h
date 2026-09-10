@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
 #include <QProcess>
+#include <QByteArray>
 #include "session.h"
 
 class QTermWidget;
@@ -14,6 +15,7 @@ class QPushButton;
 class QCheckBox;
 class ConPty;
 class QFile;
+class QEvent;
 class QAxWidget;
 class VncClientWidget;
 class QSerialPort;
@@ -61,6 +63,7 @@ public:
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
     void tabFinished();
@@ -68,6 +71,7 @@ signals:
     void remoteDirChanged(const QString& dir);
     void reconnectRequested(const Session& session);
     void closeRequested();
+    void exitRequested();
 
 private slots:
     void onTerminalFinished();
@@ -94,6 +98,8 @@ private:
     void logData(const QByteArray& data);
     void maybeScheduleReconnect();
     void requestReconnect();
+    void showStoppedPrompt();
+    void saveTerminalOutput();
     void applyTerminalSize(int rows, int cols);
     void feedTerminalData(const QByteArray& data);
     QWidget* terminalView() const;
@@ -129,6 +135,8 @@ private:
     QString m_pendingShell;
 #endif
     bool m_isActive = true;
+    bool m_stopPromptShown = false;
+    QByteArray m_outputBuffer;
 
     QFrame* m_searchFrame = nullptr;
     QLineEdit* m_searchEdit = nullptr;

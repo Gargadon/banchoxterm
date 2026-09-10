@@ -17,6 +17,7 @@
 #include <QCryptographicHash>
 #include <QApplication>
 #include <QMessageBox>
+#include "localizedmessagebox.h"
 #include <QInputDialog>
 
 #ifdef Q_OS_WIN
@@ -291,6 +292,7 @@ bool SshConnection::promptHostKey(const QString& host, const QString& fingerprin
         box.setText(text);
         box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
         box.setDefaultButton(QMessageBox::No);
+        localizeMessageBoxButtons(box);
         accept = (box.exec() == QMessageBox::Yes);
     };
 

@@ -34,9 +34,9 @@ Ya implementado:
       `direct-tcpip`, conservando SFTP, shell, túneles y monitorización.
 - [x] **Keyboard-interactive / 2FA**: `libssh2_userauth_keyboard_interactive`
       con diálogo de prompts (OTP/MFA) en `SshConnection`.
-- [ ] **X server en Windows**: X11 forwarding permite conectar con un servidor
-      X externo en `127.0.0.1:6000` (VcXsrv/X410/Xming); pendiente empaquetar o
-      integrar una opción open-source de X server en la distribución.
+- [x] **X server en Windows**: BanchoXterm detecta o inicia VcXsrv como proceso
+      externo en `127.0.0.1:6000`, con rutas separadas para builds x64 y ARM64;
+      X410/Xming siguen siendo proveedores externos compatibles.
 - [x] **FTP/FTPS**: cliente pasivo con navegación, subida, descarga, borrado,
       creación y renombrado; FTPS explícito con validación de certificado es el
       modo predeterminado y FTP plano queda como compatibilidad opt-in.
@@ -176,8 +176,10 @@ con componentes libres y una arquitectura mantenible.
   antes de ejecutar el artefacto descargado.
 - [ ] Firmar instalador y ejecutables, publicar checksums y generar SBOM por
   release.
-- [ ] Paquete de herramientas opcionales (por ejemplo, X server) separado del
-  núcleo para no mezclar licencias ni elevar el tamaño de la instalación.
+- [x] Paquete opcional de X server separado del núcleo: VcXsrv se distribuye
+  como companion process bajo `xservers/vcxsrv-x64` o `xservers/vcxsrv-arm64`,
+  sin enlazarlo en `banchoxterm.exe`; el empaquetado lo incluye solo cuando se
+  proporciona el bundle correspondiente.
 - [ ] Actualizaciones con rollback y canal estable/preview.
 
 ### Criterio de salida de la inversión 3

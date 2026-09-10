@@ -10,12 +10,14 @@
 #include <QGridLayout>
 #include <QSplitter>
 #include <QTabWidget>
+#include <QTabBar>
 #include <QStackedWidget>
 #include <QToolButton>
 #include <QFrame>
 #include <QPushButton>
 #include <QLabel>
 #include <QIcon>
+#include <QFont>
 #include <QApplication>
 #include <QPalette>
 #include <QStyle>
@@ -33,7 +35,10 @@
 #include <QLineEdit>
 #include <QComboBox>
 #include <QCloseEvent>
+#include <QEvent>
+#include <QMouseEvent>
 #include <QMessageBox>
+#include "localizedmessagebox.h"
 #include <QMenu>
 #include <QSize>
 #include <functional>
@@ -116,6 +121,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         m_themeMode = "system";
     setupUi();
     applyThemeMode(m_themeMode);
+    m_ribbonPinned = settings.value("window/ribbonPinned", true).toBool();
+    setRibbonExpanded(m_ribbonPinned);
 
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this]() {
         if (m_themeMode == "system") {
@@ -167,11 +174,11 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     }
 
     if (hasActive) {
-        QMessageBox::StandardButton res =
-            QMessageBox::question(this, tr("Exit BanchoXterm"),
-                                  tr("You have active terminal connections. Are you sure you want to disconnect all "
-                                     "sessions and close the application?"),
-                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        QMessageBox::StandardButton res = localizedQuestion(
+            this, tr("Exit BanchoXterm"),
+            tr("You have active terminal connections. Are you sure you want to disconnect all sessions and close the "
+               "application?"),
+            QMessageBox::Yes | QMessageBox::No);
         if (res != QMessageBox::Yes) {
             event->ignore();
             return;
@@ -184,12 +191,16 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     // child recursively in an unspecified order.
     reattachDetachedTabs();
 
+    m_sessionsSidebar->saveCurrentOrder();
+    m_sftpSidebar->saveLayout();
+
     QSettings settings;
     settings.setValue("window/geometry", saveGeometry());
     settings.setValue("window/state", saveState());
     settings.setValue("window/splitter", m_mainSplitter->saveState());
     settings.setValue("window/tabLayoutMode", m_paneLayoutMode);
     settings.setValue("window/activePane", qMax(0, visiblePanes().indexOf(activePane())));
+    settings.setValue("window/ribbonPinned", m_ribbonPinned);
     saveOpenTabs(settings);
     QMainWindow::closeEvent(event);
 }
@@ -236,9 +247,26 @@ void MainWindow::setupUi() {
     auto* toolBar = addToolBar(tr("Main Toolbar"));
     toolBar->setObjectName("mainToolBar");
     toolBar->setMovable(false);
-    toolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    toolBar->setIconSize(QSize(16, 16));
+    toolBar->setFloatable(false);
+    toolBar->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    toolBar->setIconSize(QSize(22, 22));
+    toolBar->setFixedHeight(78);
+    toolBar->setContentsMargins(8, 3, 8, 3);
 
+    auto addToolbarSection = [toolBar](const QString& title) {
+        auto* label = new QLabel(title, toolBar);
+        label->setObjectName("toolbarSectionLabel");
+        label->setAlignment(Qt::AlignCenter);
+        QFont font = label->font();
+        font.setPointSize(qMax(8, font.pointSize() - 1));
+        font.setBold(true);
+        label->setFont(font);
+        label->setMinimumWidth(58);
+        label->setContentsMargins(6, 0, 6, 0);
+        toolBar->addWidget(label);
+    };
+
+    addToolbarSection(tr("SESSION"));
     auto* newRemoteAction = toolBar->addAction(QIcon(":/icons/add.svg"), tr("New Session"));
     newRemoteAction->setToolTip(tr("Create a new remote session"));
     connect(newRemoteAction, &QAction::triggered, this, [this]() {
@@ -253,20 +281,22 @@ void MainWindow::setupUi() {
 
     toolBar->addSeparator();
 
-    auto* splitAction = toolBar->addAction(QIcon(":/icons/chevron-right.svg"), tr("Split"));
+    addToolbarSection(tr("VIEW"));
+    auto* splitAction = toolBar->addAction(QIcon(":/icons/split.svg"), tr("Split"));
     splitAction->setToolTip(tr("Toggle split view"));
     connect(splitAction, &QAction::triggered, this, &MainWindow::toggleSplitView);
 
-    auto* gridAction = toolBar->addAction(QIcon(":/icons/folder.svg"), tr("Grid"));
+    auto* gridAction = toolBar->addAction(QIcon(":/icons/grid.svg"), tr("Grid"));
     gridAction->setToolTip(tr("Toggle 2x2 grid view"));
     connect(gridAction, &QAction::triggered, this, &MainWindow::toggleGridView);
 
-    auto* moveAction = toolBar->addAction(QIcon(":/icons/chevron-right.svg"), tr("Move"));
+    auto* moveAction = toolBar->addAction(QIcon(":/icons/move.svg"), tr("Move"));
     moveAction->setToolTip(tr("Move the current tab to another pane"));
     connect(moveAction, &QAction::triggered, this, &MainWindow::moveTabToOtherPane);
 
     toolBar->addSeparator();
 
+    addToolbarSection(tr("TOOLS"));
     auto* multiAction = toolBar->addAction(QIcon(":/icons/multiinput.svg"), tr("Multi-Input"));
     multiAction->setCheckable(true);
     multiAction->setToolTip(tr("Send input to all terminal sessions"));
@@ -276,23 +306,172 @@ void MainWindow::setupUi() {
     auto* settingsAction = toolBar->addAction(QIcon(":/icons/gear.svg"), tr("Settings"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onOpenSettings);
 
+    const QList<QAction*> ribbonActions = {newRemoteAction, localAction, splitAction, gridAction,
+                                           moveAction, multiAction, settingsAction};
+    for (QAction* action : ribbonActions) {
+        if (auto* button = qobject_cast<QToolButton*>(toolBar->widgetForAction(action))) {
+            button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+            button->setMinimumWidth(78);
+            button->setMinimumHeight(66);
+            button->setAutoRaise(true);
+        }
+    }
+
+    // Replace the traditional menu bar with a tabbed Ribbon.  The original
+    // menus remain as the source of the shared actions and keyboard shortcuts,
+    // while the Ribbon provides the primary mouse-oriented interface.
+    menuBar()->setVisible(false);
+    const QList<QAction*> persistentRibbonActions = {newRemoteAction, localAction, splitAction, gridAction,
+                                                     moveAction, multiAction, settingsAction};
+    for (QAction* action : persistentRibbonActions)
+        action->setParent(this);
+    removeToolBar(toolBar);
+    toolBar->deleteLater();
+
+    auto* ribbonToolBar = addToolBar(tr("Ribbon"));
+    m_ribbonToolBar = ribbonToolBar;
+    ribbonToolBar->setObjectName("ribbonToolBar");
+    ribbonToolBar->setMovable(false);
+    ribbonToolBar->setFloatable(false);
+    ribbonToolBar->setContentsMargins(4, 0, 4, 0);
+    ribbonToolBar->setFixedHeight(98);
+
+    auto* ribbonTabs = new QTabWidget(ribbonToolBar);
+    ribbonTabs->setObjectName("ribbonTabs");
+    ribbonTabs->setDocumentMode(true);
+    ribbonTabs->setTabPosition(QTabWidget::North);
+
+    auto makeRibbonPage = [ribbonTabs](const QString& title) {
+        auto* page = new QWidget(ribbonTabs);
+        auto* layout = new QHBoxLayout(page);
+        layout->setContentsMargins(8, 3, 8, 3);
+        layout->setSpacing(5);
+        layout->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        ribbonTabs->addTab(page, title);
+        return qMakePair(page, layout);
+    };
+
+    auto addRibbonAction = [this](QHBoxLayout* layout, QAction* action) {
+        auto* button = new QToolButton(layout->parentWidget());
+        button->setDefaultAction(action);
+        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        button->setIconSize(QSize(20, 20));
+        button->setMinimumSize(76, 61);
+        button->setAutoRaise(true);
+        layout->addWidget(button);
+        connect(action, &QAction::triggered, this, [this]() {
+            if (!m_ribbonPinned)
+                setRibbonExpanded(false);
+        });
+    };
+
+    auto sessionPage = makeRibbonPage(tr("Session"));
+    addRibbonAction(sessionPage.second, newRemoteAction);
+    addRibbonAction(sessionPage.second, localAction);
+    auto* exitRibbonAction = new QAction(QIcon(":/icons/close.svg"), tr("Exit"), this);
+    exitRibbonAction->setToolTip(tr("Close BanchoXterm"));
+    connect(exitRibbonAction, &QAction::triggered, this, &QWidget::close);
+    addRibbonAction(sessionPage.second, exitRibbonAction);
+
+    auto viewPage = makeRibbonPage(tr("View"));
+    addRibbonAction(viewPage.second, splitAction);
+    addRibbonAction(viewPage.second, gridAction);
+    addRibbonAction(viewPage.second, moveAction);
+    auto* detachRibbonAction = new QAction(QIcon(":/icons/detach.svg"), tr("Detach"), this);
+    detachRibbonAction->setToolTip(tr("Detach current tab"));
+    connect(detachRibbonAction, &QAction::triggered, this, &MainWindow::detachCurrentTab);
+    addRibbonAction(viewPage.second, detachRibbonAction);
+
+    auto toolsPage = makeRibbonPage(tr("Tools"));
+    addRibbonAction(toolsPage.second, multiAction);
+    addRibbonAction(toolsPage.second, settingsAction);
+    addRibbonAction(toolsPage.second, m_copyAction);
+    addRibbonAction(toolsPage.second, m_pasteAction);
+    auto* clearRibbonAction = new QAction(QIcon(":/icons/delete.svg"), tr("Clear"), this);
+    clearRibbonAction->setToolTip(tr("Clear terminal scrollback"));
+    connect(clearRibbonAction, &QAction::triggered, this, [this]() {
+        if (auto* tab = currentTerminalTab())
+            tab->clearTerminal();
+    });
+    addRibbonAction(toolsPage.second, clearRibbonAction);
+
+    auto* searchRibbonAction = new QAction(QIcon(":/icons/server.svg"), tr("Search"), this);
+    searchRibbonAction->setToolTip(tr("Find in all sessions"));
+    searchRibbonAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
+    connect(searchRibbonAction, &QAction::triggered, this, &MainWindow::onGlobalSearch);
+    addRibbonAction(toolsPage.second, searchRibbonAction);
+
+    auto* themeRibbonAction = new QAction(QIcon(":/icons/palette.svg"), tr("Theme"), this);
+    themeRibbonAction->setToolTip(tr("Toggle light and dark theme"));
+    connect(themeRibbonAction, &QAction::triggered, this, &MainWindow::toggleTheme);
+    addRibbonAction(toolsPage.second, themeRibbonAction);
+
+    auto macrosPage = makeRibbonPage(tr("Macros"));
+    m_macrosRibbonPage = macrosPage.first;
+    m_macrosRibbonLayout = macrosPage.second;
+    rebuildMacrosRibbon();
+
+    auto helpPage = makeRibbonPage(tr("Help"));
+    auto* aboutRibbonAction = new QAction(QIcon(":/icons/logo.svg"), tr("About"), this);
+    connect(aboutRibbonAction, &QAction::triggered, this, &MainWindow::showAbout);
+    addRibbonAction(helpPage.second, aboutRibbonAction);
+    auto* updateRibbonAction = new QAction(QIcon(":/icons/refresh.svg"), tr("Updates"), this);
+    connect(updateRibbonAction, &QAction::triggered, this, [this]() { Updater::checkForUpdates(this); });
+    addRibbonAction(helpPage.second, updateRibbonAction);
+
+    ribbonTabs->setFixedHeight(94);
+
+    auto* sessionContext = new QWidget(ribbonTabs);
+    sessionContext->setObjectName("sessionContextWidget");
+    auto* sessionContextLayout = new QHBoxLayout(sessionContext);
+    sessionContextLayout->setContentsMargins(6, 0, 8, 0);
+    sessionContextLayout->setSpacing(6);
+    m_contextProtocolLabel = new QLabel(tr("NO SESSION"), sessionContext);
+    m_contextProtocolLabel->setObjectName("sessionContextProtocol");
+    m_contextSessionLabel = new QLabel(tr("Open a session to begin"), sessionContext);
+    m_contextSessionLabel->setObjectName("sessionContextSession");
+    sessionContextLayout->addWidget(m_contextProtocolLabel);
+    sessionContextLayout->addWidget(m_contextSessionLabel);
+    auto* statusContext = new QWidget(ribbonTabs);
+    statusContext->setObjectName("statusContextWidget");
+    auto* statusContextLayout = new QHBoxLayout(statusContext);
+    statusContextLayout->setContentsMargins(8, 0, 2, 0);
+    statusContextLayout->setSpacing(14);
+    statusContextLayout->addWidget(sessionContext);
+    m_contextStateLabel = new QLabel(statusContext);
+    m_contextStateLabel->setObjectName("sessionContextState");
+    m_contextStateLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_contextStateLabel->setMinimumWidth(78);
+    statusContextLayout->addWidget(m_contextStateLabel);
+
+    auto* ribbonToggle = new QToolButton(ribbonToolBar);
+    m_ribbonToggle = ribbonToggle;
+    ribbonToggle->setObjectName("ribbonToggleButton");
+    ribbonToggle->setIcon(QIcon(":/icons/chevron-up.svg"));
+    ribbonToggle->setToolTip(tr("Collapse Ribbon"));
+    ribbonToggle->setAutoRaise(true);
+    ribbonToggle->setFixedSize(28, 28);
+    statusContextLayout->addWidget(ribbonToggle);
+    ribbonTabs->setCornerWidget(statusContext, Qt::TopRightCorner);
+    connect(ribbonToggle, &QToolButton::clicked, this, [this]() {
+        m_ribbonPinned = !m_ribbonPinned;
+        setRibbonExpanded(m_ribbonPinned);
+        m_ribbonToggle->setToolTip(m_ribbonPinned ? tr("Collapse Ribbon") : tr("Keep Ribbon expanded"));
+    });
+    connect(ribbonTabs, &QTabWidget::currentChanged, this, [this]() {
+        if (!m_ribbonPinned)
+            setRibbonExpanded(true);
+    });
+    connect(ribbonTabs->tabBar(), &QTabBar::tabBarClicked, this, [this](int) {
+        if (!m_ribbonPinned)
+            setRibbonExpanded(true);
+    });
+    ribbonToolBar->addWidget(ribbonTabs);
+    m_ribbonTabs = ribbonTabs;
+    qApp->installEventFilter(this);
+
     auto* paletteShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_K), this);
     connect(paletteShortcut, &QShortcut::activated, this, &MainWindow::showCommandPalette);
-
-    m_sessionContextBar = new QFrame(centralWidget);
-    m_sessionContextBar->setFrameShape(QFrame::StyledPanel);
-    m_sessionContextBar->setFixedHeight(30);
-    auto* contextLayout = new QHBoxLayout(m_sessionContextBar);
-    contextLayout->setContentsMargins(8, 2, 8, 2);
-    contextLayout->setSpacing(10);
-    m_contextProtocolLabel = new QLabel(tr("NO SESSION"), m_sessionContextBar);
-    m_contextSessionLabel = new QLabel(tr("Open a session to begin"), m_sessionContextBar);
-    m_contextStateLabel = new QLabel(m_sessionContextBar);
-    m_contextStateLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    contextLayout->addWidget(m_contextProtocolLabel);
-    contextLayout->addWidget(m_contextSessionLabel, 1);
-    contextLayout->addWidget(m_contextStateLabel);
-    mainLayout->addWidget(m_sessionContextBar);
 
     // Main splitter
     m_mainSplitter = new QSplitter(Qt::Horizontal, centralWidget);
@@ -359,6 +538,9 @@ void MainWindow::setupUi() {
         auto* pane = new QTabWidget(m_tabSplitter);
         pane->setTabsClosable(true);
         pane->setMovable(true);
+        pane->setDocumentMode(true);
+        pane->tabBar()->setExpanding(false);
+        pane->tabBar()->setElideMode(Qt::ElideRight);
         return pane;
     };
     m_tabWidget = createPane();
@@ -371,11 +553,81 @@ void MainWindow::setupUi() {
     m_tabGrid->addWidget(m_tabWidget4, 1, 1);
     m_tabGrid->setRowStretch(0, 1);
     m_tabGrid->setColumnStretch(0, 1);
+
+    m_welcomeWidget = new QWidget(m_tabSplitter);
+    m_welcomeWidget->setObjectName("welcomeScreen");
+    auto* welcomeLayout = new QVBoxLayout(m_welcomeWidget);
+    welcomeLayout->setContentsMargins(30, 30, 30, 30);
+    welcomeLayout->setSpacing(12);
+    welcomeLayout->setAlignment(Qt::AlignCenter);
+
+    auto* welcomeTitle = new QLabel(tr("Welcome to BanchoXterm"), m_welcomeWidget);
+    welcomeTitle->setObjectName("welcomeTitle");
+    welcomeTitle->setAlignment(Qt::AlignCenter);
+    welcomeLayout->addWidget(welcomeTitle);
+
+    auto* welcomeSubtitle = new QLabel(tr("Open a saved session or start a new terminal to begin."), m_welcomeWidget);
+    welcomeSubtitle->setObjectName("welcomeSubtitle");
+    welcomeSubtitle->setAlignment(Qt::AlignCenter);
+    welcomeSubtitle->setWordWrap(true);
+    welcomeLayout->addWidget(welcomeSubtitle);
+
+    auto* welcomeActions = new QHBoxLayout();
+    welcomeActions->setSpacing(8);
+    auto* welcomeRemoteButton = new QPushButton(QIcon(":/icons/add.svg"), tr("New Session"), m_welcomeWidget);
+    welcomeRemoteButton->setObjectName("primaryButton");
+    auto* welcomeLocalButton = new QPushButton(QIcon(":/icons/terminal.svg"), tr("Local Terminal"), m_welcomeWidget);
+    welcomeLocalButton->setObjectName("sidebarAction");
+    welcomeActions->addWidget(welcomeRemoteButton);
+    welcomeActions->addWidget(welcomeLocalButton);
+    welcomeLayout->addLayout(welcomeActions);
+
+    auto* recentTitle = new QLabel(tr("Recent sessions"), m_welcomeWidget);
+    recentTitle->setObjectName("welcomeSectionTitle");
+    recentTitle->setAlignment(Qt::AlignCenter);
+    welcomeLayout->addWidget(recentTitle);
+
+    const QList<Session> savedSessions = SessionManager::loadSessions();
+    const QStringList recentNames = QSettings().value("sessions/recent").toStringList();
+    int recentCount = 0;
+    for (const QString& recentName : recentNames) {
+        for (const Session& recentSession : savedSessions) {
+            if (recentSession.name != recentName)
+                continue;
+            auto* recentButton = new QPushButton(
+                recentSession.favorite ? QStringLiteral("★  %1").arg(recentName) : recentName, m_welcomeWidget);
+            recentButton->setObjectName("welcomeRecentButton");
+            recentButton->setIcon(QIcon(recentSession.type == SessionType::SSH ? ":/icons/server.svg"
+                                                                                : ":/icons/terminal.svg"));
+            recentButton->setToolTip(QStringLiteral("%1@%2:%3")
+                                         .arg(recentSession.user, recentSession.host)
+                                         .arg(recentSession.port));
+            welcomeLayout->addWidget(recentButton, 0, Qt::AlignHCenter);
+            connect(recentButton, &QPushButton::clicked, this,
+                    [this, recentSession]() { onConnectSession(recentSession); });
+            if (++recentCount >= 5)
+                break;
+        }
+        if (recentCount >= 5)
+            break;
+    }
+    recentTitle->setVisible(recentCount > 0);
+
+    m_tabGrid->addWidget(m_welcomeWidget, 0, 0, 2, 2);
+
+    connect(welcomeRemoteButton, &QPushButton::clicked, this, [this]() {
+        SessionDialog dialog(this);
+        if (dialog.exec() == QDialog::Accepted)
+            onConnectSession(dialog.getSession());
+    });
+    connect(welcomeLocalButton, &QPushButton::clicked, this, &MainWindow::onNewLocalTerminal);
+
     m_tabWidget2->hide();
     m_tabWidget3->hide();
     m_tabWidget4->hide();
     m_activePane = m_tabWidget;
     m_mainSplitter->addWidget(m_tabSplitter);
+    updateWelcomeScreen();
 
     m_statusConnectionLabel = new QLabel(tr("Ready"), this);
     statusBar()->addWidget(m_statusConnectionLabel, 1);
@@ -489,8 +741,8 @@ void MainWindow::setupUi() {
     m_remoteMonitorWidget->setVisible(false);
     statusBar()->addPermanentWidget(m_remoteMonitorWidget);
 
-    // Open an initial local terminal tab
-    onNewLocalTerminal();
+    // Start with an empty workspace.  The welcome screen is the bootstrap
+    // view; a local terminal is opened only when the user requests it.
     updateSessionContext();
 }
 
@@ -537,7 +789,13 @@ void MainWindow::onConnectSession(const Session& session) {
         pane->setTabIcon(index, QIcon(":/icons/terminal.svg"));
     }
 
+    const QString endpoint = session.type == SessionType::Local
+                                 ? session.shellPath
+                                 : QStringLiteral("%1@%2:%3").arg(session.user, session.host).arg(session.port);
+    pane->setTabToolTip(index, endpoint.isEmpty() ? session.name : endpoint);
+
     pane->setCurrentIndex(index);
+    updateWelcomeScreen();
     updateSessionContext();
 
     // Auto-reconnect: when a session drops and asks to reconnect, swap this tab
@@ -549,11 +807,22 @@ void MainWindow::onConnectSession(const Session& session) {
     // dialog (closeEvent) decides whether to actually quit.
     connect(tab, &TerminalTab::closeRequested, this, [this]() { close(); });
 
+    connect(tab, &TerminalTab::exitRequested, this, [this, tab, pane]() {
+        const int tabIndex = pane->indexOf(tab);
+        if (tabIndex >= 0)
+            onTabCloseRequested(pane, tabIndex);
+    });
+
     // Connect title updates
     connect(tab, &TerminalTab::titleChanged, this, [this, tab, pane](const QString& title) {
         int idx = pane->indexOf(tab);
         if (idx != -1 && !title.isEmpty()) {
             pane->setTabText(idx, title);
+            const bool disconnected = title.startsWith(tr("[Closed]"));
+            pane->tabBar()->setTabTextColor(idx, disconnected ? QColor("#e06c75") : QColor("#36b37e"));
+            if (m_statusConnectionLabel)
+                m_statusConnectionLabel->setText(title);
+            statusBar()->showMessage(title, 3000);
             if (pane == activePane() && idx == pane->currentIndex()) {
                 setWindowTitle(QString("BanchoXterm - %1").arg(title));
             }
@@ -568,6 +837,7 @@ void MainWindow::updateSessionContext() {
         m_contextProtocolLabel->setText(tr("NO SESSION"));
         m_contextSessionLabel->setText(tr("Open a session to begin"));
         m_contextStateLabel->clear();
+        m_contextStateLabel->setStyleSheet(QString());
         if (m_statusConnectionLabel)
             m_statusConnectionLabel->setText(tr("Ready"));
         return;
@@ -589,6 +859,8 @@ void MainWindow::updateSessionContext() {
     m_contextProtocolLabel->setText(sessionTypeName(session.type));
     m_contextSessionLabel->setText(QStringLiteral("%1  ·  %2").arg(session.name, endpoint));
     m_contextStateLabel->setText(active ? tr("Connected") : tr("Disconnected"));
+    m_contextStateLabel->setStyleSheet(active ? QStringLiteral("color: #36b37e; font-weight: 600;")
+                                               : QStringLiteral("color: #e06c75; font-weight: 600;"));
     if (m_statusConnectionLabel)
         m_statusConnectionLabel->setText(QStringLiteral("%1  |  %2").arg(sessionTypeName(session.type), endpoint));
 }
@@ -597,10 +869,10 @@ void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {
     auto* tab = qobject_cast<TerminalTab*>(pane->widget(index));
     if (tab) {
         if (tab->isSessionActive()) {
-            QMessageBox::StandardButton res = QMessageBox::question(
+            QMessageBox::StandardButton res = localizedQuestion(
                 this, tr("Close Session"),
                 tr("This connection is still active. Are you sure you want to disconnect and close this tab?"),
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                QMessageBox::Yes | QMessageBox::No);
             if (res != QMessageBox::Yes) {
                 return; // User canceled
             }
@@ -613,6 +885,7 @@ void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {
         // Defer destruction until pending signals and timers finish their
         // current event-loop iteration.
         tab->deleteLater();
+        updateWelcomeScreen();
         updateSessionContext();
     }
 }
@@ -655,6 +928,20 @@ void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
     }
 }
 
+void MainWindow::updateWelcomeScreen() {
+    if (!m_welcomeWidget)
+        return;
+
+    bool hasSession = false;
+    for (QTabWidget* pane : visiblePanes()) {
+        if (pane->count() > 0) {
+            hasSession = true;
+            break;
+        }
+    }
+    m_welcomeWidget->setVisible(!hasSession);
+}
+
 void MainWindow::onNewLocalTerminal() {
     Session localSession;
     localSession.name = tr("Local Shell");
@@ -674,24 +961,44 @@ void MainWindow::toggleTheme() {
 void MainWindow::applyThemeMode(const QString& mode) {
     m_themeMode = mode;
     QPalette palette = m_systemPalette;
-    if (mode == "light" || mode == "dark") {
-        const bool wantDark = mode == "dark";
-        const bool isDark = palette.color(QPalette::Window).lightness() < 128;
-        if (wantDark != isDark) {
-            const auto transform = [wantDark](const QColor& color) {
-                return wantDark ? color.darker(180) : color.lighter(180);
-            };
-            palette.setColor(QPalette::Window, transform(palette.color(QPalette::Window)));
-            palette.setColor(QPalette::Base, transform(palette.color(QPalette::Base)));
-            palette.setColor(QPalette::AlternateBase, transform(palette.color(QPalette::AlternateBase)));
-            palette.setColor(QPalette::Button, transform(palette.color(QPalette::Button)));
-            palette.setColor(QPalette::Text, transform(palette.color(QPalette::Text)));
-            palette.setColor(QPalette::WindowText, transform(palette.color(QPalette::WindowText)));
-            palette.setColor(QPalette::ButtonText, transform(palette.color(QPalette::ButtonText)));
-            palette.setColor(QPalette::PlaceholderText, transform(palette.color(QPalette::PlaceholderText)));
-        }
+    if (mode == "light") {
+        palette = QPalette(QColor("#f5f6f8"));
+        palette.setColor(QPalette::Window, QColor("#f5f6f8"));
+        palette.setColor(QPalette::Base, Qt::white);
+        palette.setColor(QPalette::AlternateBase, QColor("#f5f6f8"));
+        palette.setColor(QPalette::Button, QColor("#e9ebef"));
+        palette.setColor(QPalette::Text, QColor("#1d2430"));
+        palette.setColor(QPalette::WindowText, QColor("#1d2430"));
+        palette.setColor(QPalette::ButtonText, QColor("#1d2430"));
+        palette.setColor(QPalette::PlaceholderText, QColor("#687386"));
+        palette.setColor(QPalette::Highlight, QColor("#2f6fed"));
+        palette.setColor(QPalette::HighlightedText, Qt::white);
+    } else if (mode == "dark") {
+        palette = QPalette(QColor("#202124"));
+        palette.setColor(QPalette::Window, QColor("#202124"));
+        palette.setColor(QPalette::Base, QColor("#17181b"));
+        palette.setColor(QPalette::AlternateBase, QColor("#17181b"));
+        palette.setColor(QPalette::Button, QColor("#2b2d31"));
+        palette.setColor(QPalette::Text, QColor("#e7e9ed"));
+        palette.setColor(QPalette::WindowText, QColor("#e7e9ed"));
+        palette.setColor(QPalette::ButtonText, QColor("#e7e9ed"));
+        palette.setColor(QPalette::PlaceholderText, QColor("#9aa3b2"));
+        palette.setColor(QPalette::Highlight, QColor("#3d75d6"));
+        palette.setColor(QPalette::HighlightedText, Qt::white);
     }
     qApp->setPalette(mode == "system" ? m_systemPalette : palette);
+
+    // Fusion is used for consistent rendering across platforms.  Re-polish
+    // existing widgets as well; Windows otherwise keeps parts of the previous
+    // palette until the next native style refresh.
+    if (QStyle* style = qApp->style()) {
+        const auto widgets = QApplication::allWidgets();
+        for (QWidget* widget : widgets) {
+            style->unpolish(widget);
+            style->polish(widget);
+            widget->update();
+        }
+    }
 }
 
 void MainWindow::onOpenSettings() {
@@ -865,11 +1172,17 @@ void MainWindow::setupMenuBar() {
     auto* editMenu = menuBar()->addMenu(tr("&Edit"));
 
     m_copyAction = editMenu->addAction(tr("&Copy"));
+    m_copyAction->setIcon(QIcon(":/icons/copy.svg"));
     m_copyAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+    m_copyAction->setToolTip(tr("Copy selection (Ctrl+Shift+C)"));
+    m_copyAction->setStatusTip(tr("Copy selection (Ctrl+Shift+C)"));
     connect(m_copyAction, &QAction::triggered, this, &MainWindow::onCopy);
 
     m_pasteAction = editMenu->addAction(tr("&Paste"));
+    m_pasteAction->setIcon(QIcon(":/icons/paste.svg"));
     m_pasteAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+    m_pasteAction->setToolTip(tr("Paste (Ctrl+Shift+V)"));
+    m_pasteAction->setStatusTip(tr("Paste (Ctrl+Shift+V)"));
     connect(m_pasteAction, &QAction::triggered, this, &MainWindow::onPaste);
 
     editMenu->addSeparator();
@@ -1125,6 +1438,11 @@ void MainWindow::restoreOpenTabs(const QSettings& settings) {
     }
     if (restored.isEmpty())
         m_activePane = visiblePanes().first();
+
+    // Restoring an empty workspace removes the last tab after setupUi() has
+    // already initialized the welcome overlay. Refresh it explicitly so the
+    // empty initial state is visible on the first application launch too.
+    updateWelcomeScreen();
 }
 
 void MainWindow::toggleSplitView() {
@@ -1223,6 +1541,7 @@ void MainWindow::rebuildMacrosMenu() {
     } else {
         for (int i = 0; i < names.size() && i < texts.size(); ++i) {
             QAction* act = m_macrosMenu->addAction(names[i]);
+            act->setIcon(QIcon(":/icons/macros.svg"));
             connect(act, &QAction::triggered, this, [this, texts, i]() {
                 auto* tab = currentTerminalTab();
                 if (tab)
@@ -1233,7 +1552,53 @@ void MainWindow::rebuildMacrosMenu() {
 
     m_macrosMenu->addSeparator();
     auto* manageAct = m_macrosMenu->addAction(tr("Manage Macros..."));
+    manageAct->setIcon(QIcon(":/icons/gear.svg"));
     connect(manageAct, &QAction::triggered, this, &MainWindow::onManageMacros);
+    rebuildMacrosRibbon();
+}
+
+void MainWindow::rebuildMacrosRibbon() {
+    if (!m_macrosRibbonLayout || !m_macrosMenu)
+        return;
+
+    while (QLayoutItem* item = m_macrosRibbonLayout->takeAt(0)) {
+        if (QWidget* widget = item->widget())
+            widget->deleteLater();
+        delete item;
+    }
+
+    for (QAction* action : m_macrosMenu->actions()) {
+        if (action->isSeparator())
+            continue;
+        auto* button = new QToolButton(m_macrosRibbonPage);
+        button->setDefaultAction(action);
+        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        button->setIconSize(QSize(20, 20));
+        button->setMinimumSize(76, 61);
+        button->setAutoRaise(true);
+        m_macrosRibbonLayout->addWidget(button);
+    }
+    m_macrosRibbonLayout->addStretch();
+}
+
+void MainWindow::setRibbonExpanded(bool expanded) {
+    if (!m_ribbonTabs || !m_ribbonToolBar || !m_ribbonToggle)
+        return;
+
+    m_ribbonTabs->setFixedHeight(expanded ? 94 : 30);
+    m_ribbonToolBar->setFixedHeight(expanded ? 98 : 30);
+    m_ribbonToggle->setIcon(QIcon(expanded ? ":/icons/chevron-up.svg" : ":/icons/chevron-down.svg"));
+    m_ribbonToggle->setToolTip(m_ribbonPinned ? tr("Collapse Ribbon") : tr("Keep Ribbon expanded"));
+}
+
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (!m_ribbonPinned && m_ribbonToolBar && m_ribbonTabs && event->type() == QEvent::MouseButtonPress) {
+        auto* widget = qobject_cast<QWidget*>(watched);
+        if (widget && !m_ribbonToolBar->isAncestorOf(widget) && widget != m_ribbonToolBar) {
+            setRibbonExpanded(false);
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::onManageMacros() {

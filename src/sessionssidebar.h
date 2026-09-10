@@ -13,6 +13,7 @@ class SessionsSidebar : public QWidget {
     Q_OBJECT
 public:
     explicit SessionsSidebar(QWidget* parent = nullptr);
+    void saveCurrentOrder();
 
 signals:
     void connectSession(const Session& session);
