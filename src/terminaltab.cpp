@@ -420,6 +420,11 @@ void TerminalTab::setupLocalTerminal() {
     if (shell.isEmpty())
         shell = "cmd.exe";
 
+    // ConPTY expects DEL for the interactive erase character.  QTermWidget's
+    // default keymap emits BS, which cmd/PowerShell can interpret as a control
+    // operation instead of deleting a single character.
+    if (QTermWidget::availableKeyBindings().contains(QStringLiteral("linux")))
+        m_terminal->setKeyBindings(QStringLiteral("linux"));
     m_terminal->startExternal();
 
     // Defer ConPTY start until the widget reports its real size.
