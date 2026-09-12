@@ -51,6 +51,7 @@ Thumbs.db
 *.kdev4
 
 # Qt Creator
+.qtcreator/
 *.autosave
 *.creator.user
 
