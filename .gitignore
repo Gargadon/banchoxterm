@@ -96,6 +96,9 @@ vcpkg_installed/
 conanbuild/
 _packages/
 
+# Cygwin installer download cache (URL-encoded mirror directory)
+https%3a%2f%2fmirrors.kernel.org%2fsourceware%2fcygwin%2f/
+
 # Temp files
 *.tmp
 *.temp
