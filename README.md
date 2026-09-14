@@ -64,6 +64,11 @@ use an installed X server such as Xming or X410.
 - C++17 compiler (GCC, Clang, or MSVC)
 - Qt 6.6+ (Core, Widgets, Gui, Network, Test, LinguistTools)
 - [libssh2](https://www.libssh2.org) — fetched automatically by CMake (FetchContent)
+- Linux password storage: `secret-tool` (`libsecret-tools` on Debian/Ubuntu,
+  `libsecret` on Fedora). This is a runtime dependency.
+- Optional Linux keyring providers (choose one if your desktop does not already
+  provide a Secret Service): GNOME Keyring (`gnome-keyring`) or KDE KWallet
+  with Secret Service support enabled. Neither replaces `secret-tool`.
 
 > QTermWidget is compiled directly from the vendored `third_party/qtermwidget`
 > submodule on every platform (same fork, same emulator code on Linux and
@@ -71,16 +76,25 @@ use an installed X server such as Xming or X410.
 
 ### Linux
 
+Saving and retrieving passwords requires a running Secret Service provider in
+the user's desktop session. Use the desktop's existing provider, or install
+GNOME Keyring or a KWallet version with Secret Service support (KWallet package
+names vary by distribution and KDE version). These are alternative providers;
+installing both is not required. For GNOME Keyring, use
+`sudo apt install gnome-keyring` on Debian/Ubuntu or
+`sudo dnf install gnome-keyring` on Fedora, and ensure it is running in your
+desktop session.
+
 ```bash
 # Install dependencies (Ubuntu/Debian)
 sudo apt install build-essential cmake ninja-build \
   qt6-base-dev qt6-serialport-dev qt6-tools-dev qt6-tools-dev-tools \
-  libssl-dev zlib1g-dev
+  libssl-dev zlib1g-dev libsecret-tools
 
 # Install dependencies (Fedora)
 sudo dnf install cmake ninja-build \
   qt6-qtbase-devel qt6-qtserialport-devel qt6-qttools-devel \
-  openssl-devel zlib-devel
+  openssl-devel zlib-devel libsecret
 
 # Build
 cmake -B build -G Ninja

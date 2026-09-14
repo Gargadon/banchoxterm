@@ -84,8 +84,8 @@ bool storePassword(const QString& sessionId, const QString& password) {
         return false;
     }
 
-    process.write(storedPassword.toUtf8());
-    process.write("\n");
+    QByteArray passwordData = storedPassword.toUtf8();
+    process.write(passwordData);
     process.closeWriteChannel();
 
     if (!process.waitForFinished(3000)) {
@@ -107,7 +107,11 @@ QString lookupPassword(const QString& sessionId) {
         return "";
     }
 
-    QString password = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    QString password = QString::fromUtf8(process.readAllStandardOutput());
+    // Remove only the newline appended by secret-tool, preserving password whitespace.
+    if (password.endsWith(QLatin1Char('\n'))) {
+        password.chop(1);
+    }
     if (password.startsWith("BANCHO:")) {
         return MasterPasswordManager::instance().decryptPassword(password);
     }

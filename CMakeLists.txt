@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(banchoxterm VERSION 1.1.0 LANGUAGES C CXX)
+project(banchoxterm VERSION 1.1.1 LANGUAGES C CXX)
 
 option(BANCHO_ENABLE_ASAN "Enable AddressSanitizer for memory debugging" OFF)
 option(BANCHO_ENABLE_IPO "Enable interprocedural optimization for release builds" ON)
