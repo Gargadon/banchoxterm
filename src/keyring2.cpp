@@ -83,11 +83,13 @@ bool storePassword(const QString& sessionId, const QString& password) {
     if (!process.waitForStarted(2000)) {
         return false;
     }
-
+// - Esto fue lo que modifique. Puedes revisarlo con calma porque esto lo genero Gemini y no se de C++ - //
     QByteArray passwordData = storedPassword.toUtf8();
     process.write(passwordData);
+    process.waitForBytesWritten(1000);
+    //process.write("\n");
     process.closeWriteChannel();
-
+// - Fin de la modificacion - //
     if (!process.waitForFinished(3000)) {
         process.kill();
         return false;
@@ -107,11 +109,7 @@ QString lookupPassword(const QString& sessionId) {
         return "";
     }
 
-    QString password = QString::fromUtf8(process.readAllStandardOutput());
-    // Remove only the newline appended by secret-tool, preserving password whitespace.
-    if (password.endsWith(QLatin1Char('\n'))) {
-        password.chop(1);
-    }
+    QString password = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
     if (password.startsWith("BANCHO:")) {
         return MasterPasswordManager::instance().decryptPassword(password);
     }
