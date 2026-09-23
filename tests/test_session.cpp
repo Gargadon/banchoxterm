@@ -1042,6 +1042,9 @@ private slots:
     }
 
     void testMainWindowTabLifecycle() {
+#ifdef Q_OS_WIN
+        QSKIP("The local process lifecycle test uses the Unix /bin/true command.");
+#endif
         MainWindow window;
         window.show();
         QTest::qWait(100);
