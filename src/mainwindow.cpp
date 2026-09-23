@@ -1222,14 +1222,13 @@ void MainWindow::applyThemeMode(const QString& mode) {
     const QString checkboxBorder = darkCheckboxTheme ? QStringLiteral("#9aa3b2") : QStringLiteral("#687386");
     const QString checkboxBackground = darkCheckboxTheme ? QStringLiteral("#202124") : QStringLiteral("#ffffff");
     const QString checkboxChecked = darkCheckboxTheme ? QStringLiteral("#3d75d6") : QStringLiteral("#2f6fed");
-    qApp->setStyleSheet(QStringLiteral(
-                            "QCheckBox::indicator {"
-                            " width: 16px; height: 16px; border: 1px solid %1;"
-                            " border-radius: 3px; background: %2; }"
-                            "QCheckBox::indicator:hover { border: 2px solid %3; }"
-                            "QCheckBox::indicator:checked { background: %3; border: 1px solid %3;"
-                            " image: url(:/icons/check-white.svg); }"
-                            "QCheckBox::indicator:disabled { opacity: 0.55; }")
+    qApp->setStyleSheet(QStringLiteral("QCheckBox::indicator {"
+                                       " width: 16px; height: 16px; border: 1px solid %1;"
+                                       " border-radius: 3px; background: %2; }"
+                                       "QCheckBox::indicator:hover { border: 2px solid %3; }"
+                                       "QCheckBox::indicator:checked { background: %3; border: 1px solid %3;"
+                                       " image: url(:/icons/check-white.svg); }"
+                                       "QCheckBox::indicator:disabled { opacity: 0.55; }")
                             .arg(checkboxBorder, checkboxBackground, checkboxChecked));
 
     // Fusion is used for consistent rendering across platforms.  Re-polish
@@ -2081,12 +2080,13 @@ void MainWindow::rebuildMacrosMenu() {
 
                 QList<TerminalTab*> targets = {tab};
                 if (groupTargets.size() > 1) {
-                    const auto choice = localizedQuestion(
-                        this, tr("Run Macro"),
-                        tr("The current session belongs to group '%1'. Send this macro to all %2 sessions in the group?")
-                            .arg(group)
-                            .arg(groupTargets.size()),
-                        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
+                    const auto choice =
+                        localizedQuestion(this, tr("Run Macro"),
+                                          tr("The current session belongs to group '%1'. Send this macro to all %2 "
+                                             "sessions in the group?")
+                                              .arg(group)
+                                              .arg(groupTargets.size()),
+                                          QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
                     if (choice == QMessageBox::Cancel)
                         return;
                     if (choice == QMessageBox::Yes)

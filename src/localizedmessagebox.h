@@ -20,23 +20,19 @@
 inline void localizeMessageBoxButtons(QMessageBox& box) {
     const auto translate = [](const char* source) { return QCoreApplication::translate("QMessageBox", source); };
 
-    if (auto* button = box.button(QMessageBox::Yes))
-    {
+    if (auto* button = box.button(QMessageBox::Yes)) {
         button->setText(translate("Yes"));
         button->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
     }
-    if (auto* button = box.button(QMessageBox::No))
-    {
+    if (auto* button = box.button(QMessageBox::No)) {
         button->setText(translate("No"));
         button->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
     }
-    if (auto* button = box.button(QMessageBox::Ok))
-    {
+    if (auto* button = box.button(QMessageBox::Ok)) {
         button->setText(translate("OK"));
         button->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
     }
-    if (auto* button = box.button(QMessageBox::Cancel))
-    {
+    if (auto* button = box.button(QMessageBox::Cancel)) {
         button->setText(translate("Cancel"));
         button->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
     }
