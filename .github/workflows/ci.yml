@@ -160,7 +160,14 @@ jobs:
         run: cmake --build build --config Release --target banchoxterm_tests --parallel 2
 
       - name: Run tests
-        run: ctest --test-dir build -C Release --output-on-failure -VV
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release --output-on-failure -VV
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "CTest did not preserve the Windows test output; rerunning the binary directly."
+            & "$env:GITHUB_WORKSPACE\build\Release\banchoxterm_tests.exe" -v1
+            exit $LASTEXITCODE
+          }
 
       - name: Stage package (windeployqt + libssh2)
         run: |
