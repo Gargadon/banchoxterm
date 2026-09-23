@@ -491,6 +491,12 @@ target_link_libraries(banchoxterm_tests PRIVATE sodium)
 target_link_libraries(banchoxterm_tests PRIVATE libssh2)
 target_link_libraries(banchoxterm_tests PRIVATE qtermwidget6)
 
+if(WIN32)
+    target_sources(banchoxterm_tests PRIVATE src/conpty.cpp src/conpty.h)
+    target_compile_definitions(banchoxterm_tests PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006)
+    target_link_libraries(banchoxterm_tests PRIVATE advapi32)
+endif()
+
 if(BANCHO_ENABLE_VNC)
     target_sources(banchoxterm_tests PRIVATE src/vncclientwidget.cpp src/vncclientwidget.h)
     target_link_libraries(banchoxterm_tests PRIVATE vncclient)
