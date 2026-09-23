@@ -73,7 +73,7 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     auto* exportBtn = new QPushButton(QIcon(":/icons/download.svg"), tr("Export"), this);
     importBtn->setObjectName("sidebarAction");
     exportBtn->setObjectName("sidebarAction");
-    importBtn->setToolTip(tr("Import JSON or OpenSSH sessions"));
+    importBtn->setToolTip(tr("Import JSON, OpenSSH, PuTTY, MobaXterm, SecureCRT or Royal TS sessions"));
     exportBtn->setToolTip(tr("Export saved sessions"));
     ioLayout->addWidget(importBtn);
     ioLayout->addWidget(exportBtn);
@@ -339,50 +339,132 @@ void SessionsSidebar::onDeleteSession() {
 }
 
 void SessionsSidebar::onImportSessions() {
-    QString path = QFileDialog::getOpenFileName(this, tr("Import Sessions"), QDir::homePath(),
-                                                tr("Session files (*.json *.conf *.reg);;JSON (*.json);;OpenSSH config "
-                                                   "(*.conf);;PuTTY registry (*.reg);;All Files (*)"));
+    QString path = QFileDialog::getOpenFileName(
+        this, tr("Import Sessions"), QDir::homePath(),
+        tr("Session files (*.json *.bancho.enc *.conf *.reg *.mxtsessions *.ini *.rtsx *.rts);;JSON (*.json);;"
+           "Encrypted sessions (*.bancho.enc);;OpenSSH config (*.conf);;"
+           "PuTTY registry (*.reg);;MobaXterm (*.mxtsessions);;"
+           "SecureCRT (*.ini);;Royal TS (*.rtsx *.rts);;All Files (*)"));
     if (path.isEmpty())
         return;
 
     bool ok = false;
-    QList<Session> imported = SessionManager::importSessions(path, &ok);
+    QStringList importedMacroNames;
+    QStringList importedMacroTexts;
+    QList<Session> imported = SessionManager::importSessions(path, &ok, &importedMacroNames, &importedMacroTexts);
     if (!ok) {
         QMessageBox::critical(this, tr("Import Failed"), tr("Could not read sessions from the selected file."));
         return;
     }
 
+    QSet<QString> knownIds;
+    QSet<QString> knownNames;
+    for (const Session& existing : m_sessions) {
+        knownIds.insert(existing.id);
+        knownNames.insert(existing.name.trimmed().toCaseFolded());
+    }
+
+    int conflicts = 0;
+    for (const Session& session : imported) {
+        if (knownIds.contains(session.id) || knownNames.contains(session.name.trimmed().toCaseFolded()))
+            ++conflicts;
+    }
+
+    enum class ConflictPolicy { Rename, Skip, Cancel };
+    ConflictPolicy policy = ConflictPolicy::Rename;
+    if (conflicts > 0) {
+        QMessageBox conflictBox(QMessageBox::Warning, tr("Import Conflicts"),
+                                tr("%1 imported session(s) have an ID or name already in use.").arg(conflicts),
+                                QMessageBox::NoButton, this);
+        auto* renameButton = conflictBox.addButton(tr("Rename and import"), QMessageBox::AcceptRole);
+        auto* skipButton = conflictBox.addButton(tr("Skip conflicts"), QMessageBox::DestructiveRole);
+        auto* cancelButton = conflictBox.addButton(QMessageBox::Cancel);
+        conflictBox.exec();
+        if (conflictBox.clickedButton() == skipButton)
+            policy = ConflictPolicy::Skip;
+        else if (conflictBox.clickedButton() == cancelButton)
+            policy = ConflictPolicy::Cancel;
+        else if (conflictBox.clickedButton() != renameButton)
+            policy = ConflictPolicy::Cancel;
+    }
+    if (policy == ConflictPolicy::Cancel)
+        return;
+
     int added = 0;
-    for (const Session& s : imported) {
-        bool exists = false;
-        for (const Session& existing : m_sessions) {
-            if (existing.id == s.id) {
-                exists = true;
-                break;
+    int skipped = 0;
+    for (Session session : imported) {
+        const bool idConflict = knownIds.contains(session.id);
+        const bool nameConflict = knownNames.contains(session.name.trimmed().toCaseFolded());
+        if (idConflict || nameConflict) {
+            if (policy == ConflictPolicy::Skip) {
+                ++skipped;
+                continue;
             }
+
+            if (idConflict)
+                session.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            const QString originalName = session.name.trimmed().isEmpty() ? tr("Imported Session") : session.name;
+            QString candidate = originalName + tr(" (imported)");
+            int suffix = 2;
+            while (knownNames.contains(candidate.toCaseFolded()))
+                candidate = originalName + tr(" (imported %1)").arg(suffix++);
+            session.name = candidate;
         }
-        if (!exists) {
-            m_sessions.append(s);
-            ++added;
+
+        // Also protect against duplicate IDs/names within the imported file.
+        if (knownIds.contains(session.id))
+            session.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (knownNames.contains(session.name.trimmed().toCaseFolded())) {
+            ++skipped;
+            continue;
         }
+        knownIds.insert(session.id);
+        knownNames.insert(session.name.trimmed().toCaseFolded());
+        m_sessions.append(session);
+        ++added;
     }
 
     saveSessions();
+    if (!importedMacroNames.isEmpty()) {
+        QSettings settings;
+        QStringList macroNames = settings.value("macros/names").toStringList();
+        QStringList macroTexts = settings.value("macros/texts").toStringList();
+        for (int i = 0; i < importedMacroNames.size() && i < importedMacroTexts.size(); ++i) {
+            const int existing = macroNames.indexOf(importedMacroNames.at(i));
+            if (existing >= 0)
+                macroTexts[existing] = importedMacroTexts.at(i);
+            else {
+                macroNames.append(importedMacroNames.at(i));
+                macroTexts.append(importedMacroTexts.at(i));
+            }
+        }
+        settings.setValue("macros/names", macroNames);
+        settings.setValue("macros/texts", macroTexts);
+        emit macrosImported();
+    }
     loadSessions();
-    QMessageBox::information(
-        this, tr("Import Complete"),
-        tr("Imported %1 session(s) (%2 skipped as duplicates).").arg(added).arg(imported.size() - added));
+    QMessageBox::information(this, tr("Import Complete"),
+                             tr("Imported %1 session(s), skipped %2 and renamed %3 conflicting session(s).")
+                                 .arg(added)
+                                 .arg(skipped)
+                                 .arg(conflicts > 0 && policy == ConflictPolicy::Rename ? conflicts : 0));
 }
 
 void SessionsSidebar::onExportSessions() {
     QString defaultName =
         QString("banchoxterm_sessions_%1.json").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
     QString path = QFileDialog::getSaveFileName(this, tr("Export Sessions"), QDir::homePath() + "/" + defaultName,
-                                                tr("BanchoXterm Sessions (*.json)"));
+                                                tr("BanchoXterm Sessions (*.json);;Encrypted sessions (*.bancho.enc);;"
+                                                   "OpenSSH config (*.conf)"));
     if (path.isEmpty())
         return;
 
-    if (SessionManager::exportSessions(m_sessions, path)) {
+    const bool openSsh = path.endsWith(QStringLiteral(".conf"), Qt::CaseInsensitive);
+    const bool encrypted = path.endsWith(QStringLiteral(".bancho.enc"), Qt::CaseInsensitive);
+    const bool exported = openSsh     ? SessionManager::exportOpenSshConfig(m_sessions, path)
+                          : encrypted ? SessionManager::exportEncryptedSessions(m_sessions, path)
+                                      : SessionManager::exportSessions(m_sessions, path);
+    if (exported) {
         QMessageBox::information(this, tr("Export Complete"), tr("Exported %1 session(s).").arg(m_sessions.size()));
     } else {
         QMessageBox::critical(this, tr("Export Failed"), tr("Could not write sessions to the selected file."));

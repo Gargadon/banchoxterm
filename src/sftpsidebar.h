@@ -5,6 +5,7 @@
 #include <QPointer>
 #include "session.h"
 #include "sshconnection.h"
+#include "sftptransferworker.h"
 
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -16,6 +17,7 @@ class QTreeView;
 class QFileSystemModel;
 class QSplitter;
 class FtpClient;
+class QThread;
 
 class SftpSidebar : public QWidget {
     Q_OBJECT
@@ -54,16 +56,23 @@ private slots:
     void onRenameClicked();
     void onChmodClicked();
     void onUploadFolderClicked();
+    void onManageTunnels();
+    void onTunnelStateChanged(int index, bool active);
+    void onCompareFoldersClicked();
+    void onCancelQueuedTransfers();
+    void onToggleTransferPause();
     void onItemDoubleClicked(QTreeWidgetItem* item, int column);
     void showContextMenu(const QPoint& pos);
     void onWatchedFileChanged(const QString& path);
 
 signals:
+    void diagnosticMessage(const QString& message);
     void requestConnect(const QString& host, int port, const QString& user, const QString& keyPath,
                         const QString& password, const QList<TunnelConfig>& tunnels,
                         const QString& jumpHost = QString(), int jumpPort = 22, const QString& jumpUser = QString(),
-                        const QString& jumpKeyPath = QString());
-    void requestFtpConnect(const QString& host, int port, const QString& user, const QString& password, bool tls);
+                        const QString& jumpKeyPath = QString(), const QString& sessionId = QString());
+    void requestFtpConnect(const QString& host, int port, const QString& user, const QString& password, bool tls,
+                           int minimumTlsVersion, const QString& caFile, bool allowInvalidCertificates);
     void requestList(const QString& path);
     void requestDownload(const QString& remotePath, const QString& localPath);
     void requestUpload(const QString& localPath, const QString& remotePath);
@@ -87,11 +96,15 @@ private:
         QString localPath;
         bool isUpload = false;
         bool isDirUpload = false;
+        int attempts = 0;
     };
     void enqueueUpload(const QStringList& localPaths);
     void enqueueDownload(const QStringList& remotePaths);
     void enqueueDownloadTo(const QStringList& remotePaths, const QString& destinationDir);
     void startNextTransfer();
+    void startParallelTransfers();
+    void finishParallelTransfer(const QString& id, bool success, const QString& error);
+    void stopParallelTransfers();
     void finishTransferQueue(bool success, const QString& error);
     void setTransferUi(bool active);
 
@@ -100,6 +113,8 @@ private:
     QPushButton* m_refreshBtn;
     QPushButton* m_uploadBtn;
     QPushButton* m_uploadDirBtn;
+    QPushButton* m_compareBtn;
+    QPushButton* m_tunnelsBtn;
     QPushButton* m_newFolderBtn;
     QPushButton* m_renameBtn;
     QPushButton* m_chmodBtn;
@@ -111,6 +126,8 @@ private:
     QLabel* m_statusLabel;
     QProgressBar* m_progressBar;
     QLabel* m_progressLabel;
+    QPushButton* m_cancelTransferBtn;
+    QPushButton* m_pauseTransferBtn;
 
     QPointer<SshConnection> m_connection;
     QPointer<FtpClient> m_ftp;
@@ -118,10 +135,23 @@ private:
     Session m_currentSession;
     QString m_currentPath;
     bool m_isConnected = false;
+    QList<SftpFile> m_currentRemoteFiles;
+    QList<bool> m_tunnelStates;
 
     QList<TransferItem> m_transferQueue;
     bool m_transferActive = false;
+    bool m_transferPaused = false;
     QString m_transferCurrentName;
+    TransferItem m_activeTransfer;
+
+    struct ParallelTransfer {
+        QString id;
+        TransferItem item;
+        QThread* thread = nullptr;
+        SftpTransferWorker* worker = nullptr;
+    };
+    QList<ParallelTransfer> m_parallelTransfers;
+    int m_maxParallelTransfers = 1;
 
     QString m_pendingEditRemotePath;
     QString m_pendingEditLocalPath;

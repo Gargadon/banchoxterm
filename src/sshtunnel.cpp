@@ -1,6 +1,7 @@
 #include "sshtunnel.h"
 #include <QHostAddress>
 #include <QtEndian>
+#include <cstring>
 
 SshTunnel::SshTunnel(LIBSSH2_SESSION* sshSession, const TunnelConfig& config, QObject* parent)
     : QObject(parent), m_sshSession(sshSession), m_config(config) {
@@ -51,6 +52,7 @@ void SshTunnel::stop() {
         closeBridge(bridge);
     }
     m_bridges.clear();
+    emit connectionCountChanged(0);
 }
 
 void SshTunnel::onNewConnection() {
@@ -76,6 +78,7 @@ void SshTunnel::onNewConnection() {
                 bridge->channel = channel;
                 bridge->socksHandshakeDone = true;
                 m_bridges.append(bridge);
+                emit connectionCountChanged(m_bridges.size());
             } else {
                 socket->close();
                 socket->deleteLater();
@@ -86,6 +89,7 @@ void SshTunnel::onNewConnection() {
             bridge->socksHandshakeDone = false;
             bridge->socksStep = 0;
             m_bridges.append(bridge);
+            emit connectionCountChanged(m_bridges.size());
         }
     }
 }
@@ -141,6 +145,7 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
         if (verAndMethods[0] != 0x05) {
             closeBridge(bridge);
             m_bridges.removeOne(bridge);
+            emit connectionCountChanged(m_bridges.size());
             return;
         }
 
@@ -151,10 +156,41 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
         socket->read(2);          // Descartar los dos primeros bytes ya leídos
         socket->read(numMethods); // Descartar métodos
 
-        // Responder con NO AUTHENTICATIONREQUIRED (0x05, 0x00)
-        char response[2] = {0x05, 0x00};
+        const bool requiresAuth = !m_config.socksUsername.isEmpty();
+        // Seleccionar autenticación sin credenciales o RFC 1929.
+        char response[2] = {0x05, static_cast<char>(requiresAuth ? 0x02 : 0x00)};
         socket->write(response, 2);
 
+        bridge->socksStep = requiresAuth ? 2 : 1;
+    }
+
+    if (bridge->socksStep == 2) {
+        if (socket->bytesAvailable() < 2)
+            return;
+        const QByteArray header = socket->peek(2);
+        if (static_cast<unsigned char>(header[0]) != 0x01)
+            return;
+        const int usernameLength = static_cast<unsigned char>(header[1]);
+        if (socket->bytesAvailable() < 2 + usernameLength + 1)
+            return;
+        const QByteArray authHeader = socket->peek(2 + usernameLength + 1);
+        const int passwordLength = static_cast<unsigned char>(authHeader.at(2 + usernameLength));
+        const int packetLength = 2 + usernameLength + 1 + passwordLength;
+        if (socket->bytesAvailable() < packetLength)
+            return;
+        const QByteArray packet = socket->read(packetLength);
+        const QByteArray username = packet.mid(2, usernameLength);
+        const QByteArray password = packet.mid(3 + usernameLength, passwordLength);
+        const bool valid = username == m_config.socksUsername.toUtf8() && password == m_config.socksPassword.toUtf8();
+        const char response[2] = {0x01, static_cast<char>(valid ? 0x00 : 0x01)};
+        socket->write(response, sizeof(response));
+        if (!valid) {
+            socket->flush();
+            closeBridge(bridge);
+            m_bridges.removeOne(bridge);
+            emit connectionCountChanged(m_bridges.size());
+            return;
+        }
         bridge->socksStep = 1;
     }
 
@@ -165,6 +201,16 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
 
         char header[4];
         socket->peek(header, 4);
+        if (static_cast<unsigned char>(header[1]) != 0x01) {
+            const char resp[10] = {0x05, 0x07, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+            socket->read(4);
+            socket->write(resp, sizeof(resp));
+            socket->flush();
+            closeBridge(bridge);
+            m_bridges.removeOne(bridge);
+            emit connectionCountChanged(m_bridges.size());
+            return;
+        }
         char atyp = header[3];
 
         int expectedBytes = 4;
@@ -182,10 +228,13 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
             QByteArray peekBuf = socket->peek(5);
             domainLen = static_cast<unsigned char>(peekBuf[4]);
             expectedBytes += 1 + domainLen + 2;
+        } else if (atyp == 0x04) { // IPv6
+            expectedBytes += 16 + 2;
         } else {
-            // Protocolo no soportado (ej. IPv6 0x04)
+            // Tipo de dirección no soportado.
             closeBridge(bridge);
             m_bridges.removeOne(bridge);
+            emit connectionCountChanged(m_bridges.size());
             return;
         }
 
@@ -205,6 +254,11 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
         } else if (atyp == 0x03) {
             int domainLen = static_cast<unsigned char>(socket->read(1)[0]);
             host = QString::fromUtf8(socket->read(domainLen));
+        } else if (atyp == 0x04) {
+            const QByteArray ipBytes = socket->read(16);
+            Q_IPV6ADDR address{};
+            std::memcpy(address.c, ipBytes.constData(), sizeof(address.c));
+            host = QHostAddress(address).toString();
         }
 
         QByteArray portBytes = socket->read(2);
@@ -228,6 +282,7 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
             socket->flush();
             closeBridge(bridge);
             m_bridges.removeOne(bridge);
+            emit connectionCountChanged(m_bridges.size());
         }
     }
 }
@@ -241,6 +296,7 @@ void SshTunnel::onSocketDisconnected() {
         if (m_bridges[i]->socket == socket) {
             closeBridge(m_bridges[i]);
             m_bridges.removeAt(i);
+            emit connectionCountChanged(m_bridges.size());
             break;
         }
     }
@@ -248,6 +304,10 @@ void SshTunnel::onSocketDisconnected() {
 
 void SshTunnel::closeBridge(ChannelBridge* bridge) {
     if (bridge->socket) {
+        // QTcpSocket::close() may synchronously emit disconnected(). Prevent
+        // the slot from removing and freeing this bridge while it is already
+        // being torn down by the caller.
+        disconnect(bridge->socket, nullptr, this, nullptr);
         bridge->socket->close();
         bridge->socket->deleteLater();
     }
@@ -266,7 +326,9 @@ void SshTunnel::poll() {
         LIBSSH2_CHANNEL* channel = libssh2_channel_forward_accept(m_listener);
         if (channel) {
             QTcpSocket* socket = new QTcpSocket(this);
-            socket->connectToHost(m_config.remoteHost, m_config.remotePort);
+            // For remote forwarding, remotePort is the listener on the
+            // SSH server and localPort is the destination on this host.
+            socket->connectToHost(m_config.remoteHost, m_config.localPort);
 
             // Esperar conexión brevemente de forma bloqueante
             if (socket->waitForConnected(100)) {
@@ -279,6 +341,7 @@ void SshTunnel::poll() {
                 connect(socket, &QTcpSocket::disconnected, this, &SshTunnel::onSocketDisconnected);
 
                 m_bridges.append(bridge);
+                emit connectionCountChanged(m_bridges.size());
             } else {
                 socket->deleteLater();
                 libssh2_session_set_blocking(m_sshSession, 1);
@@ -315,6 +378,7 @@ void SshTunnel::poll() {
         if (bridge->socketEof && bridge->socket->bytesToWrite() == 0) {
             closeBridge(bridge);
             it = m_bridges.erase(it);
+            emit connectionCountChanged(m_bridges.size());
         } else {
             ++it;
         }

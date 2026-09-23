@@ -7,6 +7,7 @@ class QLineEdit;
 class QLabel;
 class QRadioButton;
 class QCheckBox;
+class QSpinBox;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -66,5 +67,6 @@ private:
     QCheckBox* m_shellIntegrationCheck = nullptr;
     QCheckBox* m_loggingCheck = nullptr;
     QLineEdit* m_logDirEdit = nullptr;
+    QSpinBox* m_parallelTransfersSpin = nullptr;
     QCheckBox* m_masterPasswordCheck = nullptr;
 };

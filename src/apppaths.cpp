@@ -38,6 +38,9 @@ bool isPortable() {
 }
 
 QString configDir() {
+    const QString override = qEnvironmentVariable("BANCHO_CONFIG_DIR").trimmed();
+    if (!override.isEmpty())
+        return override;
     if (detectPortable())
         return applicationDir();
     return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);

@@ -18,6 +18,7 @@
 #include <qtermwidget.h>
 #include <QInputDialog>
 #include <QListWidget>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QFile>
 #include <QRegularExpression>
@@ -157,6 +158,16 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         logDirBrowseBtn->setEnabled(checked);
     });
 
+    auto* transferLayout = new QHBoxLayout();
+    auto* transferLabel = new QLabel(tr("Parallel SFTP transfers (1-8):"), appearanceTab);
+    m_parallelTransfersSpin = new QSpinBox(appearanceTab);
+    m_parallelTransfersSpin->setRange(1, 8);
+    m_parallelTransfersSpin->setValue(QSettings().value(QStringLiteral("sftp/maxParallelTransfers"), 1).toInt());
+    transferLayout->addWidget(transferLabel);
+    transferLayout->addWidget(m_parallelTransfersSpin);
+    transferLayout->addStretch();
+    appLayout->addLayout(transferLayout);
+
     appLayout->addStretch();
     tabWidget->addTab(appearanceTab, tr("Appearance"));
 
@@ -227,6 +238,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 
     // Dialog buttons
     auto* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    buttonBox->button(QDialogButtonBox::Ok)->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
+    buttonBox->button(QDialogButtonBox::Cancel)->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
     mainLayout->addWidget(buttonBox);
 
     // Event Connections
@@ -249,6 +262,12 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
                 m_masterPasswordCheck->setChecked(false);
                 return;
             }
+            if (pwd1.size() < 8) {
+                QMessageBox::warning(this, tr("Weak Master Password"),
+                                     tr("The Master Password must contain at least 8 characters."));
+                m_masterPasswordCheck->setChecked(false);
+                return;
+            }
             QString pwd2 = QInputDialog::getText(this, tr("Confirm Master Password"),
                                                  tr("Confirm new Master Password:"), QLineEdit::Password, "", &ok);
             if (!ok || pwd2.isEmpty() || pwd1 != pwd2) {
@@ -257,9 +276,15 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
                 return;
             }
 
-            MasterPasswordManager::instance().setMasterPassword(pwd1);
-            QMessageBox::information(this, tr("Master Password Set"),
-                                     tr("All future session passwords will be encrypted with your Master Password."));
+            if (MasterPasswordManager::instance().setMasterPassword(pwd1)) {
+                QMessageBox::information(
+                    this, tr("Master Password Set"),
+                    tr("All future session passwords will be encrypted with your Master Password."));
+            } else {
+                QMessageBox::warning(this, tr("Master Password Error"),
+                                     tr("The Master Password could not be enabled."));
+                m_masterPasswordCheck->setChecked(false);
+            }
         } else {
             bool ok;
             QString currentPwd =
@@ -335,6 +360,7 @@ void SettingsDialog::saveSettings() {
     settings.setValue("terminal/shellIntegration", m_enableShellIntegration);
     settings.setValue("terminal/loggingEnabled", m_loggingEnabled);
     settings.setValue("terminal/logDirectory", m_logDir);
+    settings.setValue("sftp/maxParallelTransfers", m_parallelTransfersSpin->value());
 
     if (newLang != m_lang) {
         settings.setValue("locale/lang", newLang);

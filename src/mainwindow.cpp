@@ -2,9 +2,11 @@
 #include "sessionssidebar.h"
 #include "sftpsidebar.h"
 #include "terminaltab.h"
+#include "sshconnection.h"
 #include "sessiondialog.h"
 #include "settingsdialog.h"
 #include "updater.h"
+#include "masterpasswordmanager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -19,6 +21,7 @@
 #include <QIcon>
 #include <QFont>
 #include <QApplication>
+#include <QClipboard>
 #include <QPalette>
 #include <QStyle>
 #include <QStyleFactory>
@@ -31,18 +34,172 @@
 #include <QFontDialog>
 #include <QInputDialog>
 #include <QSettings>
+#include <QDateTime>
 #include <QLineEdit>
 #include <QComboBox>
 #include <QCloseEvent>
 #include <QEvent>
 #include <QMouseEvent>
 #include <QMessageBox>
+#include <QFileDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QFile>
+#include <QTimer>
+#include <QTextStream>
 #include "localizedmessagebox.h"
 #include <QMenu>
 #include <QSize>
+#include <QRegularExpression>
+#include <QListWidget>
+#include <QDialogButtonBox>
+#include <QFileDialog>
+#include <QFile>
 #include <functional>
+#include <QSharedPointer>
 
 namespace {
+void logMacroEvent(const Session& session, const QString& message) {
+    QSettings settings;
+    QStringList entries = settings.value(QStringLiteral("macros/log")).toStringList();
+    entries.prepend(
+        QStringLiteral("%1 | %2 | %3").arg(QDateTime::currentDateTime().toString(Qt::ISODate), session.name, message));
+    while (entries.size() > 200)
+        entries.removeLast();
+    settings.setValue(QStringLiteral("macros/log"), entries);
+}
+
+QString expandMacroText(QString text, const Session& session) {
+    const QList<QPair<QString, QChar>> controls = {
+        {QStringLiteral("{{BREAK}}"), QChar(0x1e)},      {QStringLiteral("{{CTRL+C}}"), QChar(0x03)},
+        {QStringLiteral("{{CTRL+D}}"), QChar(0x04)},     {QStringLiteral("{{CTRL+Z}}"), QChar(0x1a)},
+        {QStringLiteral("{{ESC}}"), QChar(0x1b)},        {QStringLiteral("{{ENTER}}"), QChar('\r')},
+        {QStringLiteral("{{TAB}}"), QChar('\t')},        {QStringLiteral("{{BACKSPACE}}"), QChar(0x7f)},
+        {QStringLiteral("{{TELNET-ESC}}"), QChar(0x1d)},
+    };
+    for (const auto& control : controls)
+        text.replace(control.first, control.second);
+
+    const QList<QPair<QString, QString>> variables = {
+        {QStringLiteral("{{HOST}}"), session.host},
+        {QStringLiteral("{{USER}}"), session.user},
+        {QStringLiteral("{{PORT}}"), QString::number(session.port)},
+        {QStringLiteral("{{SESSION}}"), session.name},
+        {QStringLiteral("{{REMOTE_DIR}}"), session.remoteDirectory},
+        {QStringLiteral("{{SERIAL_PORT}}"), session.serialPort},
+    };
+    for (const auto& variable : variables)
+        text.replace(variable.first, variable.second);
+
+    const QRegularExpression environmentPattern(QStringLiteral(R"(\{\{ENV:([A-Za-z_][A-Za-z0-9_]*)\}\})"));
+    QRegularExpressionMatch environmentMatch = environmentPattern.match(text);
+    while (environmentMatch.hasMatch()) {
+        const QString token = environmentMatch.captured(0);
+        const QString value = qEnvironmentVariable(environmentMatch.captured(1).toUtf8().constData());
+        text.replace(token, value);
+        environmentMatch = environmentPattern.match(text);
+    }
+    return text;
+}
+
+void sendMacro(TerminalTab* tab, const QString& macro) {
+    if (!tab)
+        return;
+
+    const Session session = tab->session();
+    logMacroEvent(session, QObject::tr("Macro started"));
+    struct MacroStep {
+        enum class Type { Text, Pause, Expect, Respond } type = Type::Text;
+        QString value;
+    };
+    QList<MacroStep> steps;
+    const QRegularExpression tokenPattern(QStringLiteral(R"(\{\{(PAUSE:\d{1,6}|EXPECT:[^}]*|RESPOND:[^}]*)\}\})"));
+    QRegularExpressionMatchIterator matches = tokenPattern.globalMatch(macro);
+    int offset = 0;
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        if (match.capturedStart() > offset)
+            steps.append({MacroStep::Type::Text, macro.mid(offset, match.capturedStart() - offset)});
+        const QString token = match.captured(1);
+        if (token.startsWith(QStringLiteral("PAUSE:")))
+            steps.append({MacroStep::Type::Pause, token.mid(6)});
+        else if (token.startsWith(QStringLiteral("EXPECT:")))
+            steps.append({MacroStep::Type::Expect, token.mid(7)});
+        else
+            steps.append({MacroStep::Type::Respond, token.mid(8)});
+        offset = match.capturedEnd();
+    }
+    if (offset < macro.size())
+        steps.append({MacroStep::Type::Text, macro.mid(offset)});
+
+    const auto runner = QSharedPointer<std::function<void(int)>>::create();
+    const QWeakPointer<std::function<void(int)>> weakRunner = runner;
+    *runner = [tab, session, steps, weakRunner](int index) {
+        if (index >= steps.size()) {
+            logMacroEvent(session, QObject::tr("Macro completed"));
+            return;
+        }
+        const MacroStep& step = steps.at(index);
+        if (step.type == MacroStep::Type::Text) {
+            if (!step.value.isEmpty())
+                tab->sendRaw(expandMacroText(step.value, session));
+            if (const auto next = weakRunner.toStrongRef())
+                (*next)(index + 1);
+        } else if (step.type == MacroStep::Type::Respond) {
+            tab->sendRaw(expandMacroText(step.value, session));
+            if (const auto next = weakRunner.toStrongRef())
+                (*next)(index + 1);
+        } else if (step.type == MacroStep::Type::Pause) {
+            QTimer::singleShot(step.value.toInt(), tab, [weakRunner, index]() {
+                if (const auto next = weakRunner.toStrongRef())
+                    (*next)(index + 1);
+            });
+        } else {
+            const QRegularExpression expression(step.value);
+            if (!expression.isValid()) {
+                logMacroEvent(session,
+                              QObject::tr("Macro error: invalid EXPECT expression: %1").arg(expression.errorString()));
+                tab->reportMacroMessage(QObject::tr("Invalid EXPECT expression: %1").arg(expression.errorString()));
+                return;
+            }
+            const auto buffer = QSharedPointer<QByteArray>::create();
+            const auto completed = QSharedPointer<bool>::create(false);
+            const auto connection = QSharedPointer<QMetaObject::Connection>::create();
+            auto* timeout = new QTimer(tab);
+            timeout->setSingleShot(true);
+            timeout->setInterval(30000);
+            const auto finish = QSharedPointer<std::function<void(bool)>>::create();
+            *finish = [tab, session, weakRunner, index, completed, connection, timeout](bool matched) {
+                if (*completed)
+                    return;
+                *completed = true;
+                QObject::disconnect(*connection);
+                timeout->stop();
+                timeout->deleteLater();
+                if (matched) {
+                    if (const auto next = weakRunner.toStrongRef())
+                        (*next)(index + 1);
+                } else {
+                    logMacroEvent(session, QObject::tr("Macro error: EXPECT timed out"));
+                    tab->reportMacroMessage(QObject::tr("EXPECT timed out after 30 seconds"));
+                }
+            };
+            *connection = QObject::connect(tab, &TerminalTab::terminalDataReceived, tab,
+                                           [buffer, expression, finish](const QByteArray& data) {
+                                               buffer->append(data);
+                                               if (expression.match(QString::fromUtf8(*buffer)).hasMatch())
+                                                   (*finish)(true);
+                                               else if (buffer->size() > 65536)
+                                                   buffer->remove(0, buffer->size() - 32768);
+                                           });
+            QObject::connect(timeout, &QTimer::timeout, tab, [finish]() { (*finish)(false); });
+            timeout->start();
+        }
+    };
+    (*runner)(0);
+}
+
 QString sessionTypeName(SessionType type) {
     switch (type) {
     case SessionType::SSH:
@@ -350,6 +507,10 @@ void MainWindow::setupUi() {
         button->setIconSize(QSize(20, 20));
         button->setMinimumSize(76, 61);
         button->setAutoRaise(true);
+        if (action->menu()) {
+            button->setMenu(action->menu());
+            button->setPopupMode(QToolButton::InstantPopup);
+        }
         layout->addWidget(button);
         connect(action, &QAction::triggered, this, [this]() {
             if (!m_ribbonPinned)
@@ -379,6 +540,7 @@ void MainWindow::setupUi() {
     addRibbonAction(toolsPage.second, settingsAction);
     addRibbonAction(toolsPage.second, m_copyAction);
     addRibbonAction(toolsPage.second, m_pasteAction);
+    addRibbonAction(toolsPage.second, m_specialCharactersAction);
     auto* clearRibbonAction = new QAction(QIcon(":/icons/delete.svg"), tr("Clear"), this);
     clearRibbonAction->setToolTip(tr("Clear terminal scrollback"));
     connect(clearRibbonAction, &QAction::triggered, this, [this]() {
@@ -397,6 +559,24 @@ void MainWindow::setupUi() {
     themeRibbonAction->setToolTip(tr("Toggle light and dark theme"));
     connect(themeRibbonAction, &QAction::triggered, this, &MainWindow::toggleTheme);
     addRibbonAction(toolsPage.second, themeRibbonAction);
+
+    auto* diagnosticsAction = new QAction(QIcon(":/icons/gear.svg"), tr("Diagnostics"), this);
+    diagnosticsAction->setToolTip(tr("Inspect the active session diagnostics"));
+    connect(diagnosticsAction, &QAction::triggered, this, &MainWindow::showDiagnostics);
+    addRibbonAction(toolsPage.second, diagnosticsAction);
+
+    auto* clearClipboardAction = new QAction(QIcon(":/icons/delete.svg"), tr("Clear Clipboard"), this);
+    clearClipboardAction->setToolTip(tr("Remove copied text from the system clipboard"));
+    connect(clearClipboardAction, &QAction::triggered, this, [this]() {
+        if (auto* clipboard = QApplication::clipboard()) {
+            clipboard->clear(QClipboard::Clipboard);
+            clipboard->clear(QClipboard::Selection);
+        }
+        statusBar()->showMessage(tr("Clipboard cleared"), 3000);
+    });
+    addRibbonAction(toolsPage.second, clearClipboardAction);
+
+    addRibbonAction(toolsPage.second, m_lockAction);
 
     auto macrosPage = makeRibbonPage(tr("Macros"));
     m_macrosRibbonPage = macrosPage.first;
@@ -472,7 +652,10 @@ void MainWindow::setupUi() {
     m_ribbonTabs = ribbonTabs;
     qApp->installEventFilter(this);
 
-    auto* paletteShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_K), this);
+    // Keep Ctrl+K available to terminal applications (for example, nano uses
+    // it to cut the current line). Use the conventional command-palette
+    // shortcut instead.
+    auto* paletteShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P), this);
     connect(paletteShortcut, &QShortcut::activated, this, &MainWindow::showCommandPalette);
 
     // Main splitter
@@ -679,6 +862,7 @@ void MainWindow::setupUi() {
     connect(m_sftpTabBtn, &QToolButton::clicked, this, [this]() { switchSidebarTab(1); });
 
     connect(m_sessionsSidebar, &SessionsSidebar::connectSession, this, &MainWindow::onConnectSession);
+    connect(m_sessionsSidebar, &SessionsSidebar::macrosImported, this, &MainWindow::rebuildMacrosMenu);
     connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, [this](int i) { onTabCloseRequested(m_tabWidget, i); });
     connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget, i); });
     connect(m_tabWidget2, &QTabWidget::tabCloseRequested, this,
@@ -691,6 +875,20 @@ void MainWindow::setupUi() {
             [this](int i) { onTabCloseRequested(m_tabWidget4, i); });
     connect(m_tabWidget4, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget4, i); });
     connect(m_sftpSidebar, &SftpSidebar::remoteStatsUpdated, this, &MainWindow::onRemoteStatsUpdated);
+    connect(m_sftpSidebar, &SftpSidebar::diagnosticMessage, this, [this](const QString& message) {
+        SshConnection* connection = m_sftpSidebar->connection();
+        if (!connection)
+            return;
+        for (QTabWidget* pane : allPanes()) {
+            for (int i = 0; i < pane->count(); ++i) {
+                auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
+                if (tab && tab->connection() == connection) {
+                    m_diagnosticLogs[tab].append(message);
+                    return;
+                }
+            }
+        }
+    });
 
     // Atajo Ctrl+W para cerrar la pestaña activa
     auto* closeTabShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_W), this);
@@ -768,6 +966,12 @@ void MainWindow::onConnectSession(const Session& session) {
     if (session.type == SessionType::SSH) {
         pane->setTabIcon(index, QIcon(":/icons/server.svg"));
         // Share the terminal's SSH connection with the SFTP browser.
+        QMetaObject::invokeMethod(tab->connection(), "setTerminalType", Qt::QueuedConnection,
+                                  Q_ARG(QString, session.terminalType));
+        QMetaObject::invokeMethod(tab->connection(), "setLanguage", Qt::QueuedConnection,
+                                  Q_ARG(QString, session.language));
+        QMetaObject::invokeMethod(tab->connection(), "setInitialSize", Qt::QueuedConnection,
+                                  Q_ARG(int, session.initialRows), Q_ARG(int, session.initialColumns));
         m_sftpSidebar->setConnection(tab->connection());
         m_sftpSidebar->startSession(session);
         m_sftpTabBtn->setEnabled(true);
@@ -802,6 +1006,22 @@ void MainWindow::onConnectSession(const Session& session) {
     // Auto-reconnect: when a session drops and asks to reconnect, swap this tab
     // for a fresh one with the same session.
     connect(tab, &TerminalTab::reconnectRequested, this, &MainWindow::onReconnectRequested);
+    connect(tab, &TerminalTab::promptDetected, this, [this, tab](const QString& prompt) {
+        m_diagnosticLogs[tab].append(QStringLiteral("[prompt] ") + prompt);
+        statusBar()->showMessage(tr("Prompt detected: %1").arg(prompt), 2500);
+    });
+    if (tab->connection()) {
+        connect(tab->connection(), &SshConnection::diagnosticMessage, this,
+                [this, tab](const QString& message) { m_diagnosticLogs[tab].append(message); });
+        connect(tab->connection(), &SshConnection::tunnelStatus, this,
+                [this, tab](const QString& message, bool active) {
+                    m_diagnosticLogs[tab].append(
+                        (active ? QStringLiteral("[tunnel] ") : QStringLiteral("[tunnel error] ")) + message);
+                });
+        connect(tab->connection(), &SshConnection::connectionFailed, this, [this, tab](const QString& message) {
+            m_diagnosticLogs[tab].append(QStringLiteral("[connection error] ") + message);
+        });
+    }
 
     // Alt+F4 on the embedded terminal hits the term host process, which
     // forwards it here; route it through close() so the normal confirmation
@@ -883,6 +1103,7 @@ void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {
             m_sftpSidebar->stopSession();
         }
         pane->removeTab(index);
+        m_diagnosticLogs.remove(tab);
         // Defer destruction until pending signals and timers finish their
         // current event-loop iteration.
         tab->deleteLater();
@@ -972,6 +1193,10 @@ void MainWindow::applyThemeMode(const QString& mode) {
         palette.setColor(QPalette::WindowText, QColor("#1d2430"));
         palette.setColor(QPalette::ButtonText, QColor("#1d2430"));
         palette.setColor(QPalette::PlaceholderText, QColor("#687386"));
+        palette.setColor(QPalette::Disabled, QPalette::Text, QColor("#7a8494"));
+        palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor("#7a8494"));
+        palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor("#7a8494"));
+        palette.setColor(QPalette::Disabled, QPalette::PlaceholderText, QColor("#9aa3b2"));
         palette.setColor(QPalette::Highlight, QColor("#2f6fed"));
         palette.setColor(QPalette::HighlightedText, Qt::white);
     } else if (mode == "dark") {
@@ -984,10 +1209,28 @@ void MainWindow::applyThemeMode(const QString& mode) {
         palette.setColor(QPalette::WindowText, QColor("#e7e9ed"));
         palette.setColor(QPalette::ButtonText, QColor("#e7e9ed"));
         palette.setColor(QPalette::PlaceholderText, QColor("#9aa3b2"));
+        palette.setColor(QPalette::Disabled, QPalette::Text, QColor("#8b93a1"));
+        palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor("#8b93a1"));
+        palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor("#8b93a1"));
+        palette.setColor(QPalette::Disabled, QPalette::PlaceholderText, QColor("#707885"));
         palette.setColor(QPalette::Highlight, QColor("#3d75d6"));
         palette.setColor(QPalette::HighlightedText, Qt::white);
     }
     qApp->setPalette(mode == "system" ? m_systemPalette : palette);
+
+    const bool darkCheckboxTheme = palette.color(QPalette::Window).lightness() < 128;
+    const QString checkboxBorder = darkCheckboxTheme ? QStringLiteral("#9aa3b2") : QStringLiteral("#687386");
+    const QString checkboxBackground = darkCheckboxTheme ? QStringLiteral("#202124") : QStringLiteral("#ffffff");
+    const QString checkboxChecked = darkCheckboxTheme ? QStringLiteral("#3d75d6") : QStringLiteral("#2f6fed");
+    qApp->setStyleSheet(QStringLiteral(
+                            "QCheckBox::indicator {"
+                            " width: 16px; height: 16px; border: 1px solid %1;"
+                            " border-radius: 3px; background: %2; }"
+                            "QCheckBox::indicator:hover { border: 2px solid %3; }"
+                            "QCheckBox::indicator:checked { background: %3; border: 1px solid %3;"
+                            " image: url(:/icons/check-white.svg); }"
+                            "QCheckBox::indicator:disabled { opacity: 0.55; }")
+                            .arg(checkboxBorder, checkboxBackground, checkboxChecked));
 
     // Fusion is used for consistent rendering across platforms.  Re-polish
     // existing widgets as well; Windows otherwise keeps parts of the previous
@@ -1007,6 +1250,8 @@ void MainWindow::onOpenSettings() {
     if (dialog.exec() == QDialog::Accepted) {
         if (dialog.themeMode() != m_themeMode)
             applyThemeMode(dialog.themeMode());
+        if (m_lockAction)
+            m_lockAction->setEnabled(MasterPasswordManager::instance().isEnabled());
 
         // Typography Configuration
         for (QTabWidget* pane : allPanes()) {
@@ -1018,6 +1263,67 @@ void MainWindow::onOpenSettings() {
             }
         }
     }
+}
+
+void MainWindow::showDiagnostics() {
+    TerminalTab* tab = currentTerminalTab();
+    if (!tab) {
+        QMessageBox::information(this, tr("Diagnostics"), tr("No active terminal session."));
+        return;
+    }
+
+    const Session& session = tab->session();
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Session Diagnostics"));
+    dialog.resize(620, 480);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* summary = new QLabel(&dialog);
+    summary->setWordWrap(true);
+    summary->setText(tr("Session: %1\nProtocol: %2\nState: %3\nReconnects: %4")
+                         .arg(session.name)
+                         .arg(sessionTypeName(session.type))
+                         .arg(tab->isSessionActive() ? tr("Connected") : tr("Disconnected"))
+                         .arg(m_reconnectCounts.value(session.id, 0)));
+    layout->addWidget(summary);
+
+    auto* metrics = new QLabel(&dialog);
+    metrics->setText(tr("Remote metrics: CPU %1, RAM %2, Disk %3, Uptime %4")
+                         .arg(m_remoteCpuValue->text(), m_remoteMemValue->text(), m_remoteDiskValue->text(),
+                              m_remoteUptimeValue->text()));
+    layout->addWidget(metrics);
+
+    auto* logList = new QListWidget(&dialog);
+    const QStringList logs = m_diagnosticLogs.value(tab);
+    if (logs.isEmpty())
+        logList->addItem(tr("No diagnostic events recorded for this session."));
+    else
+        logList->addItems(logs);
+    layout->addWidget(logList, 1);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    auto* exportButton = buttons->addButton(tr("Export..."), QDialogButtonBox::ActionRole);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(exportButton, &QPushButton::clicked, &dialog, [this, &dialog, session, tab, logs]() {
+        const QString path =
+            QFileDialog::getSaveFileName(&dialog, tr("Export Diagnostics"), QString(), tr("Text files (*.txt)"));
+        if (path.isEmpty())
+            return;
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QMessageBox::warning(&dialog, tr("Export Diagnostics"), tr("Could not write the selected file."));
+            return;
+        }
+        QTextStream stream(&file);
+        stream << "BanchoXterm diagnostics\n"
+               << "Session: " << session.name << "\n"
+               << "Protocol: " << sessionTypeName(session.type) << "\n"
+               << "State: " << (tab->isSessionActive() ? "Connected" : "Disconnected") << "\n"
+               << "Reconnects: " << m_reconnectCounts.value(session.id, 0) << "\n\n";
+        for (const QString& log : logs)
+            stream << log << '\n';
+    });
+    dialog.exec();
 }
 
 void MainWindow::toggleMultiInputBar() {
@@ -1049,6 +1355,19 @@ void MainWindow::onSendMultiInput() {
     if (targets.isEmpty())
         return;
 
+    const QRegularExpression destructivePattern(
+        QStringLiteral(
+            R"((^|[;&|]\s*)(rm\s+-[a-z]*r[a-z]*f|mkfs(?:\.|\s)|shutdown\b|reboot\b|poweroff\b|format\s|drop\s+database\b|truncate\s+))"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (destructivePattern.match(text).hasMatch()) {
+        const auto decision = localizedQuestion(
+            this, tr("Potentially destructive command"),
+            tr("This command may modify or destroy data:\n\n%1\n\nDo you want to continue?").arg(text),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No, QMessageBox::Warning);
+        if (decision != QMessageBox::Yes)
+            return;
+    }
+
     QDialog targetDialog(this);
     targetDialog.setWindowTitle(tr("Confirm Multi-Input"));
     auto* targetLayout = new QVBoxLayout(&targetDialog);
@@ -1065,6 +1384,8 @@ void MainWindow::onSendMultiInput() {
     commandLabel->setWordWrap(true);
     targetLayout->addWidget(commandLabel);
     auto* targetButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &targetDialog);
+    targetButtons->button(QDialogButtonBox::Ok)->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
+    targetButtons->button(QDialogButtonBox::Cancel)->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
     targetLayout->addWidget(targetButtons);
     connect(targetButtons, &QDialogButtonBox::accepted, &targetDialog, &QDialog::accept);
     connect(targetButtons, &QDialogButtonBox::rejected, &targetDialog, &QDialog::reject);
@@ -1081,8 +1402,14 @@ void MainWindow::onSendMultiInput() {
     if (selectedTargets.isEmpty())
         return;
 
-    for (TerminalTab* tab : selectedTargets)
-        tab->sendInputText(text);
+    // Stagger writes to avoid flooding slow devices or WAN links when a
+    // broadcast targets many sessions.  The tab is the context object, so a
+    // closed session cancels its pending write automatically.
+    constexpr int broadcastIntervalMs = 75;
+    for (int i = 0; i < selectedTargets.size(); ++i) {
+        TerminalTab* tab = selectedTargets.at(i);
+        QTimer::singleShot(i * broadcastIntervalMs, tab, [tab, text]() { tab->sendInputText(text); });
+    }
 
     // Add to dropdown history and save
     QSettings settings;
@@ -1101,6 +1428,7 @@ void MainWindow::onSendMultiInput() {
 }
 
 void MainWindow::onReconnectRequested(const Session& session) {
+    ++m_reconnectCounts[session.id];
     auto* tab = qobject_cast<TerminalTab*>(sender());
     if (tab) {
         QTabWidget* pane = nullptr;
@@ -1122,6 +1450,7 @@ void MainWindow::onReconnectRequested(const Session& session) {
                 m_sftpSidebar->stopSession();
             }
             pane->removeTab(idx);
+            m_diagnosticLogs.remove(tab);
             tab->deleteLater();
         }
     }
@@ -1192,6 +1521,122 @@ void MainWindow::setupMenuBar() {
 
     editMenu->addSeparator();
 
+    auto* specialMenu = editMenu->addMenu(tr("Special Characters"));
+    m_specialCharactersAction = specialMenu->menuAction();
+    m_specialCharactersAction->setIcon(QIcon(":/icons/terminal.svg"));
+    const QList<QPair<QString, QByteArray>> specialCharacters = {
+        {tr("Break (Cisco)"), QByteArray("\x1e")},
+        {tr("Ctrl+C"), QByteArray("\x03")},
+        {tr("Ctrl+D"), QByteArray("\x04")},
+        {tr("Ctrl+Z"), QByteArray("\x1a")},
+        {tr("Escape"), QByteArray("\x1b")},
+        {tr("Enter"), QByteArray("\r")},
+        {tr("Tab"), QByteArray("\t")},
+        {tr("Backspace"), QByteArray("\x7f")},
+        {tr("Telnet escape (Ctrl+])"), QByteArray("\x1d")},
+    };
+    for (const auto& special : specialCharacters) {
+        auto* action = specialMenu->addAction(special.first);
+        action->setData(special.second);
+        action->setProperty("physicalBreak", special.first == tr("Break (Cisco)"));
+        connect(action, &QAction::triggered, this, [this, action]() {
+            if (auto* tab = currentTerminalTab()) {
+                if (action->property("physicalBreak").toBool())
+                    tab->sendBreak();
+                else
+                    tab->sendRaw(QString::fromLatin1(action->data().toByteArray()));
+            }
+        });
+    }
+
+    specialMenu->addSeparator();
+    auto* customMenu = specialMenu->addMenu(tr("Custom"));
+    auto* manageCustomAction = specialMenu->addAction(tr("Manage custom characters..."));
+    const auto rebuildCustomCharacters = [customMenu, this]() {
+        customMenu->clear();
+        QSettings settings;
+        const QStringList names = settings.value(QStringLiteral("specialCharacters/names")).toStringList();
+        const QStringList values = settings.value(QStringLiteral("specialCharacters/values")).toStringList();
+        for (int i = 0; i < names.size() && i < values.size(); ++i) {
+            const QByteArray bytes = QByteArray::fromHex(values.at(i).toLatin1());
+            if (bytes.isEmpty())
+                continue;
+            auto* action = customMenu->addAction(names.at(i));
+            connect(action, &QAction::triggered, this, [this, bytes]() {
+                if (auto* tab = currentTerminalTab())
+                    tab->sendRaw(QString::fromLatin1(bytes));
+            });
+        }
+        if (customMenu->isEmpty())
+            customMenu->addAction(tr("No custom characters configured"))->setEnabled(false);
+    };
+    rebuildCustomCharacters();
+    connect(manageCustomAction, &QAction::triggered, this, [this, rebuildCustomCharacters]() {
+        QSettings settings;
+        QStringList names = settings.value(QStringLiteral("specialCharacters/names")).toStringList();
+        QStringList values = settings.value(QStringLiteral("specialCharacters/values")).toStringList();
+
+        QDialog dialog(this);
+        dialog.setWindowTitle(tr("Custom special characters"));
+        dialog.resize(520, 360);
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* list = new QListWidget(&dialog);
+        layout->addWidget(list);
+        auto refresh = [&]() {
+            list->clear();
+            for (int i = 0; i < names.size() && i < values.size(); ++i)
+                list->addItem(QStringLiteral("%1 — %2").arg(names.at(i), values.at(i)));
+        };
+        refresh();
+
+        auto* buttons = new QDialogButtonBox(&dialog);
+        auto* addButton = buttons->addButton(tr("Add"), QDialogButtonBox::ActionRole);
+        auto* removeButton = buttons->addButton(tr("Remove"), QDialogButtonBox::DestructiveRole);
+        auto* closeButton = buttons->addButton(QDialogButtonBox::Close);
+        layout->addWidget(buttons);
+        connect(addButton, &QPushButton::clicked, &dialog, [&]() {
+            bool nameOk = false;
+            const QString name = QInputDialog::getText(&dialog, tr("Custom character"), tr("Name:"), QLineEdit::Normal,
+                                                       QString(), &nameOk)
+                                     .trimmed();
+            if (!nameOk || name.isEmpty())
+                return;
+            bool valueOk = false;
+            QString hex = QInputDialog::getText(&dialog, tr("Custom character"), tr("Hex bytes (for example 1B5B):"),
+                                                QLineEdit::Normal, QString(), &valueOk)
+                              .remove(' ')
+                              .trimmed()
+                              .toUpper();
+            if (!valueOk || hex.isEmpty() || hex.size() % 2 != 0 ||
+                !QRegularExpression(QStringLiteral("^[0-9A-F]+$")).match(hex).hasMatch()) {
+                QMessageBox::warning(&dialog, tr("Invalid sequence"),
+                                     tr("Enter an even number of hexadecimal digits."));
+                return;
+            }
+            const int existing = names.indexOf(name);
+            if (existing >= 0) {
+                values[existing] = hex;
+            } else {
+                names.append(name);
+                values.append(hex);
+            }
+            refresh();
+        });
+        connect(removeButton, &QPushButton::clicked, &dialog, [&]() {
+            const int row = list->currentRow();
+            if (row < 0 || row >= names.size() || row >= values.size())
+                return;
+            names.removeAt(row);
+            values.removeAt(row);
+            refresh();
+        });
+        connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
+        dialog.exec();
+        settings.setValue(QStringLiteral("specialCharacters/names"), names);
+        settings.setValue(QStringLiteral("specialCharacters/values"), values);
+        rebuildCustomCharacters();
+    });
+
     auto* clearAction = editMenu->addAction(tr("Clear Scrollback"));
     connect(clearAction, &QAction::triggered, this, [this]() {
         auto* tab = currentTerminalTab();
@@ -1210,6 +1655,12 @@ void MainWindow::setupMenuBar() {
 
     auto* settingsAction = editMenu->addAction(tr("C&onfiguration..."));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onOpenSettings);
+
+    m_lockAction = new QAction(QIcon(":/icons/gear.svg"), tr("Lock Application"), this);
+    m_lockAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_L));
+    m_lockAction->setToolTip(tr("Lock the application using the Master Password"));
+    m_lockAction->setEnabled(MasterPasswordManager::instance().isEnabled());
+    connect(m_lockAction, &QAction::triggered, this, &MainWindow::lockApplication);
 
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
 
@@ -1259,7 +1710,8 @@ void MainWindow::showCommandPalette() {
     const QStringList commands = {
         tr("New Remote Session"),     tr("Open Local Terminal"), tr("Toggle Split View"), tr("Toggle 2x2 Grid View"),
         tr("Move Tab to Other Pane"), tr("Toggle Multi-Input"),  tr("Open Settings"),     tr("Manage Macros"),
-        tr("Find in All Sessions"),   tr("Toggle Theme"),
+        tr("Find in All Sessions"),   tr("Open Diagnostics"),    tr("Clear Clipboard"),   tr("Toggle Theme"),
+        tr("Lock Application"),
     };
 
     bool accepted = false;
@@ -1288,8 +1740,71 @@ void MainWindow::showCommandPalette() {
         onManageMacros();
     } else if (command == tr("Find in All Sessions")) {
         onGlobalSearch();
+    } else if (command == tr("Open Diagnostics")) {
+        showDiagnostics();
+    } else if (command == tr("Clear Clipboard")) {
+        if (auto* clipboard = QApplication::clipboard()) {
+            clipboard->clear(QClipboard::Clipboard);
+            clipboard->clear(QClipboard::Selection);
+        }
+        statusBar()->showMessage(tr("Clipboard cleared"), 3000);
     } else if (command == tr("Toggle Theme")) {
         toggleTheme();
+    } else if (command == tr("Lock Application")) {
+        lockApplication();
+    }
+}
+
+void MainWindow::lockApplication() {
+    auto& masterPassword = MasterPasswordManager::instance();
+    if (!masterPassword.isEnabled()) {
+        QMessageBox::information(this, tr("Application Lock"),
+                                 tr("Enable the Master Password in Settings before locking the application."));
+        return;
+    }
+
+    masterPassword.lock();
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("BanchoXterm Locked"));
+    dialog.setModal(true);
+    dialog.setWindowFlags(Qt::Dialog | Qt::CustomizeWindowHint | Qt::WindowTitleHint);
+    dialog.setMinimumWidth(360);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* message = new QLabel(tr("Enter the Master Password to continue."), &dialog);
+    message->setWordWrap(true);
+    layout->addWidget(message);
+    auto* password = new QLineEdit(&dialog);
+    password->setEchoMode(QLineEdit::Password);
+    password->setPlaceholderText(tr("Master Password"));
+    layout->addWidget(password);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
+    buttons->button(QDialogButtonBox::Cancel)->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Unlock"));
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    password->setFocus();
+
+    constexpr int maxAttempts = 5;
+    for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+        if (dialog.exec() != QDialog::Accepted) {
+            close();
+            return;
+        }
+        if (masterPassword.unlock(password->text()))
+            return;
+        if (attempt == maxAttempts) {
+            QMessageBox::critical(this, tr("Application Lock"),
+                                  tr("Too many incorrect attempts. BanchoXterm will close."));
+            close();
+            return;
+        }
+        QMessageBox::warning(&dialog, tr("Application Lock"),
+                             tr("The Master Password is incorrect. Attempt %1 of %2.").arg(attempt).arg(maxAttempts));
+        password->clear();
+        password->setFocus();
     }
 }
 
@@ -1549,8 +2064,40 @@ void MainWindow::rebuildMacrosMenu() {
             act->setIcon(QIcon(":/icons/macros.svg"));
             connect(act, &QAction::triggered, this, [this, texts, i]() {
                 auto* tab = currentTerminalTab();
-                if (tab)
-                    tab->sendRaw(texts[i]);
+                if (!tab)
+                    return;
+
+                QList<TerminalTab*> groupTargets;
+                const QString group = tab->session().group.trimmed();
+                if (!group.isEmpty()) {
+                    for (QTabWidget* pane : allPanes()) {
+                        for (int tabIndex = 0; tabIndex < pane->count(); ++tabIndex) {
+                            auto* candidate = qobject_cast<TerminalTab*>(pane->widget(tabIndex));
+                            if (candidate && candidate->session().group.trimmed() == group)
+                                groupTargets.append(candidate);
+                        }
+                    }
+                }
+
+                QList<TerminalTab*> targets = {tab};
+                if (groupTargets.size() > 1) {
+                    const auto choice = localizedQuestion(
+                        this, tr("Run Macro"),
+                        tr("The current session belongs to group '%1'. Send this macro to all %2 sessions in the group?")
+                            .arg(group)
+                            .arg(groupTargets.size()),
+                        QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel, QMessageBox::Yes);
+                    if (choice == QMessageBox::Cancel)
+                        return;
+                    if (choice == QMessageBox::Yes)
+                        targets = groupTargets;
+                }
+
+                for (int targetIndex = 0; targetIndex < targets.size(); ++targetIndex) {
+                    TerminalTab* target = targets.at(targetIndex);
+                    QTimer::singleShot(targetIndex * 75, target,
+                                       [target, text = texts[i]]() { sendMacro(target, text); });
+                }
             });
         }
     }
@@ -1630,14 +2177,20 @@ void MainWindow::onManageMacros() {
     lay->addWidget(nameEdit);
 
     auto* textEdit = new QPlainTextEdit(&dlg);
-    textEdit->setPlaceholderText(tr("Text to send (\\n for newline)"));
+    textEdit->setPlaceholderText(tr("Text to send (use {{PAUSE:500}} between steps)"));
     lay->addWidget(textEdit);
 
     auto* btnRow = new QHBoxLayout();
     auto* addBtn = new QPushButton(tr("Add / Update"), &dlg);
     auto* delBtn = new QPushButton(tr("Delete"), &dlg);
+    auto* importBtn = new QPushButton(tr("Import"), &dlg);
+    auto* exportBtn = new QPushButton(tr("Export"), &dlg);
+    auto* logBtn = new QPushButton(tr("View log"), &dlg);
     btnRow->addWidget(addBtn);
     btnRow->addWidget(delBtn);
+    btnRow->addWidget(importBtn);
+    btnRow->addWidget(exportBtn);
+    btnRow->addWidget(logBtn);
     lay->addLayout(btnRow);
 
     auto* closeBtn = new QPushButton(tr("Close"), &dlg);
@@ -1674,6 +2227,83 @@ void MainWindow::onManageMacros() {
             list->clear();
             list->addItems(names);
         }
+    });
+
+    connect(exportBtn, &QPushButton::clicked, &dlg, [&]() {
+        const QString path =
+            QFileDialog::getSaveFileName(&dlg, tr("Export Macros"), QString(), tr("JSON files (*.json)"));
+        if (path.isEmpty())
+            return;
+
+        QJsonArray macros;
+        for (int i = 0; i < names.size() && i < texts.size(); ++i) {
+            QJsonObject macro;
+            macro.insert(QStringLiteral("name"), names.at(i));
+            macro.insert(QStringLiteral("text"), texts.at(i));
+            macros.append(macro);
+        }
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            QMessageBox::warning(&dlg, tr("Export Macros"), tr("Could not write the selected file."));
+            return;
+        }
+        file.write(QJsonDocument(macros).toJson(QJsonDocument::Indented));
+    });
+
+    connect(importBtn, &QPushButton::clicked, &dlg, [&]() {
+        const QString path =
+            QFileDialog::getOpenFileName(&dlg, tr("Import Macros"), QString(), tr("JSON files (*.json)"));
+        if (path.isEmpty())
+            return;
+
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            QMessageBox::warning(&dlg, tr("Import Macros"), tr("Could not read the selected file."));
+            return;
+        }
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+        if (!document.isArray() || parseError.error != QJsonParseError::NoError) {
+            QMessageBox::warning(&dlg, tr("Import Macros"), tr("The selected file is not a valid macro list."));
+            return;
+        }
+
+        int imported = 0;
+        for (const QJsonValue& value : document.array()) {
+            if (!value.isObject())
+                continue;
+            const QJsonObject macro = value.toObject();
+            const QString name = macro.value(QStringLiteral("name")).toString().trimmed();
+            if (name.isEmpty() || !macro.value(QStringLiteral("text")).isString())
+                continue;
+            const QString text = macro.value(QStringLiteral("text")).toString();
+            const int index = names.indexOf(name);
+            if (index >= 0)
+                texts[index] = text;
+            else {
+                names.append(name);
+                texts.append(text);
+            }
+            ++imported;
+        }
+        list->clear();
+        list->addItems(names);
+        if (imported == 0)
+            QMessageBox::warning(&dlg, tr("Import Macros"), tr("No valid macros were found in the selected file."));
+    });
+
+    connect(logBtn, &QPushButton::clicked, &dlg, [&]() {
+        QDialog logDialog(&dlg);
+        logDialog.setWindowTitle(tr("Macro execution log"));
+        logDialog.resize(720, 420);
+        auto* logLayout = new QVBoxLayout(&logDialog);
+        auto* logList = new QListWidget(&logDialog);
+        logList->addItems(QSettings().value(QStringLiteral("macros/log")).toStringList());
+        logLayout->addWidget(logList);
+        auto* closeLog = new QDialogButtonBox(QDialogButtonBox::Close, &logDialog);
+        logLayout->addWidget(closeLog);
+        connect(closeLog, &QDialogButtonBox::rejected, &logDialog, &QDialog::reject);
+        logDialog.exec();
     });
 
     dlg.exec();

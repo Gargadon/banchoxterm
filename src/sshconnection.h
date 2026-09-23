@@ -3,8 +3,10 @@
 #include <QByteArray>
 #include <QList>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <functional>
+#include <atomic>
 #include <libssh2.h>
 #include <libssh2_sftp.h>
 #include "session.h"
@@ -36,12 +38,16 @@ public:
 public slots:
     void connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
                        const QString& password, const QList<TunnelConfig>& tunnels, const QString& jumpHost = QString(),
-                       int jumpPort = 22, const QString& jumpUser = QString(), const QString& jumpKeyPath = QString());
+                       int jumpPort = 22, const QString& jumpUser = QString(), const QString& jumpKeyPath = QString(),
+                       const QString& sessionId = QString());
     void setX11Forwarding(bool enabled);
     void setKeepAliveSeconds(int seconds);
     void setCipherAlgorithms(const QString& ciphers);
     void setKexAlgorithm(const QString& kex);
     void setMacAlgorithm(const QString& mac);
+    void setTerminalType(const QString& terminalType);
+    void setLanguage(const QString& language);
+    void setInitialSize(int rows, int cols);
     void disconnectFromHost();
     void sendToShell(const QByteArray& data);
     void resizePty(int rows, int cols);
@@ -53,6 +59,11 @@ public slots:
     void renamePath(const QString& oldPath, const QString& newPath);
     void chmodPath(const QString& path, int mode);
     void uploadDirectory(const QString& localPath, const QString& remoteBasePath);
+    void cancelTransfer();
+    void pauseTransfer();
+    void resumeTransfer();
+    void startTunnel(int index);
+    void stopTunnel(int index);
 
 signals:
     void connectionSuccess();
@@ -63,6 +74,9 @@ signals:
     void directoryListed(const QString& path, const QList<SftpFile>& files);
     void operationFinished(bool success, const QString& error);
     void transferProgress(const QString& fileName, qint64 bytesDone, qint64 totalBytes);
+    void tunnelStatus(const QString& message, bool active);
+    void tunnelStateChanged(int index, bool active);
+    void diagnosticMessage(const QString& message);
     void remoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
 
 private slots:
@@ -106,6 +120,10 @@ private:
 
     bool uploadOneFile(const QString& localPath, const QString& remotePath);
     bool uploadDirRecursive(const QString& localDir, const QString& remoteDir);
+    bool transferCancelled() const {
+        return m_transferCancelRequested.load(std::memory_order_relaxed);
+    }
+    void waitIfTransferPaused() const;
 
     void startStats();
     void pollStats();
@@ -138,6 +156,7 @@ private:
     int m_port = 22;
     QString m_user;
     QString m_keyPath;
+    QString m_sessionId;
 
     int m_ptyRows = 24;
     int m_ptyCols = 80;
@@ -147,12 +166,15 @@ private:
     QSocketNotifier* m_readNotifier = nullptr;
     QSocketNotifier* m_writeNotifier = nullptr;
     bool m_connected = false;
+    QElapsedTimer m_connectionTimer;
 
     // Per-session SSH options (set before connectToHost)
     int m_keepAliveSeconds = 0;
     QString m_cryptCipher;
     QString m_kexAlgo;
     QString m_macAlgo;
+    QString m_terminalType = QStringLiteral("xterm-256color");
+    QString m_language;
 
     // non-blocking stats query state machine
     enum class StatsState { Idle, Opening, Execing, Reading };
@@ -179,4 +201,6 @@ private:
     // Tunnels
     QList<TunnelConfig> m_tunnelConfigs;
     QList<SshTunnel*> m_tunnels;
+    std::atomic_bool m_transferCancelRequested{false};
+    std::atomic_bool m_transferPaused{false};
 };

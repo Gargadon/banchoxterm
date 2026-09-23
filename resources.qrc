@@ -33,6 +33,8 @@
     <file>icons/chevron-down.svg</file>
     <file>icons/chevron-up.svg</file>
     <file>icons/close.svg</file>
+    <file>icons/check.svg</file>
+    <file>icons/check-white.svg</file>
     <file>icons/cpu.svg</file>
     <file>icons/memory.svg</file>
     <file>icons/disk.svg</file>

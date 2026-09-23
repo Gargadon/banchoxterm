@@ -19,6 +19,10 @@
 #include <QDialogButtonBox>
 #include <QGroupBox>
 #include <QSerialPortInfo>
+#include <QMessageBox>
+#include <QRegularExpression>
+#include <QSignalBlocker>
+#include <qtermwidget.h>
 
 class TunnelEditDialog : public QDialog {
 public:
@@ -44,13 +48,37 @@ public:
         m_remotePortSpin->setRange(1, 65535);
         m_remotePortSpin->setValue(80);
 
+        m_socksUsernameEdit = new QLineEdit(this);
+        m_socksUsernameEdit->setPlaceholderText(tr("Optional SOCKS5 username"));
+        m_socksPasswordEdit = new QLineEdit(this);
+        m_socksPasswordEdit->setEchoMode(QLineEdit::Password);
+        m_socksPasswordEdit->setPlaceholderText(tr("Optional SOCKS5 password"));
+
         layout->addRow(tr("Tunnel Type:"), m_typeCombo);
         layout->addRow(tr("Local Port:"), m_localPortSpin);
         layout->addRow(tr("Remote Host:"), m_remoteHostEdit);
         layout->addRow(tr("Remote Port:"), m_remotePortSpin);
+        layout->addRow(tr("SOCKS5 Username:"), m_socksUsernameEdit);
+        layout->addRow(tr("SOCKS5 Password:"), m_socksPasswordEdit);
 
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-        connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
+        buttons->button(QDialogButtonBox::Ok)->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
+        buttons->button(QDialogButtonBox::Cancel)->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
+        connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
+            const bool dynamic = m_typeCombo->currentData().toInt() == static_cast<int>(TunnelConfig::Type::Dynamic);
+            const QString host = m_remoteHostEdit->text().trimmed();
+            if (!dynamic && host.isEmpty()) {
+                QMessageBox::warning(this, tr("Invalid Tunnel"), tr("A remote host is required for this tunnel."));
+                m_remoteHostEdit->setFocus();
+                return;
+            }
+            if (!dynamic && host.contains(QRegularExpression(QStringLiteral("\\s")))) {
+                QMessageBox::warning(this, tr("Invalid Tunnel"), tr("The remote host cannot contain whitespace."));
+                m_remoteHostEdit->setFocus();
+                return;
+            }
+            accept();
+        });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
         layout->addRow(buttons);
 
@@ -67,6 +95,8 @@ public:
         c.localPort = m_localPortSpin->value();
         c.remoteHost = m_remoteHostEdit->text().trimmed();
         c.remotePort = m_remotePortSpin->value();
+        c.socksUsername = m_socksUsernameEdit->text();
+        c.socksPassword = m_socksPasswordEdit->text();
         return c;
     }
 
@@ -75,6 +105,8 @@ private:
     QSpinBox* m_localPortSpin;
     QLineEdit* m_remoteHostEdit;
     QSpinBox* m_remotePortSpin;
+    QLineEdit* m_socksUsernameEdit;
+    QLineEdit* m_socksPasswordEdit;
 };
 
 SessionDialog::SessionDialog(QWidget* parent) : QDialog(parent) {
@@ -411,6 +443,40 @@ void SessionDialog::setupUi() {
     m_serialBaudCombo->setCurrentText("115200");
     serialForm->addRow(tr("Baud Rate:"), m_serialBaudCombo);
 
+    m_serialDataBitsCombo = new QComboBox(serialWidget);
+    m_serialDataBitsCombo->addItem("5", 5);
+    m_serialDataBitsCombo->addItem("6", 6);
+    m_serialDataBitsCombo->addItem("7", 7);
+    m_serialDataBitsCombo->addItem("8", 8);
+    m_serialDataBitsCombo->setCurrentText("8");
+    serialForm->addRow(tr("Data Bits:"), m_serialDataBitsCombo);
+
+    m_serialParityCombo = new QComboBox(serialWidget);
+    m_serialParityCombo->addItem(tr("None"), 0);
+    m_serialParityCombo->addItem(tr("Even"), 2);
+    m_serialParityCombo->addItem(tr("Odd"), 3);
+    serialForm->addRow(tr("Parity:"), m_serialParityCombo);
+
+    m_serialStopBitsCombo = new QComboBox(serialWidget);
+    m_serialStopBitsCombo->addItem("1", 1);
+    m_serialStopBitsCombo->addItem("1.5", 3);
+    m_serialStopBitsCombo->addItem("2", 2);
+    serialForm->addRow(tr("Stop Bits:"), m_serialStopBitsCombo);
+
+    m_serialFlowCombo = new QComboBox(serialWidget);
+    m_serialFlowCombo->addItem(tr("None"), 0);
+    m_serialFlowCombo->addItem(tr("RTS/CTS"), 1);
+    m_serialFlowCombo->addItem(tr("XON/XOFF"), 2);
+    serialForm->addRow(tr("Flow Control:"), m_serialFlowCombo);
+
+    m_serialDtrCheck = new QCheckBox(tr("Assert DTR"), serialWidget);
+    m_serialDtrCheck->setChecked(true);
+    serialForm->addRow(tr("DTR:"), m_serialDtrCheck);
+
+    m_serialRtsCheck = new QCheckBox(tr("Assert RTS"), serialWidget);
+    m_serialRtsCheck->setChecked(true);
+    serialForm->addRow(tr("RTS:"), m_serialRtsCheck);
+
     m_serialCmdCombo = new QComboBox(serialWidget);
     m_serialCmdCombo->addItems({"picocom", "screen", "minicom"});
     serialForm->addRow(tr("Serial Tool:"), m_serialCmdCombo);
@@ -445,6 +511,41 @@ void SessionDialog::setupUi() {
     m_ftpTlsCheck->setChecked(true);
     ftpForm->addRow(QString(), m_ftpTlsCheck);
 
+    m_ftpTlsVersionCombo = new QComboBox(ftpWidget);
+    m_ftpTlsVersionCombo->addItem(tr("TLS 1.2 or newer"), 12);
+    m_ftpTlsVersionCombo->addItem(tr("TLS 1.3 only"), 13);
+    ftpForm->addRow(tr("Minimum TLS version:"), m_ftpTlsVersionCombo);
+
+    auto* caFileWidget = new QWidget(ftpWidget);
+    auto* caFileLayout = new QHBoxLayout(caFileWidget);
+    caFileLayout->setContentsMargins(0, 0, 0, 0);
+    m_ftpTlsCaFileEdit = new QLineEdit(caFileWidget);
+    m_ftpTlsCaFileEdit->setPlaceholderText(tr("Use the system CA store"));
+    auto* caFileButton = new QPushButton(tr("Browse..."), caFileWidget);
+    caFileLayout->addWidget(m_ftpTlsCaFileEdit);
+    caFileLayout->addWidget(caFileButton);
+    connect(caFileButton, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(this, tr("Select CA certificate bundle"));
+        if (!path.isEmpty())
+            m_ftpTlsCaFileEdit->setText(path);
+    });
+    ftpForm->addRow(tr("Custom CA bundle:"), caFileWidget);
+
+    m_ftpTlsAllowInvalidCheck = new QCheckBox(tr("Allow invalid certificates (unsafe)"), ftpWidget);
+    ftpForm->addRow(QString(), m_ftpTlsAllowInvalidCheck);
+
+    auto updateTlsControls = [this]() {
+        const bool enabled = m_ftpTlsCheck && m_ftpTlsCheck->isChecked();
+        if (m_ftpTlsVersionCombo)
+            m_ftpTlsVersionCombo->setEnabled(enabled);
+        if (m_ftpTlsCaFileEdit)
+            m_ftpTlsCaFileEdit->setEnabled(enabled);
+        if (m_ftpTlsAllowInvalidCheck)
+            m_ftpTlsAllowInvalidCheck->setEnabled(enabled);
+    };
+    connect(m_ftpTlsCheck, &QCheckBox::toggled, this, updateTlsControls);
+    updateTlsControls();
+
     m_stackedWidget->addWidget(ftpWidget); // index 6
 
     mainLayout->addWidget(m_stackedWidget);
@@ -462,6 +563,88 @@ void SessionDialog::setupUi() {
     m_scrollbackSpin->setValue(5000);
     m_scrollbackSpin->setToolTip(tr("Lines of scrollback history. 0 disables scrollback."));
     termForm->addRow(tr("Scrollback (lines):"), m_scrollbackSpin);
+
+    m_colorSchemeCombo = new QComboBox(m_terminalSettingsWidget);
+    m_colorSchemeCombo->addItem(tr("Use global setting"), QString());
+    for (const QString& scheme : QTermWidget::availableColorSchemes())
+        m_colorSchemeCombo->addItem(scheme, scheme);
+    termForm->addRow(tr("Color scheme:"), m_colorSchemeCombo);
+
+    m_terminalTypeEdit = new QLineEdit(m_terminalSettingsWidget);
+    m_terminalTypeEdit->setText(QStringLiteral("xterm-256color"));
+    m_terminalTypeEdit->setPlaceholderText(tr("e.g. xterm-256color, vt100"));
+    termForm->addRow(tr("TERM:"), m_terminalTypeEdit);
+
+    m_languageEdit = new QLineEdit(m_terminalSettingsWidget);
+    m_languageEdit->setPlaceholderText(tr("Optional, e.g. en_US.UTF-8"));
+    termForm->addRow(tr("LANG:"), m_languageEdit);
+
+    m_promptPatternEdit = new QLineEdit(m_terminalSettingsWidget);
+    m_promptPatternEdit->setPlaceholderText(tr("Optional regular expression, e.g. [#$>]\\s*$"));
+    m_promptPatternEdit->setToolTip(tr("A matching prompt is recorded in session diagnostics."));
+    termForm->addRow(tr("Prompt regex:"), m_promptPatternEdit);
+
+    m_encodingCombo = new QComboBox(m_terminalSettingsWidget);
+    m_encodingCombo->addItem(QStringLiteral("UTF-8"), QStringLiteral("UTF-8"));
+    m_encodingCombo->addItem(tr("System locale"), QStringLiteral("Locale"));
+    termForm->addRow(tr("Encoding:"), m_encodingCombo);
+
+    m_readOnlyCheck = new QCheckBox(tr("Read-only session (block input)"), m_terminalSettingsWidget);
+    m_readOnlyCheck->setToolTip(
+        tr("Keep terminal output visible but prevent commands and special characters from being sent."));
+    termForm->addRow(QString(), m_readOnlyCheck);
+
+    m_backspaceCombo = new QComboBox(m_terminalSettingsWidget);
+    m_backspaceCombo->addItem(tr("Delete (0x7F)"), QString(QChar(0x7f)));
+    m_backspaceCombo->addItem(tr("Ctrl-H (0x08)"), QString(QChar(0x08)));
+    termForm->addRow(tr("Backspace sends:"), m_backspaceCombo);
+
+    m_enterCombo = new QComboBox(m_terminalSettingsWidget);
+    m_enterCombo->addItem(tr("Carriage return (CR, 0x0D)"), QString(QChar('\r')));
+    m_enterCombo->addItem(tr("Line feed (LF, 0x0A)"), QString(QChar('\n')));
+    m_enterCombo->addItem(tr("CR followed by LF (0x0D 0x0A)"), QString(QChar('\r')) + QChar('\n'));
+    termForm->addRow(tr("Enter sends:"), m_enterCombo);
+
+    m_ciscoBreakEdit = new QLineEdit(m_terminalSettingsWidget);
+    m_ciscoBreakEdit->setText(QStringLiteral("1E"));
+    m_ciscoBreakEdit->setPlaceholderText(tr("Hex bytes, e.g. 1E"));
+    m_ciscoBreakEdit->setToolTip(tr("Sequence sent by Break (Cisco), written as hexadecimal bytes."));
+    termForm->addRow(tr("Cisco Break sequence (hex):"), m_ciscoBreakEdit);
+
+    m_manufacturerCombo = new QComboBox(m_terminalSettingsWidget);
+    m_manufacturerCombo->addItem(tr("Generic"), QStringLiteral("generic"));
+    m_manufacturerCombo->addItem(tr("Cisco IOS"), QStringLiteral("cisco"));
+    m_manufacturerCombo->addItem(tr("Juniper Junos"), QStringLiteral("juniper"));
+    m_manufacturerCombo->addItem(tr("MikroTik RouterOS"), QStringLiteral("mikrotik"));
+    m_manufacturerCombo->addItem(tr("FortiOS"), QStringLiteral("fortios"));
+    m_manufacturerCombo->setToolTip(tr("Applies common terminal defaults; individual values remain editable."));
+    termForm->addRow(tr("Manufacturer profile:"), m_manufacturerCombo);
+    connect(m_manufacturerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        const QString profile = m_manufacturerCombo->itemData(index).toString();
+        if (profile == QStringLiteral("cisco")) {
+            m_terminalTypeEdit->setText(QStringLiteral("xterm-256color"));
+            m_ciscoBreakEdit->setText(QStringLiteral("1E"));
+        } else if (profile == QStringLiteral("juniper")) {
+            m_terminalTypeEdit->setText(QStringLiteral("vt100"));
+            m_ciscoBreakEdit->setText(QStringLiteral("1E"));
+        } else if (profile == QStringLiteral("mikrotik")) {
+            m_terminalTypeEdit->setText(QStringLiteral("xterm"));
+            m_ciscoBreakEdit->setText(QStringLiteral("1E"));
+        } else if (profile == QStringLiteral("fortios")) {
+            m_terminalTypeEdit->setText(QStringLiteral("xterm-256color"));
+            m_ciscoBreakEdit->setText(QStringLiteral("1E"));
+        }
+    });
+
+    m_initialRowsSpin = new QSpinBox(m_terminalSettingsWidget);
+    m_initialRowsSpin->setRange(1, 200);
+    m_initialRowsSpin->setValue(24);
+    termForm->addRow(tr("Initial rows:"), m_initialRowsSpin);
+
+    m_initialColumnsSpin = new QSpinBox(m_terminalSettingsWidget);
+    m_initialColumnsSpin->setRange(1, 400);
+    m_initialColumnsSpin->setValue(80);
+    termForm->addRow(tr("Initial columns:"), m_initialColumnsSpin);
 
     auto* fontRow = new QHBoxLayout();
     m_fontLabel = new QLabel(m_terminalSettingsWidget);
@@ -598,6 +781,12 @@ void SessionDialog::loadSession(const Session& session) {
             m_serialPortCombo->setCurrentText(session.serialPort);
         m_serialBaudCombo->setCurrentText(QString::number(session.baudRate));
         m_serialCmdCombo->setCurrentText(session.serialCmd);
+        m_serialDataBitsCombo->setCurrentText(QString::number(session.serialDataBits));
+        m_serialParityCombo->setCurrentIndex(m_serialParityCombo->findData(session.serialParity));
+        m_serialStopBitsCombo->setCurrentIndex(m_serialStopBitsCombo->findData(session.serialStopBits));
+        m_serialFlowCombo->setCurrentIndex(m_serialFlowCombo->findData(session.serialFlowControl));
+        m_serialDtrCheck->setChecked(session.serialDtr);
+        m_serialRtsCheck->setChecked(session.serialRts);
         break;
     }
     case SessionType::FTP:
@@ -606,6 +795,14 @@ void SessionDialog::loadSession(const Session& session) {
         m_ftpPortSpin->setValue(session.port > 0 ? session.port : 21);
         m_ftpUserEdit->setText(session.user);
         m_ftpTlsCheck->setChecked(session.ftpTls);
+        if (m_ftpTlsVersionCombo) {
+            const int versionIndex = m_ftpTlsVersionCombo->findData(session.ftpTlsMinimumVersion);
+            m_ftpTlsVersionCombo->setCurrentIndex(versionIndex >= 0 ? versionIndex : 0);
+        }
+        if (m_ftpTlsCaFileEdit)
+            m_ftpTlsCaFileEdit->setText(session.ftpTlsCaFile);
+        if (m_ftpTlsAllowInvalidCheck)
+            m_ftpTlsAllowInvalidCheck->setChecked(session.ftpTlsAllowInvalidCertificates);
         {
             QString password = Keyring::lookupPassword(session.id);
             if (m_ftpPasswordEdit && !password.isEmpty())
@@ -625,6 +822,29 @@ void SessionDialog::loadSession(const Session& session) {
     } else {
         m_fontLabel->setText(tr("Global default"));
     }
+    const int schemeIndex = m_colorSchemeCombo->findData(session.colorScheme);
+    m_colorSchemeCombo->setCurrentIndex(schemeIndex >= 0 ? schemeIndex : 0);
+    m_terminalTypeEdit->setText(session.terminalType.isEmpty() ? QStringLiteral("xterm-256color")
+                                                               : session.terminalType);
+    m_languageEdit->setText(session.language);
+    m_promptPatternEdit->setText(session.promptPattern);
+    const int encodingIndex =
+        m_encodingCombo->findData(session.encoding.isEmpty() ? QStringLiteral("UTF-8") : session.encoding);
+    m_encodingCombo->setCurrentIndex(encodingIndex >= 0 ? encodingIndex : 0);
+    if (m_readOnlyCheck)
+        m_readOnlyCheck->setChecked(session.readOnly);
+    const int backspaceIndex = m_backspaceCombo->findData(session.backspaceSequence);
+    m_backspaceCombo->setCurrentIndex(backspaceIndex >= 0 ? backspaceIndex : 0);
+    const int enterIndex = m_enterCombo->findData(session.enterSequence);
+    m_enterCombo->setCurrentIndex(enterIndex >= 0 ? enterIndex : 0);
+    m_ciscoBreakEdit->setText(session.ciscoBreakSequence.isEmpty() ? QStringLiteral("1E") : session.ciscoBreakSequence);
+    if (m_manufacturerCombo) {
+        const QSignalBlocker blocker(m_manufacturerCombo);
+        const int profileIndex = m_manufacturerCombo->findData(session.manufacturerProfile);
+        m_manufacturerCombo->setCurrentIndex(profileIndex >= 0 ? profileIndex : 0);
+    }
+    m_initialRowsSpin->setValue(session.initialRows > 0 ? session.initialRows : 24);
+    m_initialColumnsSpin->setValue(session.initialColumns > 0 ? session.initialColumns : 80);
 
     // SSH advanced options
     if (m_keepAliveSpin) {
@@ -713,6 +933,12 @@ Session SessionDialog::getSession() const {
             s.serialPort = visiblePort;
         s.baudRate = m_serialBaudCombo->currentText().toInt();
         s.serialCmd = m_serialCmdCombo->currentText();
+        s.serialDataBits = m_serialDataBitsCombo->currentData().toInt();
+        s.serialParity = m_serialParityCombo->currentData().toInt();
+        s.serialStopBits = m_serialStopBitsCombo->currentData().toInt();
+        s.serialFlowControl = m_serialFlowCombo->currentData().toInt();
+        s.serialDtr = m_serialDtrCheck->isChecked();
+        s.serialRts = m_serialRtsCheck->isChecked();
         break;
     }
     case 6:
@@ -721,6 +947,9 @@ Session SessionDialog::getSession() const {
         s.port = m_ftpPortSpin->value();
         s.user = m_ftpUserEdit->text().trimmed();
         s.ftpTls = m_ftpTlsCheck && m_ftpTlsCheck->isChecked();
+        s.ftpTlsMinimumVersion = m_ftpTlsVersionCombo ? m_ftpTlsVersionCombo->currentData().toInt() : 12;
+        s.ftpTlsCaFile = m_ftpTlsCaFileEdit ? m_ftpTlsCaFileEdit->text().trimmed() : QString();
+        s.ftpTlsAllowInvalidCertificates = m_ftpTlsAllowInvalidCheck && m_ftpTlsAllowInvalidCheck->isChecked();
         break;
     }
 
@@ -733,6 +962,21 @@ Session SessionDialog::getSession() const {
         s.fontFamily.clear();
         s.fontSize = 0;
     }
+    s.colorScheme = m_colorSchemeCombo->currentData().toString();
+    s.terminalType = m_terminalTypeEdit->text().trimmed();
+    if (s.terminalType.isEmpty())
+        s.terminalType = QStringLiteral("xterm-256color");
+    s.language = m_languageEdit->text().trimmed();
+    s.promptPattern = m_promptPatternEdit->text().trimmed();
+    s.encoding = m_encodingCombo->currentData().toString();
+    s.readOnly = m_readOnlyCheck && m_readOnlyCheck->isChecked();
+    s.backspaceSequence = m_backspaceCombo->currentData().toString();
+    s.enterSequence = m_enterCombo->currentData().toString();
+    s.ciscoBreakSequence = m_ciscoBreakEdit->text().remove(' ').trimmed().toUpper();
+    s.initialRows = m_initialRowsSpin->value();
+    s.initialColumns = m_initialColumnsSpin->value();
+    s.manufacturerProfile =
+        m_manufacturerCombo ? m_manufacturerCombo->currentData().toString() : QStringLiteral("generic");
 
     // SSH advanced options
     if (m_keepAliveSpin) {
@@ -745,6 +989,14 @@ Session SessionDialog::getSession() const {
 }
 
 void SessionDialog::accept() {
+    const QString breakSequence = m_ciscoBreakEdit->text().remove(' ').trimmed();
+    static const QRegularExpression hexBytes(QStringLiteral("^[0-9A-Fa-f]{2,64}$"));
+    if (!hexBytes.match(breakSequence).hasMatch() || (breakSequence.size() % 2) != 0) {
+        QMessageBox::warning(this, tr("Invalid Cisco Break sequence"),
+                             tr("Enter an even number of hexadecimal digits, for example 1E."));
+        m_ciscoBreakEdit->setFocus();
+        return;
+    }
     if (m_typeCombo->currentIndex() == 0) {
         if (m_savePasswordCheck->isChecked()) {
             QString pwd = m_passwordEdit->text();
@@ -753,6 +1005,13 @@ void SessionDialog::accept() {
             }
         } else {
             Keyring::deletePassword(m_id);
+        }
+        for (int i = 0; i < m_tunnels.size(); ++i) {
+            const QString key = QStringLiteral("%1:socks:%2").arg(m_id).arg(i);
+            if (!m_tunnels.at(i).socksPassword.isEmpty())
+                Keyring::storePassword(key, m_tunnels.at(i).socksPassword);
+            else
+                Keyring::deletePassword(key);
         }
     } else if (m_typeCombo->currentIndex() == 4) {
         QString pwd = m_vncPasswordEdit ? m_vncPasswordEdit->text() : QString();

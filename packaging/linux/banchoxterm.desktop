@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=BanchoXterm
+Comment=Multi-protocol terminal emulator and remote session manager
+Exec=banchoxterm
+Icon=banchoxterm
+Terminal=false
+Categories=System;TerminalEmulator;Network;
+Keywords=terminal;SSH;SFTP;remote;serial;

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RoyalDocument>
+  <RoyalSSHConnection>
+    <Name>Fixture SSH</Name>
+    <URI>fixture.example</URI>
+    <Port>2222</Port>
+    <CredentialUsername>admin</CredentialUsername>
+  </RoyalSSHConnection>
+</RoyalDocument>

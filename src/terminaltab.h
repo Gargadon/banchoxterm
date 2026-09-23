@@ -2,6 +2,7 @@
 #include <QWidget>
 #include <QProcess>
 #include <QByteArray>
+#include <QRegularExpression>
 #include "session.h"
 
 class QTermWidget;
@@ -54,6 +55,10 @@ public:
     void syncTerminalSize();
     void sendInputText(const QString& text);
     void sendRaw(const QString& text);
+    void reportMacroMessage(const QString& message);
+    void sendBreak();
+    void sendSerialFile();
+    void cancelSerialFile();
     bool searchText(const QString& str, bool next, bool caseSensitive);
     void copySelection();
     void pasteSelection();
@@ -66,6 +71,8 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
+    void terminalDataReceived(const QByteArray& data);
+    void promptDetected(const QString& prompt);
     void tabFinished();
     void titleChanged(const QString& title);
     void remoteDirChanged(const QString& dir);
@@ -112,6 +119,13 @@ private:
     void doClear();
     void doZoomIn();
     void doZoomOut();
+    void recordCommand(const QString& command);
+    void recordTypedInput(const QByteArray& data);
+    void showCommandHistory();
+    void handleXmodemInput(const QByteArray& data);
+    void sendXmodemPacket();
+    void finishXmodem(bool success, const QString& message);
+    void finishZmodem(bool success, const QString& message);
 
     Session m_session;
     QTermWidget* m_terminal = nullptr;
@@ -127,16 +141,34 @@ private:
     QTimer* m_rdpPollTimer = nullptr;
     bool m_rdpWasConnected = false;
     VncClientWidget* m_vncWidget = nullptr;
-#ifdef Q_OS_WIN
     QSerialPort* m_serialPort = nullptr;
+#ifdef Q_OS_WIN
     ConPty* m_conpty = nullptr;
     QTimer* m_conptyPollTimer = nullptr;
     bool m_conptyStarted = false;
     QString m_pendingShell;
 #endif
     bool m_isActive = true;
+    bool m_closing = false;
     bool m_stopPromptShown = false;
     QByteArray m_outputBuffer;
+    QByteArray m_promptBuffer;
+    QRegularExpression m_promptPattern;
+    QString m_lastDetectedPrompt;
+    QByteArray m_commandInputBuffer;
+    QFile* m_xmodemFile = nullptr;
+    QTimer* m_xmodemTimer = nullptr;
+    QByteArray m_xmodemPacket;
+    int m_xmodemBlock = 1;
+    int m_xmodemRetries = 0;
+    bool m_xmodemCrcMode = true;
+    bool m_xmodemWaitingEotAck = false;
+    bool m_ymodem = false;
+    bool m_ymodemHeaderPending = false;
+    bool m_ymodemFinalHeader = false;
+    QString m_ymodemFileName;
+    QProcess* m_zmodemProcess = nullptr;
+    QString m_zmodemFileName;
 
     QFrame* m_searchFrame = nullptr;
     QLineEdit* m_searchEdit = nullptr;

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 project(banchoxterm VERSION 1.1.2 LANGUAGES C CXX)
 
+include(GNUInstallDirs)
+
 option(BANCHO_ENABLE_ASAN "Enable AddressSanitizer for memory debugging" OFF)
 option(BANCHO_ENABLE_IPO "Enable interprocedural optimization for release builds" ON)
 
@@ -145,6 +147,8 @@ set(SOURCES
     src/sessionssidebar.h
     src/sftpsidebar.cpp
     src/sftpsidebar.h
+    src/sftptransferworker.cpp
+    src/sftptransferworker.h
     src/terminaltab.cpp
     src/terminaltab.h
     src/remoteeditordialog.cpp
@@ -405,6 +409,22 @@ add_custom_command(
 add_custom_target(translations DEPENDS ${QM_FILES})
 add_dependencies(banchoxterm translations)
 
+# Native Linux installation.  QTermWidget looks beside the executable for
+# these runtime data directories, so keep them together with the installed
+# binary instead of requiring a distro-specific data path.
+install(TARGETS banchoxterm RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY third_party/qtermwidget/lib/color-schemes
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY third_party/qtermwidget/lib/kb-layouts
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY third_party/qtermwidget/lib/translations
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES packaging/linux/banchoxterm.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES icons/logo.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+        RENAME banchoxterm.svg)
+
 # ── Tests ──────────────────────────────────────────────────────────
 
 enable_testing()
@@ -417,8 +437,37 @@ add_executable(banchoxterm_tests
     src/session.h
     src/masterpasswordmanager.cpp
     src/masterpasswordmanager.h
+    src/keyring.cpp
+    src/keyring.h
     src/vtterminalwidget.cpp
     src/vtterminalwidget.h
+    src/ftpclient.cpp
+    src/ftpclient.h
+    src/sshconnection.cpp
+    src/sshconnection.h
+    src/sftptransferworker.cpp
+    src/sftptransferworker.h
+    src/sshtunnel.cpp
+    src/sshtunnel.h
+    src/terminaltab.cpp
+    src/terminaltab.h
+    src/mainwindow.cpp
+    src/mainwindow.h
+    src/sessiondialog.cpp
+    src/sessiondialog.h
+    src/sessionssidebar.cpp
+    src/sessionssidebar.h
+    src/sftpsidebar.cpp
+    src/sftpsidebar.h
+    src/remoteeditordialog.cpp
+    src/remoteeditordialog.h
+    src/settingsdialog.cpp
+    src/settingsdialog.h
+    src/updater.cpp
+    src/updater.h
+    src/xservermanager.cpp
+    src/xservermanager.h
+    resources.qrc
 )
 
 target_link_libraries(banchoxterm_tests
@@ -426,6 +475,8 @@ target_link_libraries(banchoxterm_tests
         Qt6::Core
         Qt6::Test
         Qt6::Widgets
+        Qt6::Network
+        Qt6::SerialPort
 )
 
 target_include_directories(banchoxterm_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -434,7 +485,21 @@ target_include_directories(banchoxterm_tests PRIVATE
     ${BANCHO_SODIUM_GENERATED_INCLUDE}
 )
 target_compile_definitions(banchoxterm_tests PRIVATE SODIUM_STATIC)
+target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(banchoxterm_tests PRIVATE sodium)
+target_link_libraries(banchoxterm_tests PRIVATE libssh2)
+target_link_libraries(banchoxterm_tests PRIVATE qtermwidget6)
+
+if(BANCHO_ENABLE_VNC)
+    target_sources(banchoxterm_tests PRIVATE src/vncclientwidget.cpp src/vncclientwidget.h)
+    target_link_libraries(banchoxterm_tests PRIVATE vncclient)
+    target_include_directories(banchoxterm_tests PRIVATE
+        ${libvncserver_SOURCE_DIR}
+        ${libvncserver_BINARY_DIR}
+    )
+    target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_HAVE_VNC)
+endif()
 
 add_test(NAME SessionTests COMMAND banchoxterm_tests)
 # The test binary creates QWidget-based terminal components.  Use Qt's

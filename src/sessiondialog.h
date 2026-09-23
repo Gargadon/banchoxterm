@@ -36,6 +36,17 @@ private:
     QLabel* m_fontLabel = nullptr;
     QFont m_font;
     bool m_fontChosen = false;
+    QComboBox* m_colorSchemeCombo = nullptr;
+    QLineEdit* m_terminalTypeEdit = nullptr;
+    QComboBox* m_manufacturerCombo = nullptr;
+    QLineEdit* m_languageEdit = nullptr;
+    QLineEdit* m_promptPatternEdit = nullptr;
+    QComboBox* m_encodingCombo = nullptr;
+    QComboBox* m_backspaceCombo = nullptr;
+    QComboBox* m_enterCombo = nullptr;
+    QLineEdit* m_ciscoBreakEdit = nullptr;
+    QSpinBox* m_initialRowsSpin = nullptr;
+    QSpinBox* m_initialColumnsSpin = nullptr;
 
     // SSH advanced
     QSpinBox* m_keepAliveSpin = nullptr;
@@ -51,6 +62,7 @@ private:
     QCheckBox* m_savePasswordCheck;
     QCheckBox* m_x11ForwardCheck = nullptr;
     QCheckBox* m_autoReconnectCheck = nullptr;
+    QCheckBox* m_readOnlyCheck = nullptr;
     QLineEdit* m_keyEdit;
     QLineEdit* m_jumpHostEdit = nullptr;
     QSpinBox* m_jumpPortSpin = nullptr;
@@ -78,6 +90,12 @@ private:
     QComboBox* m_serialPortCombo;
     QComboBox* m_serialBaudCombo;
     QComboBox* m_serialCmdCombo;
+    QComboBox* m_serialDataBitsCombo;
+    QComboBox* m_serialParityCombo;
+    QComboBox* m_serialStopBitsCombo;
+    QComboBox* m_serialFlowCombo;
+    QCheckBox* m_serialDtrCheck;
+    QCheckBox* m_serialRtsCheck;
 
     // FTP
     QLineEdit* m_ftpHostEdit = nullptr;
@@ -85,6 +103,9 @@ private:
     QLineEdit* m_ftpUserEdit = nullptr;
     QLineEdit* m_ftpPasswordEdit = nullptr;
     QCheckBox* m_ftpTlsCheck = nullptr;
+    QComboBox* m_ftpTlsVersionCombo = nullptr;
+    QLineEdit* m_ftpTlsCaFileEdit = nullptr;
+    QCheckBox* m_ftpTlsAllowInvalidCheck = nullptr;
 
     // Tunnels
     QTableWidget* m_tunnelsTable;

@@ -57,7 +57,9 @@ private slots:
     void showAbout();
     void onManageMacros();
     void onGlobalSearch();
+    void showDiagnostics();
     void showCommandPalette();
+    void lockApplication();
 
 private:
     void setupUi();
@@ -116,6 +118,8 @@ private:
 
     QAction* m_copyAction;
     QAction* m_pasteAction;
+    QAction* m_specialCharactersAction = nullptr;
+    QAction* m_lockAction = nullptr;
     QMenu* m_macrosMenu = nullptr;
 
     QString m_themeMode = "system";
@@ -126,4 +130,6 @@ private:
     QLabel* m_contextSessionLabel = nullptr;
     QLabel* m_contextStateLabel = nullptr;
     QLabel* m_statusConnectionLabel = nullptr;
+    QHash<TerminalTab*, QStringList> m_diagnosticLogs;
+    QHash<QString, int> m_reconnectCounts;
 };

@@ -1,0 +1,6 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\SimonTatham\PuTTY\Sessions\Fixture%20Server]
+"HostName"="fixture.example"
+"UserName"="admin"
+"PortNumber"=dword:000008ae

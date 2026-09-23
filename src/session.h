@@ -20,6 +20,8 @@ struct TunnelConfig {
     int localPort = 0;
     QString remoteHost;
     int remotePort = 0;
+    QString socksUsername;
+    QString socksPassword;
 
     QJsonObject toJson() const;
     static TunnelConfig fromJson(const QJsonObject& json);
@@ -46,6 +48,7 @@ struct Session {
     QString jumpKeyPath;
     bool x11Forwarding = false;
     bool autoReconnect = false;
+    bool readOnly = false;
 
     // Local
     QString shellPath;
@@ -54,11 +57,28 @@ struct Session {
     QString serialPort;
     int baudRate = 115200;
     QString serialCmd;
+    int serialDataBits = 8;
+    int serialParity = 0;      // QSerialPort::Parity
+    int serialStopBits = 1;    // QSerialPort::StopBits
+    int serialFlowControl = 0; // QSerialPort::FlowControl
+    bool serialDtr = true;
+    bool serialRts = true;
 
     // Terminal (SSH / Local / Telnet / Serial)
     int scrollback = 5000;
     QString fontFamily;
-    int fontSize = 0; // 0 = inherit global settings
+    int fontSize = 0;    // 0 = inherit global settings
+    QString colorScheme; // empty = inherit global settings
+    QString terminalType = "xterm-256color";
+    QString manufacturerProfile = QStringLiteral("generic");
+    QString language;
+    QString promptPattern;
+    QString encoding = "UTF-8";
+    QString backspaceSequence = QString(QChar(0x7f));
+    QString enterSequence = QString(QChar('\r'));
+    QString ciscoBreakSequence = QStringLiteral("1E");
+    int initialRows = 24;
+    int initialColumns = 80;
 
     // SSH advanced
     int keepAliveSeconds = 0; // 0 = disabled
@@ -68,6 +88,9 @@ struct Session {
 
     // FTP
     bool ftpTls = true; // explicit FTPS by default
+    int ftpTlsMinimumVersion = 12;
+    QString ftpTlsCaFile;
+    bool ftpTlsAllowInvalidCertificates = false;
 
     QList<TunnelConfig> tunnels;
 
@@ -80,10 +103,15 @@ public:
     static QList<Session> loadSessions();
     static void saveSessions(const QList<Session>& sessions);
     static bool exportSessions(const QList<Session>& sessions, const QString& path);
-    static QList<Session> importSessions(const QString& path, bool* ok = nullptr);
+    static bool exportEncryptedSessions(const QList<Session>& sessions, const QString& path);
+    static bool exportOpenSshConfig(const QList<Session>& sessions, const QString& path);
+    static QList<Session> importSessions(const QString& path, bool* ok = nullptr,
+                                         QStringList* importedMacroNames = nullptr,
+                                         QStringList* importedMacroTexts = nullptr);
     static QList<Session> importOpenSshConfig(const QString& path, bool* ok = nullptr);
     static QList<Session> importPuTTYRegistry(const QString& path, bool* ok = nullptr);
-
-private:
+    static QList<Session> importMobaXtermSessions(const QString& path, bool* ok = nullptr);
+    static QList<Session> importSecureCrtSession(const QString& path, bool* ok = nullptr);
+    static QList<Session> importRoyalTsDocument(const QString& path, bool* ok = nullptr);
     static QString getFilePath();
 };

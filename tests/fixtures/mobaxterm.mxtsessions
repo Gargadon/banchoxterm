@@ -1,0 +1,5 @@
+[Bookmarks\Fixture]
+HostName=fixture.example
+UserName=admin
+Port=2222
+Protocol=ssh

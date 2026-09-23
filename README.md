@@ -9,8 +9,11 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Multi-tab terminal** — run multiple sessions side by side
 - **SSH client** — connect with key-based auth, password auth, SSH agent, and X11 forwarding
 - **SFTP sidebar** — browse, upload, download, delete, and edit remote files directly
+- **FTP/FTPS** — browse, transfer files and folders, drag & drop, pause/cancel,
+  automatic reconnect, and configurable TLS validation
 - **Telnet client** — connect to telnet hosts
-- **Serial console** — supports picocom, screen, and minicom
+- **Serial console** — supports picocom, screen, and minicom, with XMODEM/YMODEM
+  and optional ZMODEM sending through `sz` from lrzsz
 - **Local terminal** — open local shell sessions
 - **Multi-input** — send commands to all open terminals simultaneously
 - **Remote monitoring** — CPU, RAM, disk, and uptime stats in the status bar
@@ -68,7 +71,9 @@ use an installed X server such as Xming or X410.
   `libsecret` on Fedora). This is a runtime dependency.
 - Optional Linux keyring providers (choose one if your desktop does not already
   provide a Secret Service): GNOME Keyring (`gnome-keyring`) or KDE KWallet
-  with Secret Service support enabled. Neither replaces `secret-tool`.
+  with Secret Service support enabled. BanchoXterm also falls back to
+  `kwallet-query` when the Secret Service command is unavailable.
+- Optional ZMODEM sender: `lrzsz` (`sz`) for serial file transfers.
 
 > QTermWidget is compiled directly from the vendored `third_party/qtermwidget`
 > submodule on every platform (same fork, same emulator code on Linux and
@@ -89,12 +94,12 @@ desktop session.
 # Install dependencies (Ubuntu/Debian)
 sudo apt install build-essential cmake ninja-build \
   qt6-base-dev qt6-serialport-dev qt6-tools-dev qt6-tools-dev-tools \
-  libssl-dev zlib1g-dev libsecret-tools
+  libssl-dev zlib1g-dev libsecret-tools lrzsz
 
 # Install dependencies (Fedora)
 sudo dnf install cmake ninja-build \
   qt6-qtbase-devel qt6-qtserialport-devel qt6-qttools-devel \
-  openssl-devel zlib-devel libsecret
+  openssl-devel zlib-devel libsecret lrzsz
 
 # Build
 cmake -B build -G Ninja
@@ -131,8 +136,9 @@ without KPty, so local shells are bridged through ConPTY).
 
 ## Limitations
 
-- **FTP** is passive-mode only (no TLS/FTPS, no chmod) and has no folder upload,
-  no byte-level progress, and no drag & drop (use the SFTP sidebar for those).
+- **FTP/FTPS** currently uses passive mode and does not provide chmod. FTPS
+  supports TLS 1.2+ or TLS 1.3-only, a custom CA bundle, and an explicitly
+  opt-in policy for invalid certificates.
 - **SFTP drag & drop** only works *within* the app: local files dropped on the
   sidebar are uploaded, and remote files can be dragged out of the sidebar to a
   chosen local folder. Dragging remote files to another application (e.g.

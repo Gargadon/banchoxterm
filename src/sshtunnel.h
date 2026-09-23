@@ -14,7 +14,13 @@ public:
 
     bool start();
     void stop();
+    const TunnelConfig& config() const {
+        return m_config;
+    }
     void poll(); // Invocado periódicamente para leer de los canales SSH y escribir en los sockets
+
+signals:
+    void connectionCountChanged(int count);
 
 private slots:
     void onNewConnection();

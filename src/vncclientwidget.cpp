@@ -5,6 +5,10 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QMetaObject>
+#include <QApplication>
+#include <QClipboard>
+#include <QMenu>
+#include <QAction>
 #include <cstring>
 #include <cstdlib>
 
@@ -13,6 +17,15 @@
 VncClientWidget::VncClientWidget(QWidget* parent) : QWidget(parent) {
     setFocusPolicy(Qt::StrongFocus);
     setAttribute(Qt::WA_OpaquePaintEvent);
+    setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(this, &QWidget::customContextMenuRequested, this, &VncClientWidget::showDisplayContextMenu);
+    connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [this]() {
+        if (!m_connected || m_updatingClipboard)
+            return;
+        const QString text = QApplication::clipboard()->text();
+        if (!text.isEmpty())
+            enqueueClipboard(text.toUtf8());
+    });
 }
 
 VncClientWidget::~VncClientWidget() {
@@ -69,6 +82,21 @@ void VncClientWidget::onGotFrameBufferUpdate(rfbClient* client, int x, int y, in
     QMetaObject::invokeMethod(self, [self]() { self->update(); }, Qt::QueuedConnection);
 }
 
+void VncClientWidget::onGotXCutText(rfbClient* client, const char* text, int textLength) {
+    VncClientWidget* self = static_cast<VncClientWidget*>(rfbClientGetClientData(client, nullptr));
+    if (!self || !text || textLength <= 0)
+        return;
+    const QString clipboardText = QString::fromUtf8(text, textLength);
+    QMetaObject::invokeMethod(
+        self,
+        [self, clipboardText]() {
+            self->m_updatingClipboard = true;
+            QApplication::clipboard()->setText(clipboardText);
+            self->m_updatingClipboard = false;
+        },
+        Qt::QueuedConnection);
+}
+
 rfbCredential* VncClientWidget::onGetCredential(rfbClient* client, int credentialType) {
     VncClientWidget* self = static_cast<VncClientWidget*>(rfbClientGetClientData(client, nullptr));
     if (!self || credentialType != rfbCredentialTypeUser)
@@ -91,12 +119,18 @@ void VncClientWidget::runVncLoop() {
 
     client->MallocFrameBuffer = &VncClientWidget::onMallocFrameBuffer;
     client->GotFrameBufferUpdate = &VncClientWidget::onGotFrameBufferUpdate;
+    client->GotXCutText = &VncClientWidget::onGotXCutText;
     client->GetCredential = &VncClientWidget::onGetCredential;
 
     const QByteArray host = m_host.toUtf8();
     client->serverHost = qstrdup(host.constData());
     client->serverPort = m_port;
     client->connectTimeout = 10;
+    // Prefer compressed encodings when the server supports them, with Raw as
+    // a final fallback for older or minimal VNC implementations.
+    client->appData.encodingsString = "tight,zrle,hextile,copyrect,raw";
+    client->appData.enableJPEG = 1;
+    client->appData.qualityLevel = 8;
 
     // Request a 32-bit RGB framebuffer (matches QImage::Format_RGB32 layout).
     client->format.bitsPerPixel = 32;
@@ -119,7 +153,9 @@ void VncClientWidget::runVncLoop() {
 
     if (!rfbInitClient(client, &argc, argv)) {
         m_client = nullptr;
-        rfbClientCleanup(client);
+        // rfbInitClient() owns and cleans up the client structure on failure.
+        // Calling rfbClientCleanup() here again double-frees libvncclient's
+        // partially initialized connection state.
         emit errorOccurred(tr("VNC connection failed"));
         return;
     }
@@ -150,8 +186,12 @@ void VncClientWidget::processPendingInput(rfbClient* client) {
     for (const PendingInput& in : batch) {
         if (in.type == PendingInput::Key)
             SendKeyEvent(client, in.keysym, in.down);
-        else
+        else if (in.type == PendingInput::Pointer)
             SendPointerEvent(client, in.x, in.y, in.buttonMask);
+        else if (!in.clipboardText.isEmpty()) {
+            QByteArray clipboardText = in.clipboardText;
+            SendClientCutText(client, clipboardText.data(), clipboardText.size());
+        }
     }
 }
 
@@ -174,6 +214,14 @@ void VncClientWidget::enqueuePointer(int x, int y, int buttonMask) {
     m_pendingInputs.append(in);
 }
 
+void VncClientWidget::enqueueClipboard(const QByteArray& text) {
+    QMutexLocker locker(&m_inputMutex);
+    PendingInput in;
+    in.type = PendingInput::Clipboard;
+    in.clipboardText = text;
+    m_pendingInputs.append(in);
+}
+
 void VncClientWidget::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     QMutexLocker locker(&m_framebufferMutex);
@@ -184,7 +232,42 @@ void VncClientWidget::paintEvent(QPaintEvent*) {
     }
     const QImage copy = m_framebuffer.copy();
     locker.unlock();
-    painter.drawImage(rect(), copy);
+    painter.fillRect(rect(), Qt::black);
+    if (m_scaleMode == ScaleMode::OneToOne) {
+        const QPoint topLeft((width() - copy.width()) / 2, (height() - copy.height()) / 2);
+        painter.drawImage(topLeft, copy);
+        return;
+    }
+
+    const QImage scaled = copy.scaled(size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    const QPoint topLeft((width() - scaled.width()) / 2, (height() - scaled.height()) / 2);
+    painter.drawImage(topLeft, scaled);
+}
+
+void VncClientWidget::showDisplayContextMenu(const QPoint& position) {
+    QMenu menu(this);
+    QAction* fitAction = menu.addAction(tr("Fit to window (keep aspect ratio)"));
+    fitAction->setCheckable(true);
+    fitAction->setChecked(m_scaleMode == ScaleMode::Fit);
+    QAction* oneToOneAction = menu.addAction(tr("1:1 pixel size"));
+    oneToOneAction->setCheckable(true);
+    oneToOneAction->setChecked(m_scaleMode == ScaleMode::OneToOne);
+    menu.addSeparator();
+    QAction* fullscreenAction = menu.addAction(window()->isFullScreen() ? tr("Exit fullscreen") : tr("Fullscreen"));
+
+    QAction* selected = menu.exec(mapToGlobal(position));
+    if (selected == fitAction) {
+        m_scaleMode = ScaleMode::Fit;
+        update();
+    } else if (selected == oneToOneAction) {
+        m_scaleMode = ScaleMode::OneToOne;
+        update();
+    } else if (selected == fullscreenAction) {
+        if (window()->isFullScreen())
+            window()->showNormal();
+        else
+            window()->showFullScreen();
+    }
 }
 
 void VncClientWidget::resizeEvent(QResizeEvent*) {
@@ -222,6 +305,52 @@ rfbKeySym VncClientWidget::keysymForEvent(QKeyEvent* event) const {
         return XK_Right;
     case Qt::Key_Down:
         return XK_Down;
+    case Qt::Key_Clear:
+        return XK_Clear;
+    case Qt::Key_Pause:
+        return XK_Pause;
+    case Qt::Key_Print:
+        return XK_Print;
+    case Qt::Key_CapsLock:
+        return XK_Caps_Lock;
+    case Qt::Key_NumLock:
+        return XK_Num_Lock;
+    case Qt::Key_ScrollLock:
+        return XK_Scroll_Lock;
+    case Qt::Key_Menu:
+        return XK_Menu;
+    case Qt::Key_Space:
+        return XK_space;
+    case Qt::Key_Asterisk:
+        return XK_KP_Multiply;
+    case Qt::Key_Plus:
+        return XK_KP_Add;
+    case Qt::Key_Minus:
+        return XK_KP_Subtract;
+    case Qt::Key_Slash:
+        return XK_KP_Divide;
+    case Qt::Key_Period:
+        return XK_KP_Decimal;
+    case Qt::Key_0:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_0 : '0';
+    case Qt::Key_1:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_1 : '1';
+    case Qt::Key_2:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_2 : '2';
+    case Qt::Key_3:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_3 : '3';
+    case Qt::Key_4:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_4 : '4';
+    case Qt::Key_5:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_5 : '5';
+    case Qt::Key_6:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_6 : '6';
+    case Qt::Key_7:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_7 : '7';
+    case Qt::Key_8:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_8 : '8';
+    case Qt::Key_9:
+        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_9 : '9';
     case Qt::Key_Shift:
         return XK_Shift_L;
     case Qt::Key_Control:
@@ -234,7 +363,7 @@ rfbKeySym VncClientWidget::keysymForEvent(QKeyEvent* event) const {
         break;
     }
 
-    if (event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F12)
+    if (event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F24)
         return XK_F1 + (event->key() - Qt::Key_F1);
 
     const QString text = event->text();

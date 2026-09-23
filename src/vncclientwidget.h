@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
 #include <QImage>
+#include <QByteArray>
 #include <QMutex>
 #include <QList>
 #include <thread>
@@ -38,24 +39,30 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
 
 private:
+    enum class ScaleMode { Fit, OneToOne };
+
     struct PendingInput {
-        enum Type { Key, Pointer } type = Key;
+        enum Type { Key, Pointer, Clipboard } type = Key;
         rfbKeySym keysym = 0;
         rfbBool down = 0;
         int x = 0;
         int y = 0;
         int buttonMask = 0;
+        QByteArray clipboardText;
     };
 
     void runVncLoop();
     void processPendingInput(rfbClient* client);
     void enqueueKey(rfbKeySym keysym, bool down);
     void enqueuePointer(int x, int y, int buttonMask);
+    void enqueueClipboard(const QByteArray& text);
+    void showDisplayContextMenu(const QPoint& position);
     void sendPointerEvent(QMouseEvent* event, bool down);
     rfbKeySym keysymForEvent(QKeyEvent* event) const;
 
     static rfbBool onMallocFrameBuffer(rfbClient* client);
     static void onGotFrameBufferUpdate(rfbClient* client, int x, int y, int w, int h);
+    static void onGotXCutText(rfbClient* client, const char* text, int textLength);
     static rfbCredential* onGetCredential(rfbClient* client, int credentialType);
 
     rfbClient* m_client = nullptr;
@@ -69,9 +76,11 @@ private:
     std::atomic<bool> m_connected{false};
     std::atomic<int> m_remoteWidth{0};
     std::atomic<int> m_remoteHeight{0};
+    std::atomic<bool> m_updatingClipboard{false};
 
     QString m_host;
     int m_port = 5900;
     QString m_password;
     int m_buttonMask = 0;
+    ScaleMode m_scaleMode = ScaleMode::Fit;
 };

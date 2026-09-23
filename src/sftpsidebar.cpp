@@ -1,6 +1,7 @@
 #include "sftpsidebar.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QTreeWidget>
@@ -29,8 +30,15 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QApplication>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QListWidget>
+#include <QThread>
+#include <QUuid>
+#include <QMap>
 #include <QEvent>
 #include <QDropEvent>
+#include <utility>
 #include "keyring.h"
 #include "remoteeditordialog.h"
 #include "ftpclient.h"
@@ -152,6 +160,9 @@ protected:
 };
 
 SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
+    QSettings transferSettings;
+    m_maxParallelTransfers =
+        qBound(1, transferSettings.value(QStringLiteral("sftp/maxParallelTransfers"), 1).toInt(), 8);
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(10, 10, 10, 10);
     mainLayout->setSpacing(8);
@@ -188,28 +199,44 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
 
     remoteLayout->addLayout(navLayout);
 
-    auto* toolsLayout = new QHBoxLayout();
-    toolsLayout->setSpacing(6);
+    auto* toolsLayout = new QGridLayout();
+    toolsLayout->setHorizontalSpacing(6);
+    toolsLayout->setVerticalSpacing(6);
 
     m_uploadBtn = new QPushButton(QIcon(":/icons/upload.svg"), tr("Upload"), remotePanel);
-    toolsLayout->addWidget(m_uploadBtn);
+    toolsLayout->addWidget(m_uploadBtn, 0, 0);
 
     m_uploadDirBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("Upload Folder"), remotePanel);
-    toolsLayout->addWidget(m_uploadDirBtn);
+    toolsLayout->addWidget(m_uploadDirBtn, 0, 1);
+
+    m_compareBtn = new QPushButton(QIcon(":/icons/refresh.svg"), tr("Compare"), remotePanel);
+    m_compareBtn->setToolTip(tr("Compare the active local and remote folders"));
+    toolsLayout->addWidget(m_compareBtn, 1, 0);
+
+    m_tunnelsBtn = new QPushButton(QIcon(":/icons/server.svg"), tr("Tunnels"), remotePanel);
+    m_tunnelsBtn->setToolTip(tr("Start or stop individual SSH tunnels"));
+    toolsLayout->addWidget(m_tunnelsBtn, 1, 1);
+
+    toolsLayout->setColumnStretch(0, 1);
+    toolsLayout->setColumnStretch(1, 1);
 
     remoteLayout->addLayout(toolsLayout);
 
-    auto* fileOpsLayout = new QHBoxLayout();
-    fileOpsLayout->setSpacing(6);
+    auto* fileOpsLayout = new QGridLayout();
+    fileOpsLayout->setHorizontalSpacing(6);
+    fileOpsLayout->setVerticalSpacing(6);
 
     m_newFolderBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("New Folder"), remotePanel);
-    fileOpsLayout->addWidget(m_newFolderBtn);
+    fileOpsLayout->addWidget(m_newFolderBtn, 0, 0);
 
     m_renameBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Rename"), remotePanel);
-    fileOpsLayout->addWidget(m_renameBtn);
+    fileOpsLayout->addWidget(m_renameBtn, 0, 1);
 
     m_chmodBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Permissions"), remotePanel);
-    fileOpsLayout->addWidget(m_chmodBtn);
+    fileOpsLayout->addWidget(m_chmodBtn, 1, 0);
+
+    fileOpsLayout->setColumnStretch(0, 1);
+    fileOpsLayout->setColumnStretch(1, 1);
 
     remoteLayout->addLayout(fileOpsLayout);
 
@@ -316,6 +343,16 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     m_progressBar->hide();
     remoteLayout->addWidget(m_progressBar);
 
+    m_cancelTransferBtn = new QPushButton(tr("Cancel queued"), remotePanel);
+    m_cancelTransferBtn->setEnabled(false);
+    m_cancelTransferBtn->hide();
+    remoteLayout->addWidget(m_cancelTransferBtn);
+
+    m_pauseTransferBtn = new QPushButton(tr("Pause transfer"), remotePanel);
+    m_pauseTransferBtn->setEnabled(false);
+    m_pauseTransferBtn->hide();
+    remoteLayout->addWidget(m_pauseTransferBtn);
+
     m_statusLabel = new QLabel(tr("Disconnected"), remotePanel);
     m_statusLabel->setObjectName("sftpStatus");
     remoteLayout->addWidget(m_statusLabel);
@@ -328,6 +365,8 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     m_newFolderBtn->setEnabled(false);
     m_renameBtn->setEnabled(false);
     m_chmodBtn->setEnabled(false);
+    m_compareBtn->setEnabled(false);
+    m_tunnelsBtn->setEnabled(false);
     m_treeWidget->setEnabled(false);
 
     m_fileWatcher = new QFileSystemWatcher(this);
@@ -337,6 +376,10 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     connect(m_refreshBtn, &QPushButton::clicked, this, &SftpSidebar::onRefreshClicked);
     connect(m_uploadBtn, &QPushButton::clicked, this, &SftpSidebar::onUploadClicked);
     connect(m_uploadDirBtn, &QPushButton::clicked, this, &SftpSidebar::onUploadFolderClicked);
+    connect(m_compareBtn, &QPushButton::clicked, this, &SftpSidebar::onCompareFoldersClicked);
+    connect(m_tunnelsBtn, &QPushButton::clicked, this, &SftpSidebar::onManageTunnels);
+    connect(m_cancelTransferBtn, &QPushButton::clicked, this, &SftpSidebar::onCancelQueuedTransfers);
+    connect(m_pauseTransferBtn, &QPushButton::clicked, this, &SftpSidebar::onToggleTransferPause);
     connect(m_newFolderBtn, &QPushButton::clicked, this, &SftpSidebar::onNewFolderClicked);
     connect(m_renameBtn, &QPushButton::clicked, this, &SftpSidebar::onRenameClicked);
     connect(m_chmodBtn, &QPushButton::clicked, this, &SftpSidebar::onChmodClicked);
@@ -346,6 +389,7 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
 }
 
 SftpSidebar::~SftpSidebar() {
+    stopParallelTransfers();
     saveLayout();
     detachConnection();
 }
@@ -361,6 +405,7 @@ void SftpSidebar::setConnection(SshConnection* connection) {
     if (m_connection == connection)
         return;
 
+    stopParallelTransfers();
     detachConnection();
     detachFtp();
     m_connection = connection;
@@ -385,6 +430,7 @@ void SftpSidebar::setConnection(SshConnection* connection) {
     connect(m_connection, &SshConnection::transferProgress, this, &SftpSidebar::onTransferProgress);
     connect(m_connection, &SshConnection::passwordRequired, this, &SftpSidebar::onPasswordRequired);
     connect(m_connection, &SshConnection::remoteStatsUpdated, this, &SftpSidebar::remoteStatsUpdated);
+    connect(m_connection, &SshConnection::tunnelStateChanged, this, &SftpSidebar::onTunnelStateChanged);
 }
 
 void SftpSidebar::detachConnection() {
@@ -408,6 +454,7 @@ void SftpSidebar::setFtpClient(FtpClient* client) {
     connect(this, &SftpSidebar::requestList, m_ftp, &FtpClient::listDirectory);
     connect(this, &SftpSidebar::requestDownload, m_ftp, &FtpClient::downloadFile);
     connect(this, &SftpSidebar::requestUpload, m_ftp, &FtpClient::uploadFile);
+    connect(this, &SftpSidebar::requestUploadDir, m_ftp, &FtpClient::uploadDirectory);
     connect(this, &SftpSidebar::requestDelete, m_ftp, &FtpClient::deleteFile);
     connect(this, &SftpSidebar::requestCreateDir, m_ftp, &FtpClient::createDirectory);
     connect(this, &SftpSidebar::requestRename, m_ftp, &FtpClient::renamePath);
@@ -416,6 +463,7 @@ void SftpSidebar::setFtpClient(FtpClient* client) {
     connect(m_ftp, &FtpClient::connectionFailed, this, &SftpSidebar::onConnectionFailed);
     connect(m_ftp, &FtpClient::directoryListed, this, &SftpSidebar::onDirectoryListed);
     connect(m_ftp, &FtpClient::operationFinished, this, &SftpSidebar::onOperationFinished);
+    connect(m_ftp, &FtpClient::transferProgress, this, &SftpSidebar::onTransferProgress);
 }
 
 void SftpSidebar::detachFtp() {
@@ -435,7 +483,9 @@ void SftpSidebar::startSession(const Session& session) {
         if (!m_ftp)
             setFtpClient(new FtpClient(this));
         const QString password = Keyring::lookupPassword(session.id);
-        emit requestFtpConnect(session.host, session.port, session.user, password, session.ftpTls);
+        emit requestFtpConnect(session.host, session.port, session.user, password, session.ftpTls,
+                               session.ftpTlsMinimumVersion, session.ftpTlsCaFile,
+                               session.ftpTlsAllowInvalidCertificates);
         return;
     }
     if (session.type != SessionType::SSH) {
@@ -456,26 +506,36 @@ void SftpSidebar::startSession(const Session& session) {
 
     QString password = Keyring::lookupPassword(session.id);
     emit requestConnect(session.host, session.port, session.user, session.keyPath, password, session.tunnels,
-                        session.jumpHost, session.jumpPort, session.jumpUser, session.jumpKeyPath);
+                        session.jumpHost, session.jumpPort, session.jumpUser, session.jumpKeyPath, session.id);
 }
 
 void SftpSidebar::stopSession() {
+    stopParallelTransfers();
     m_isConnected = false;
     detachFtp();
     m_treeWidget->clear();
+    m_currentRemoteFiles.clear();
+    m_tunnelStates.clear();
     m_pathEdit->clear();
     m_statusLabel->setText(tr("Disconnected"));
 
     m_transferQueue.clear();
     m_transferActive = false;
+    m_transferPaused = false;
     m_progressBar->hide();
     m_progressLabel->hide();
+    m_cancelTransferBtn->setEnabled(false);
+    m_cancelTransferBtn->hide();
+    m_pauseTransferBtn->setEnabled(false);
+    m_pauseTransferBtn->hide();
 
     m_upBtn->setEnabled(false);
     m_pathEdit->setEnabled(false);
     m_refreshBtn->setEnabled(false);
     m_uploadBtn->setEnabled(false);
     m_uploadDirBtn->setEnabled(false);
+    m_compareBtn->setEnabled(false);
+    m_tunnelsBtn->setEnabled(false);
     m_newFolderBtn->setEnabled(false);
     m_renameBtn->setEnabled(false);
     m_chmodBtn->setEnabled(false);
@@ -497,6 +557,9 @@ void SftpSidebar::onConnectionSuccess() {
     m_refreshBtn->setEnabled(true);
     m_uploadBtn->setEnabled(true);
     m_uploadDirBtn->setEnabled(true);
+    m_compareBtn->setEnabled(true);
+    m_tunnelStates = QList<bool>(m_currentSession.tunnels.size(), false);
+    m_tunnelsBtn->setEnabled(m_currentSession.type == SessionType::SSH && !m_currentSession.tunnels.isEmpty());
     m_newFolderBtn->setEnabled(true);
     m_renameBtn->setEnabled(true);
     m_chmodBtn->setEnabled(true);
@@ -508,11 +571,66 @@ void SftpSidebar::onConnectionSuccess() {
 
 void SftpSidebar::onConnectionFailed(const QString& error) {
     m_isConnected = false;
+    const QString protocol = m_ftp ? QStringLiteral("FTP") : QStringLiteral("SFTP");
+    emit diagnosticMessage(QStringLiteral("[%1 connection error] ").arg(protocol) + error);
     m_statusLabel->setText(tr("Failed: %1").arg(error));
     stopSession();
 }
 
+void SftpSidebar::onTunnelStateChanged(int index, bool active) {
+    if (index < 0)
+        return;
+    if (index >= m_tunnelStates.size())
+        m_tunnelStates.resize(index + 1);
+    m_tunnelStates[index] = active;
+}
+
+void SftpSidebar::onManageTunnels() {
+    if (!m_connection || m_currentSession.tunnels.isEmpty())
+        return;
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("SSH Tunnels"));
+    dialog.resize(520, 300);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* list = new QListWidget(&dialog);
+    layout->addWidget(list);
+    const auto refresh = [this, list]() {
+        list->clear();
+        for (int i = 0; i < m_currentSession.tunnels.size(); ++i) {
+            const TunnelConfig& tunnel = m_currentSession.tunnels.at(i);
+            const QString type = tunnel.type == TunnelConfig::Type::Local
+                                     ? tr("Local")
+                                     : (tunnel.type == TunnelConfig::Type::Remote ? tr("Remote") : tr("SOCKS5"));
+            const int port = tunnel.type == TunnelConfig::Type::Remote ? tunnel.remotePort : tunnel.localPort;
+            const bool active = i < m_tunnelStates.size() && m_tunnelStates.at(i);
+            list->addItem(tr("%1 — port %2 — %3").arg(type).arg(port).arg(active ? tr("Running") : tr("Stopped")));
+        }
+    };
+    refresh();
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    auto* start = buttons->addButton(tr("Start"), QDialogButtonBox::ActionRole);
+    auto* stop = buttons->addButton(tr("Stop"), QDialogButtonBox::ActionRole);
+    connect(start, &QPushButton::clicked, &dialog, [this, list]() {
+        if (list->currentRow() >= 0)
+            QMetaObject::invokeMethod(m_connection, "startTunnel", Qt::QueuedConnection,
+                                      Q_ARG(int, list->currentRow()));
+    });
+    connect(stop, &QPushButton::clicked, &dialog, [this, list]() {
+        if (list->currentRow() >= 0)
+            QMetaObject::invokeMethod(m_connection, "stopTunnel", Qt::QueuedConnection, Q_ARG(int, list->currentRow()));
+    });
+    connect(m_connection, &SshConnection::tunnelStateChanged, &dialog, [this, refresh](int index, bool active) {
+        onTunnelStateChanged(index, active);
+        refresh();
+    });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.exec();
+}
+
 void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& files) {
+    m_currentRemoteFiles = files;
     m_treeWidget->setUpdatesEnabled(false);
     m_treeWidget->clear();
     updatePath(path);
@@ -570,6 +688,97 @@ void SftpSidebar::onDirectoryListed(const QString& path, const QList<SftpFile>& 
     m_treeWidget->addTopLevelItems(folders);
     m_treeWidget->addTopLevelItems(normalFiles);
     m_treeWidget->setUpdatesEnabled(true);
+}
+
+void SftpSidebar::onCompareFoldersClicked() {
+    const QString localPath = QDir::fromNativeSeparators(m_localPathEdit->text().trimmed());
+    QDir localDir(localPath);
+    if (!localDir.exists()) {
+        QMessageBox::warning(this, tr("Compare folders"), tr("The selected local folder does not exist."));
+        return;
+    }
+    if (m_currentRemoteFiles.isEmpty()) {
+        QMessageBox::information(this, tr("Compare folders"), tr("Load a remote folder before comparing it."));
+        return;
+    }
+
+    QMap<QString, QFileInfo> localEntries;
+    const QFileInfoList entries = localDir.entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo& entry : entries)
+        localEntries.insert(entry.fileName(), entry);
+
+    QMap<QString, SftpFile> remoteEntries;
+    for (const SftpFile& entry : m_currentRemoteFiles)
+        remoteEntries.insert(entry.name, entry);
+
+    QStringList differences;
+    QStringList uploadPaths;
+    QStringList downloadPaths;
+    for (auto it = remoteEntries.cbegin(); it != remoteEntries.cend(); ++it) {
+        if (!localEntries.contains(it.key())) {
+            differences << tr("Remote only: %1").arg(it.key());
+            if (!it.value().isDirectory)
+                downloadPaths << (m_currentPath.endsWith('/') ? m_currentPath : m_currentPath + '/') + it.key();
+            continue;
+        }
+        const QFileInfo local = localEntries.value(it.key());
+        if (local.isDir() != it.value().isDirectory) {
+            differences << tr("Type differs: %1").arg(it.key());
+        } else if (!it.value().isDirectory && local.size() != it.value().size) {
+            differences
+                << tr("Size differs: %1 (local %2, remote %3)").arg(it.key()).arg(local.size()).arg(it.value().size);
+            uploadPaths << local.absoluteFilePath();
+            downloadPaths << (m_currentPath.endsWith('/') ? m_currentPath : m_currentPath + '/') + it.key();
+        }
+        localEntries.remove(it.key());
+    }
+    for (auto it = localEntries.cbegin(); it != localEntries.cend(); ++it) {
+        differences << tr("Local only: %1").arg(it.key());
+        if (!it.value().isDir())
+            uploadPaths << it.value().absoluteFilePath();
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Compare folders"));
+    dialog.resize(620, 420);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* summary =
+        new QLabel(differences.isEmpty() ? tr("The active folders have the same entries and file sizes.")
+                                         : tr("Differences in local %1 and remote %2:").arg(localPath, m_currentPath),
+                   &dialog);
+    summary->setWordWrap(true);
+    layout->addWidget(summary);
+    auto* list = new QListWidget(&dialog);
+    if (differences.isEmpty())
+        list->addItem(tr("No differences found."));
+    else
+        list->addItems(differences);
+    layout->addWidget(list);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    QPushButton* syncUpload = nullptr;
+    QPushButton* syncDownload = nullptr;
+    if (!uploadPaths.isEmpty())
+        syncUpload = buttons->addButton(tr("Sync local → remote"), QDialogButtonBox::ActionRole);
+    if (!downloadPaths.isEmpty())
+        syncDownload = buttons->addButton(tr("Sync remote → local"), QDialogButtonBox::ActionRole);
+    int syncMode = 0;
+    if (syncUpload)
+        connect(syncUpload, &QPushButton::clicked, &dialog, [&syncMode, &dialog]() {
+            syncMode = 1;
+            dialog.accept();
+        });
+    if (syncDownload)
+        connect(syncDownload, &QPushButton::clicked, &dialog, [&syncMode, &dialog]() {
+            syncMode = 2;
+            dialog.accept();
+        });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    dialog.exec();
+    if (syncMode == 1)
+        enqueueUpload(uploadPaths);
+    else if (syncMode == 2)
+        enqueueDownloadTo(downloadPaths, localPath);
 }
 
 void SftpSidebar::onOperationFinished(bool success, const QString& error) {
@@ -635,7 +844,9 @@ void SftpSidebar::onOperationFinished(bool success, const QString& error) {
     } else {
         m_pendingEditRemotePath.clear();
         m_pendingEditLocalPath.clear();
-        QMessageBox::critical(this, tr("SFTP Error"), error);
+        const QString protocol = m_ftp ? QStringLiteral("FTP") : QStringLiteral("SFTP");
+        emit diagnosticMessage(QStringLiteral("[%1 operation error] ").arg(protocol) + error);
+        QMessageBox::critical(this, tr("%1 Error").arg(protocol), error);
     }
 }
 
@@ -646,7 +857,8 @@ void SftpSidebar::onPasswordRequired(const QString& prompt) {
         m_statusLabel->setText(tr("Connecting with password..."));
         emit requestConnect(m_currentSession.host, m_currentSession.port, m_currentSession.user,
                             m_currentSession.keyPath, password, m_currentSession.tunnels, m_currentSession.jumpHost,
-                            m_currentSession.jumpPort, m_currentSession.jumpUser, m_currentSession.jumpKeyPath);
+                            m_currentSession.jumpPort, m_currentSession.jumpUser, m_currentSession.jumpKeyPath,
+                            m_currentSession.id);
     } else {
         stopSession();
     }
@@ -696,6 +908,16 @@ void SftpSidebar::onUploadFolderClicked() {
         return;
     QString path = QFileDialog::getExistingDirectory(this, tr("Select Folder to Upload"), QDir::homePath());
     if (!path.isEmpty()) {
+        if (m_ftp) {
+            m_activeTransfer = {QString(), path, false, true, 0};
+            m_transferActive = true;
+            setTransferUi(true);
+            m_transferCurrentName = QFileInfo(path).fileName();
+            m_progressLabel->setText(tr("Uploading folder %1...").arg(m_transferCurrentName));
+            m_progressLabel->show();
+            m_progressBar->setRange(0, 0);
+            m_progressBar->show();
+        }
         m_statusLabel->setText(tr("Uploading folder %1...").arg(QFileInfo(path).fileName()));
         emit requestUploadDir(path, m_currentPath);
     }
@@ -961,6 +1183,65 @@ void SftpSidebar::setTransferUi(bool active) {
     m_newFolderBtn->setEnabled(enabled);
     m_renameBtn->setEnabled(enabled);
     m_chmodBtn->setEnabled(enabled);
+    const bool canCancelActive = active && (!m_ftp.isNull() || !m_connection.isNull());
+    m_cancelTransferBtn->setText(m_transferQueue.isEmpty() ? tr("Cancel transfer") : tr("Cancel transfers"));
+    m_cancelTransferBtn->setEnabled(canCancelActive || (active && !m_transferQueue.isEmpty()));
+    m_cancelTransferBtn->setVisible(canCancelActive || (active && !m_transferQueue.isEmpty()));
+    const bool canPause = active && (!m_ftp.isNull() || !m_connection.isNull());
+    m_pauseTransferBtn->setText(m_transferPaused ? tr("Resume transfer") : tr("Pause transfer"));
+    m_pauseTransferBtn->setEnabled(canPause);
+    m_pauseTransferBtn->setVisible(canPause);
+}
+
+void SftpSidebar::onToggleTransferPause() {
+    if (!m_transferActive || (m_ftp.isNull() && m_connection.isNull()))
+        return;
+
+    if (m_transferPaused) {
+        if (m_ftp)
+            QMetaObject::invokeMethod(m_ftp, "resumeTransfer", Qt::DirectConnection);
+        else if (!m_parallelTransfers.isEmpty()) {
+            for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers))
+                QMetaObject::invokeMethod(transfer.worker, "resume", Qt::QueuedConnection);
+        } else
+            QMetaObject::invokeMethod(m_connection, "resumeTransfer", Qt::DirectConnection);
+        m_transferPaused = false;
+        m_statusLabel->setText(tr("Resuming transfer..."));
+    } else {
+        if (m_ftp)
+            QMetaObject::invokeMethod(m_ftp, "pauseTransfer", Qt::DirectConnection);
+        else if (!m_parallelTransfers.isEmpty()) {
+            for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers))
+                QMetaObject::invokeMethod(transfer.worker, "pause", Qt::QueuedConnection);
+        } else
+            QMetaObject::invokeMethod(m_connection, "pauseTransfer", Qt::DirectConnection);
+        m_transferPaused = true;
+        m_statusLabel->setText(tr("Transfer paused."));
+    }
+    m_pauseTransferBtn->setText(m_transferPaused ? tr("Resume transfer") : tr("Pause transfer"));
+}
+
+void SftpSidebar::onCancelQueuedTransfers() {
+    const bool cancelActive = m_transferActive && (!m_ftp.isNull() || !m_connection.isNull());
+    if (m_transferQueue.isEmpty() && !cancelActive)
+        return;
+
+    const int cancelled = m_transferQueue.size();
+    m_transferQueue.clear();
+    if (cancelActive) {
+        if (m_ftp)
+            QMetaObject::invokeMethod(m_ftp, "cancelTransfer", Qt::DirectConnection);
+        else if (!m_parallelTransfers.isEmpty()) {
+            for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers))
+                QMetaObject::invokeMethod(transfer.worker, "cancel", Qt::QueuedConnection);
+        } else
+            QMetaObject::invokeMethod(m_connection, "cancelTransfer", Qt::DirectConnection);
+    }
+    m_cancelTransferBtn->setEnabled(false);
+    m_cancelTransferBtn->hide();
+    m_statusLabel->setText(cancelActive
+                               ? tr("Cancelling active transfer; %1 queued transfer(s) removed.").arg(cancelled)
+                               : tr("Cancelled %1 queued transfer(s).").arg(cancelled));
 }
 
 void SftpSidebar::onWatchedFileChanged(const QString& path) {
@@ -971,16 +1252,118 @@ void SftpSidebar::onWatchedFileChanged(const QString& path) {
     }
 }
 
+void SftpSidebar::startParallelTransfers() {
+    if (m_currentSession.type != SessionType::SSH || m_maxParallelTransfers <= 1)
+        return startNextTransfer();
+
+    while (!m_transferQueue.isEmpty() && m_parallelTransfers.size() < m_maxParallelTransfers) {
+        const TransferItem item = m_transferQueue.takeFirst();
+        SftpTransferRequest request;
+        request.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        request.remotePath = item.remotePath.isEmpty() ? m_currentPath : item.remotePath;
+        request.localPath = item.localPath;
+        request.isUpload = item.isUpload;
+        request.isDirUpload = item.isDirUpload;
+
+        auto* thread = new QThread(this);
+        auto* worker = new SftpTransferWorker(m_currentSession, request);
+        worker->moveToThread(thread);
+
+        ParallelTransfer active;
+        active.id = request.id;
+        active.item = item;
+        active.thread = thread;
+        active.worker = worker;
+        m_parallelTransfers.append(active);
+
+        connect(thread, &QThread::started, worker, &SftpTransferWorker::start);
+        connect(worker, &SftpTransferWorker::progress, this,
+                [this](const QString&, const QString& fileName, qint64 done, qint64 total) {
+                    onTransferProgress(fileName, done, total);
+                });
+        connect(worker, &SftpTransferWorker::finished, this,
+                [this](const QString& id, bool success, const QString& error) {
+                    finishParallelTransfer(id, success, error);
+                });
+        connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+        connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+        thread->start();
+    }
+
+    if (m_parallelTransfers.isEmpty() && m_transferQueue.isEmpty()) {
+        m_transferActive = false;
+        setTransferUi(false);
+        m_progressBar->hide();
+        m_progressLabel->hide();
+        m_statusLabel->setText(tr("All transfers finished."));
+        emit requestList(m_currentPath);
+        return;
+    }
+
+    m_transferActive = true;
+    setTransferUi(true);
+    m_progressBar->setRange(0, 0);
+    m_progressBar->show();
+    m_progressLabel->setText(tr("Transferring %1 file(s) in parallel...").arg(m_parallelTransfers.size()));
+    m_progressLabel->show();
+    m_statusLabel->setText(
+        tr("%1 transfer(s) active, %2 queued.").arg(m_parallelTransfers.size()).arg(m_transferQueue.size()));
+}
+
+void SftpSidebar::finishParallelTransfer(const QString& id, bool success, const QString& error) {
+    int index = -1;
+    for (int i = 0; i < m_parallelTransfers.size(); ++i) {
+        if (m_parallelTransfers.at(i).id == id) {
+            index = i;
+            break;
+        }
+    }
+    if (index < 0)
+        return;
+
+    const TransferItem item = m_parallelTransfers.at(index).item;
+    if (m_parallelTransfers.at(index).thread)
+        m_parallelTransfers.at(index).thread->quit();
+    m_parallelTransfers.removeAt(index);
+
+    if (!success && !error.startsWith(QStringLiteral("Transfer cancelled")) && item.attempts < 2 && m_isConnected) {
+        TransferItem retryItem = item;
+        ++retryItem.attempts;
+        m_transferQueue.prepend(retryItem);
+        m_statusLabel->setText(tr("Transfer failed; retrying (%1/2)...").arg(retryItem.attempts));
+    } else if (!success && !error.startsWith(QStringLiteral("Transfer cancelled"))) {
+        emit diagnosticMessage(tr("Parallel transfer failed: %1").arg(error));
+        m_statusLabel->setText(error);
+    }
+
+    startParallelTransfers();
+}
+
+void SftpSidebar::stopParallelTransfers() {
+    m_transferQueue.clear();
+    for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers)) {
+        if (transfer.worker)
+            QMetaObject::invokeMethod(transfer.worker, "cancel", Qt::QueuedConnection);
+        if (transfer.thread)
+            transfer.thread->quit();
+    }
+    m_parallelTransfers.clear();
+    m_transferActive = false;
+}
+
 void SftpSidebar::enqueueUpload(const QStringList& localPaths) {
     if (!m_isConnected)
         return;
+
+    const bool parallel = m_currentSession.type == SessionType::SSH && m_maxParallelTransfers > 1;
 
     for (const QString& localPath : localPaths) {
         QFileInfo info(localPath);
         if (info.isDir()) {
             if (m_ftp)
                 continue; // FTP has no recursive folder upload
-            if (!m_transferActive) {
+            if (!m_transferActive && !parallel) {
+                m_activeTransfer = {QString(), localPath, false, true, 0};
                 m_transferActive = true;
                 setTransferUi(true);
                 m_transferCurrentName = info.fileName();
@@ -992,6 +1375,8 @@ void SftpSidebar::enqueueUpload(const QStringList& localPaths) {
                 emit requestUploadDir(localPath, m_currentPath);
             } else {
                 m_transferQueue.append({QString(), localPath, false, true});
+                m_cancelTransferBtn->setEnabled(true);
+                m_cancelTransferBtn->show();
             }
             continue;
         }
@@ -1000,7 +1385,8 @@ void SftpSidebar::enqueueUpload(const QStringList& localPaths) {
             remotePath += "/";
         remotePath += info.fileName();
 
-        if (!m_transferActive) {
+        if (!m_transferActive && !parallel) {
+            m_activeTransfer = {remotePath, localPath, true, false, 0};
             m_transferActive = true;
             setTransferUi(true);
             m_transferCurrentName = info.fileName();
@@ -1013,8 +1399,13 @@ void SftpSidebar::enqueueUpload(const QStringList& localPaths) {
             emit requestUpload(localPath, remotePath);
         } else {
             m_transferQueue.append({remotePath, localPath, true, false});
+            m_cancelTransferBtn->setEnabled(true);
+            m_cancelTransferBtn->show();
         }
     }
+
+    if (parallel)
+        startParallelTransfers();
 }
 
 void SftpSidebar::enqueueDownload(const QStringList& remotePaths) {
@@ -1032,6 +1423,8 @@ void SftpSidebar::enqueueDownloadTo(const QStringList& remotePaths, const QStrin
     if (!m_isConnected || destinationDir.isEmpty())
         return;
 
+    const bool parallel = m_currentSession.type == SessionType::SSH && m_maxParallelTransfers > 1;
+
     int added = 0;
     for (const QString& remotePath : remotePaths) {
         QString fileName = QFileInfo(remotePath).fileName();
@@ -1046,7 +1439,8 @@ void SftpSidebar::enqueueDownloadTo(const QStringList& remotePaths, const QStrin
             ++n;
         }
 
-        if (!m_transferActive) {
+        if (!m_transferActive && !parallel) {
+            m_activeTransfer = {remotePath, localPath, false, false, 0};
             m_transferActive = true;
             setTransferUi(true);
             m_transferCurrentName = fileName;
@@ -1059,12 +1453,17 @@ void SftpSidebar::enqueueDownloadTo(const QStringList& remotePaths, const QStrin
             emit requestDownload(remotePath, localPath);
         } else {
             m_transferQueue.append({remotePath, localPath, false});
+            m_cancelTransferBtn->setEnabled(true);
+            m_cancelTransferBtn->show();
         }
         ++added;
     }
 
     if (added > 1 && m_progressLabel->isVisible())
         m_progressLabel->setText(tr("Downloading %1... (%2 queued)").arg(m_transferCurrentName).arg(added - 1));
+
+    if (parallel && added > 0)
+        startParallelTransfers();
 }
 
 void SftpSidebar::startNextTransfer() {
@@ -1073,12 +1472,17 @@ void SftpSidebar::startNextTransfer() {
         setTransferUi(false);
         m_progressBar->hide();
         m_progressLabel->hide();
+        m_cancelTransferBtn->setEnabled(false);
+        m_cancelTransferBtn->hide();
         m_statusLabel->setText(tr("All transfers finished."));
         emit requestList(m_currentPath);
         return;
     }
 
     TransferItem item = m_transferQueue.takeFirst();
+    m_activeTransfer = item;
+    m_cancelTransferBtn->setEnabled(!m_transferQueue.isEmpty());
+    m_cancelTransferBtn->setVisible(!m_transferQueue.isEmpty());
     m_transferCurrentName = QFileInfo(item.isUpload ? item.localPath : item.remotePath).fileName();
     m_progressBar->setRange(0, (item.isDirUpload || m_ftp) ? 0 : 100);
     m_progressBar->setValue(0);
@@ -1098,11 +1502,39 @@ void SftpSidebar::startNextTransfer() {
 
 void SftpSidebar::finishTransferQueue(bool success, const QString& error) {
     if (!success) {
+        if (error.startsWith(QStringLiteral("Transfer cancelled"))) {
+            m_transferQueue.clear();
+            m_transferActive = false;
+            setTransferUi(false);
+            m_progressBar->hide();
+            m_progressLabel->hide();
+            m_cancelTransferBtn->setEnabled(false);
+            m_cancelTransferBtn->hide();
+            m_pauseTransferBtn->setEnabled(false);
+            m_pauseTransferBtn->hide();
+            m_transferPaused = false;
+            m_statusLabel->setText(tr("Transfer cancelled."));
+            return;
+        }
+        constexpr int maxRetries = 2;
+        if (m_activeTransfer.attempts < maxRetries && m_isConnected) {
+            ++m_activeTransfer.attempts;
+            m_transferQueue.prepend(m_activeTransfer);
+            m_statusLabel->setText(
+                tr("Transfer failed; retrying (%1/%2)...").arg(m_activeTransfer.attempts).arg(maxRetries));
+            startNextTransfer();
+            return;
+        }
         m_transferQueue.clear();
         m_transferActive = false;
         setTransferUi(false);
         m_progressBar->hide();
         m_progressLabel->hide();
+        m_cancelTransferBtn->setEnabled(false);
+        m_cancelTransferBtn->hide();
+        m_pauseTransferBtn->setEnabled(false);
+        m_pauseTransferBtn->hide();
+        m_transferPaused = false;
         m_statusLabel->setText(error);
         QMessageBox::critical(this, tr("SFTP Transfer Error"), error);
         return;

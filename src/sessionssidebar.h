@@ -18,6 +18,7 @@ public:
 signals:
     void connectSession(const Session& session);
     void newLocalSessionRequested();
+    void macrosImported();
 
 public slots:
     void onNewSession();
