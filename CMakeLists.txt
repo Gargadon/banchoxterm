@@ -507,7 +507,7 @@ if(BANCHO_ENABLE_VNC)
     target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_HAVE_VNC)
 endif()
 
-add_test(NAME SessionTests COMMAND banchoxterm_tests)
+add_test(NAME SessionTests COMMAND banchoxterm_tests -v1)
 # The test binary creates QWidget-based terminal components.  Use Qt's
 # headless platform plugin so ctest is reproducible on CI and servers without
 # an X11/Wayland display.
