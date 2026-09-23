@@ -692,6 +692,9 @@ private slots:
     }
 
     void testSshAndSftpAgainstLocalServer() {
+#ifdef Q_OS_WIN
+        QSKIP("The local sshd/SFTP integration test requires a Unix OpenSSH daemon.");
+#endif
         QTemporaryDir serverDir;
         QVERIFY(serverDir.isValid());
         const QByteArray isolatedConfig = QDir(serverDir.filePath(QStringLiteral("config"))).absolutePath().toUtf8();
