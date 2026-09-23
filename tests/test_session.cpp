@@ -1005,6 +1005,13 @@ private slots:
     }
 
     void testTerminalTabLifecycle() {
+#ifdef Q_OS_WIN
+        // ConPTY requires a real Windows console/window host.  Running this
+        // lifecycle test with Qt's offscreen platform can terminate the test
+        // process without a QtTest assertion, so cover it on Unix where the
+        // QTermWidget PTY backend is available.
+        QSKIP("The local ConPTY lifecycle test is not reliable with the offscreen Windows runner.");
+#endif
         Session session;
         session.id = QStringLiteral("terminal-tab-lifecycle");
         session.name = QStringLiteral("Lifecycle test");
