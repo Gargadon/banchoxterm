@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(banchoxterm VERSION 1.1.2 LANGUAGES C CXX)
+project(banchoxterm VERSION 1.1.3 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
