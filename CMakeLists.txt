@@ -511,7 +511,10 @@ if(BANCHO_ENABLE_VNC)
     target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_HAVE_VNC)
 endif()
 
-add_test(NAME SessionTests COMMAND banchoxterm_tests -v1)
+# Keep a persistent QtTest report even when Windows console output is absent.
+set_target_properties(banchoxterm_tests PROPERTIES WIN32_EXECUTABLE FALSE)
+add_test(NAME SessionTests COMMAND banchoxterm_tests -v1
+    -o -,txt -o ${CMAKE_CURRENT_BINARY_DIR}/session-tests.txt,txt)
 # The test binary creates QWidget-based terminal components.  Use Qt's
 # headless platform plugin so ctest is reproducible on CI and servers without
 # an X11/Wayland display.
