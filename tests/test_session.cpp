@@ -1005,7 +1005,7 @@ private slots:
     }
 
     void testTerminalTabLifecycle() {
-#ifdef Q_OS_WIN
+#if defined(Q_OS_WIN) || defined(BANCHO_WINDOWS_CI)
         // ConPTY requires a real Windows console/window host.  Running this
         // lifecycle test with Qt's offscreen platform can terminate the test
         // process without a QtTest assertion, so cover it on Unix where the
@@ -1082,15 +1082,8 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(window.findChild<TerminalTab*>() == nullptr, 3000);
     }
 
-#ifdef BANCHO_HAVE_VNC
+#if defined(BANCHO_HAVE_VNC) && !defined(BANCHO_WINDOWS_CI)
     void testVncReconnectRequestAfterFailure() {
-#ifdef Q_OS_WIN
-        // libvncclient's refused-socket timeout is not reliable on the
-        // Windows runners, especially under ARM64 emulation.  The embedded
-        // VNC failure/reconnect path is covered by the native Unix CI job;
-        // avoid making the Windows test suite wait indefinitely here.
-        QSKIP("The VNC refused-connection test is not reliable on Windows CI.");
-#endif
         Session session;
         session.id = QStringLiteral("vnc-reconnect-test");
         session.name = QStringLiteral("Unavailable VNC");

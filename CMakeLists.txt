@@ -493,7 +493,11 @@ target_link_libraries(banchoxterm_tests PRIVATE qtermwidget6)
 
 if(WIN32)
     target_sources(banchoxterm_tests PRIVATE src/conpty.cpp src/conpty.h)
-    target_compile_definitions(banchoxterm_tests PRIVATE _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006)
+    target_compile_definitions(banchoxterm_tests PRIVATE
+        _WIN32_WINNT=0x0A00
+        NTDDI_VERSION=0x0A000006
+        BANCHO_WINDOWS_CI
+    )
     target_link_libraries(banchoxterm_tests PRIVATE advapi32)
 endif()
 
