@@ -72,6 +72,10 @@ cscope.*
 .env
 *.banchoxterm-license
 
+# Self-signed localhost certificate used by the explicit FTPS test.
+!tests/fixtures/ftps-cert.pem
+!tests/fixtures/ftps-key.pem
+
 # Packaging artifacts
 packaging/
 *.deb

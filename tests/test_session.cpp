@@ -699,6 +699,7 @@ private slots:
         const QString hostKey = serverDir.filePath(QStringLiteral("host_key"));
         const QString clientKey = serverDir.filePath(QStringLiteral("client_key"));
         const QString authorizedKeys = serverDir.filePath(QStringLiteral("authorized_keys"));
+        const QString sshdConfig = serverDir.filePath(QStringLiteral("sshd_config"));
 
         QTcpServer echoServer;
         if (!echoServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
@@ -741,6 +742,23 @@ private slots:
         QVERIFY(QFile::setPermissions(clientKey, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
         QVERIFY(QFile::setPermissions(authorizedKeys, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
 
+        QFile configFile(sshdConfig);
+        QVERIFY(configFile.open(QIODevice::WriteOnly | QIODevice::Text));
+        const QByteArray config = QStringLiteral("HostKey %1\n"
+                                                 "AuthorizedKeysFile %2\n"
+                                                 "PubkeyAuthentication yes\n"
+                                                 "PasswordAuthentication no\n"
+                                                 "KbdInteractiveAuthentication no\n"
+                                                 "UsePAM no\n"
+                                                 "StrictModes no\n"
+                                                 "PermitRootLogin no\n"
+                                                 "Subsystem sftp internal-sftp\n")
+                                      .arg(hostKey, authorizedKeys)
+                                      .toUtf8();
+        QVERIFY(configFile.write(config) == config.size());
+        configFile.close();
+        QVERIFY(QFile::setPermissions(sshdConfig, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+
         QTcpServer portProbe;
         if (!portProbe.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
             QSKIP(qPrintable(QStringLiteral("Local TCP sockets are unavailable: %1").arg(portProbe.errorString())));
@@ -749,18 +767,8 @@ private slots:
 
         QProcess sshd;
         sshd.setProcessChannelMode(QProcess::MergedChannels);
-        sshd.start(QStringLiteral("sshd"),
-                   {QStringLiteral("-D"), QStringLiteral("-e"),
-                    QStringLiteral("-p"), QString::number(port),
-                    QStringLiteral("-h"), hostKey,
-                    QStringLiteral("-o"), QStringLiteral("AuthorizedKeysFile=%1").arg(authorizedKeys),
-                    QStringLiteral("-o"), QStringLiteral("PubkeyAuthentication=yes"),
-                    QStringLiteral("-o"), QStringLiteral("PasswordAuthentication=no"),
-                    QStringLiteral("-o"), QStringLiteral("KbdInteractiveAuthentication=no"),
-                    QStringLiteral("-o"), QStringLiteral("UsePAM=no"),
-                    QStringLiteral("-o"), QStringLiteral("StrictModes=no"),
-                    QStringLiteral("-o"), QStringLiteral("PermitRootLogin=no"),
-                    QStringLiteral("-o"), QStringLiteral("Subsystem=sftp internal-sftp")});
+        sshd.start(QStringLiteral("sshd"), {QStringLiteral("-D"), QStringLiteral("-e"), QStringLiteral("-f"),
+                                            sshdConfig, QStringLiteral("-p"), QString::number(port)});
         QVERIFY(sshd.waitForStarted(3000));
         QTest::qWait(500);
         QVERIFY2(sshd.state() == QProcess::Running, qPrintable(sshd.readAll()));
