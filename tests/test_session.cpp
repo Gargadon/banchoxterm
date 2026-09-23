@@ -146,6 +146,9 @@ private slots:
     }
 
     void testSessionFilesArePrivate() {
+#ifdef Q_OS_WIN
+        QSKIP("This test verifies POSIX mode bits, not Windows ACLs.");
+#endif
         Session session;
         session.id = QStringLiteral("private-file-test");
         session.name = QStringLiteral("Private");
@@ -1005,13 +1008,6 @@ private slots:
     }
 
     void testTerminalTabLifecycle() {
-#if defined(Q_OS_WIN) || defined(BANCHO_WINDOWS_CI)
-        // ConPTY requires a real Windows console/window host.  Running this
-        // lifecycle test with Qt's offscreen platform can terminate the test
-        // process without a QtTest assertion, so cover it on Unix where the
-        // QTermWidget PTY backend is available.
-        QSKIP("The local ConPTY lifecycle test is not reliable with the offscreen Windows runner.");
-#endif
         Session session;
         session.id = QStringLiteral("terminal-tab-lifecycle");
         session.name = QStringLiteral("Lifecycle test");
@@ -1044,7 +1040,13 @@ private slots:
         QTest::qWait(300);
         QVERIFY(application.state() == QProcess::Running);
 
+#ifdef Q_OS_WIN
+        // Offscreen windows cannot be relied on to handle WM_CLOSE from
+        // QProcess::terminate(). This smoke test only checks process startup.
+        application.kill();
+#else
         application.terminate();
+#endif
         QVERIFY(application.waitForFinished(3000));
     }
 
@@ -1082,7 +1084,7 @@ private slots:
         QTRY_VERIFY_WITH_TIMEOUT(window.findChild<TerminalTab*>() == nullptr, 3000);
     }
 
-#if defined(BANCHO_HAVE_VNC) && !defined(BANCHO_WINDOWS_CI)
+#ifdef BANCHO_HAVE_VNC
     void testVncReconnectRequestAfterFailure() {
         Session session;
         session.id = QStringLiteral("vnc-reconnect-test");

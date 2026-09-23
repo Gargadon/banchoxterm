@@ -159,11 +159,32 @@ jobs:
       - name: Build tests
         run: cmake --build build --config Release --target banchoxterm_tests --parallel 2
 
+      - name: Enable ARM64 startup diagnostics
+        if: matrix.arch.name == 'arm64'
+        shell: pwsh
+        run: |
+          # Send Qt startup/plugin messages to captured stderr, including
+          # messages emitted before QtTest can open its report.
+          Add-Content -Path $env:GITHUB_ENV -Value 'QT_DEBUG_PLUGINS=1'
+          Add-Content -Path $env:GITHUB_ENV -Value 'QT_FORCE_STDERR_LOGGING=1'
+          Add-Content -Path $env:GITHUB_ENV -Value 'QT_MESSAGE_PATTERN=[%{time process}] %{type} %{category}: %{message}'
+          & {
+            Write-Output "OS architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)"
+            Write-Output "PowerShell architecture: $([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)"
+            Write-Output "QT_ROOT_DIR=$env:QT_ROOT_DIR"
+            Write-Output "QT_PLUGIN_PATH=$env:QT_PLUGIN_PATH"
+            Write-Output "PATH=$env:PATH"
+            Get-Command cmake, ctest, python | Select-Object Name, Source | Format-Table -AutoSize
+            Get-ChildItem build/Release -File | Select-Object Name, Length | Format-Table -AutoSize
+            Get-ChildItem "$env:QT_ROOT_DIR/plugins/platforms" -File | Select-Object Name, Length | Format-Table -AutoSize
+          } | Tee-Object -FilePath build/arm64-startup-environment.txt
+
       - name: Run tests
         shell: pwsh
         run: |
-          ctest --test-dir build -C Release --output-on-failure -VV
+          ctest --test-dir build -C Release --output-on-failure -VV --output-log build/ctest-output.log
           $testExitCode = $LASTEXITCODE
+          Write-Host "CTest exit code: $testExitCode"
           if (Test-Path build/session-tests.txt) {
             Get-Content build/session-tests.txt
           } else {
@@ -178,6 +199,8 @@ jobs:
           name: test-diagnostics-windows-${{ matrix.arch.name }}
           path: |
             build/session-tests.txt
+            build/ctest-output.log
+            build/arm64-startup-environment.txt
             build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
 
