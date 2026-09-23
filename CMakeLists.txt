@@ -498,6 +498,17 @@ if(WIN32)
         NTDDI_VERSION=0x0A000006
     )
     target_link_libraries(banchoxterm_tests PRIVATE advapi32)
+    # Tests run before packaging. Make the freshly built SSH DLL available
+    # beside both executables instead of relying on the runner's PATH.
+    if(TARGET libssh2_shared)
+        foreach(bancho_target IN ITEMS banchoxterm banchoxterm_tests)
+            add_custom_command(TARGET ${bancho_target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    $<TARGET_FILE:libssh2_shared>
+                    $<TARGET_FILE_DIR:${bancho_target}>
+                VERBATIM)
+        endforeach()
+    endif()
 endif()
 
 if(BANCHO_ENABLE_VNC)

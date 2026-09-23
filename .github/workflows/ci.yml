@@ -159,6 +159,19 @@ jobs:
       - name: Build tests
         run: cmake --build build --config Release --target banchoxterm_tests --parallel 2
 
+      - name: Deploy ARM64 test runtime
+        if: matrix.arch.name == 'arm64'
+        shell: pwsh
+        run: |
+          $deploy = Join-Path $env:QT_ROOT_DIR 'bin/windeployqt.exe'
+          foreach ($executable in @('banchoxterm.exe', 'banchoxterm_tests.exe')) {
+            & $deploy --release --compiler-runtime "build/Release/$executable"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path build/Release/libssh2.dll)) {
+            throw 'The test runtime is missing the locally built libssh2.dll.'
+          }
+
       - name: Enable ARM64 startup diagnostics
         if: matrix.arch.name == 'arm64'
         shell: pwsh
