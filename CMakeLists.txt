@@ -513,6 +513,7 @@ add_test(NAME SessionTests COMMAND banchoxterm_tests)
 # an X11/Wayland display.
 set_tests_properties(SessionTests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 120
 )
 
 # ── Formatting ──────────────────────────────────────────────────────
