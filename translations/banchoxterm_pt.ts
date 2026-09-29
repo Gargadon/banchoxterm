@@ -16,7 +16,7 @@
     <message>
         <location filename="../src/ftpclient.cpp" line="99"/>
         <source>FTP connection lost: %1</source>
-        <translation>FTP connection failed: %1</translation>
+        <translation>A conexão FTP foi perdida: %1</translation>
     </message>
     <message>
         <location filename="../src/ftpclient.cpp" line="107"/>
@@ -66,7 +66,7 @@
     <message>
         <location filename="../src/ftpclient.cpp" line="261"/>
         <source>FTPS data certificate validation failed: %1</source>
-        <translation>FTPS PBSZ negotiation failed</translation>
+        <translation>Falha na validação do certificado de dados FTPS: %1</translation>
     </message>
     <message>
         <location filename="../src/ftpclient.cpp" line="278"/>
@@ -76,7 +76,7 @@
     <message>
         <location filename="../src/ftpclient.cpp" line="296"/>
         <source>Could not load FTPS CA bundle: %1</source>
-        <translation>Falha na conexão de dados FTP</translation>
+        <translation>Não foi possível carregar o pacote de CAs do FTPS: %1</translation>
     </message>
     <message>
         <location filename="../src/ftpclient.cpp" line="335"/>
@@ -89,7 +89,7 @@
         <location filename="../src/ftpclient.cpp" line="407"/>
         <location filename="../src/ftpclient.cpp" line="464"/>
         <source>Transfer cancelled by user</source>
-        <translation>Não foi possível abrir o arquivo local: %1</translation>
+        <translation>Transferência cancelada pelo usuário</translation>
     </message>
     <message>
         <location filename="../src/ftpclient.cpp" line="360"/>
@@ -109,7 +109,7 @@
     <message>
         <location filename="../src/ftpclient.cpp" line="428"/>
         <source>Not a directory: %1</source>
-        <translation>Download concluído: %1</translation>
+        <translation>Não é um diretório: %1</translation>
     </message>
     <message>
         <location filename="../src/ftpclient.cpp" line="474"/>
@@ -409,7 +409,7 @@
     <message>
         <location filename="../src/mainwindow.cpp" line="480"/>
         <source>Ribbon</source>
-        <translation>Excluído com sucesso</translation>
+        <translation>Faixa de opções</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="563"/>
@@ -500,7 +500,7 @@
     <message>
         <location filename="../src/mainwindow.cpp" line="1011"/>
         <source>Prompt detected: %1</source>
-        <translation>SEM SESSÃO</translation>
+        <translation>Prompt detectado: %1</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="1042"/>
@@ -597,7 +597,7 @@ Comando:
     <message>
         <location filename="../src/mainwindow.cpp" line="1524"/>
         <source>Special Characters</source>
-        <translation>Shell local</translation>
+        <translation>Caracteres especiais</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="1528"/>
@@ -721,7 +721,7 @@ Comando:
         <location filename="../src/mainwindow.cpp" line="1714"/>
         <location filename="../src/mainwindow.cpp" line="1753"/>
         <source>Lock Application</source>
-        <translation>Limpar histórico</translation>
+        <translation>Bloquear aplicativo</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="1661"/>
@@ -854,7 +854,7 @@ Comando:
     <message>
         <location filename="../src/mainwindow.cpp" line="1271"/>
         <source>No active terminal session.</source>
-        <translation>&amp;Exibir</translation>
+        <translation>Não há uma sessão de terminal ativa.</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="1277"/>
@@ -942,7 +942,7 @@ Deseja continuar?</translation>
         <location filename="../src/mainwindow.cpp" line="1711"/>
         <location filename="../src/mainwindow.cpp" line="1727"/>
         <source>Open Local Terminal</source>
-        <translation>Nova sessão remota</translation>
+        <translation>Abrir terminal local</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="1711"/>
@@ -1066,7 +1066,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/mainwindow.cpp" line="2189"/>
         <source>View log</source>
-        <translation>Importar</translation>
+        <translation>Ver registro</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="2235"/>
@@ -1192,7 +1192,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/mainwindow.cpp" line="111"/>
         <source>Macro started</source>
-        <translation>Pesquisar texto...</translation>
+        <translation>Macro iniciada</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="140"/>
@@ -1609,7 +1609,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sessiondialog.cpp" line="452"/>
         <source>Data Bits:</source>
-        <translation>Editar arquivo remoto: %1</translation>
+        <translation>Bits de dados:</translation>
     </message>
     <message>
         <location filename="../src/sessiondialog.cpp" line="455"/>
@@ -1680,7 +1680,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sessiondialog.cpp" line="995"/>
         <source>Invalid Cisco Break sequence</source>
-        <translation>Ferramenta serial:</translation>
+        <translation>A sequência Break da Cisco é inválida</translation>
     </message>
     <message>
         <location filename="../src/sessiondialog.cpp" line="996"/>
@@ -1711,7 +1711,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sessiondialog.cpp" line="515"/>
         <source>TLS 1.2 or newer</source>
-        <translation>Selecionar chave privada</translation>
+        <translation>TLS 1.2 ou mais recente</translation>
     </message>
     <message>
         <location filename="../src/sessiondialog.cpp" line="516"/>
@@ -1756,7 +1756,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sessiondialog.cpp" line="568"/>
         <source>Use global setting</source>
-        <translation>Lines of scrollback history. 0 disables scrollback.</translation>
+        <translation>Usar configuração global</translation>
     </message>
     <message>
         <location filename="../src/sessiondialog.cpp" line="571"/>
@@ -2368,7 +2368,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/settingsdialog.cpp" line="266"/>
         <source>Weak Master Password</source>
-        <translation>Editor de texto</translation>
+        <translation>Senha mestra fraca</translation>
     </message>
     <message>
         <location filename="../src/settingsdialog.cpp" line="267"/>
@@ -2408,7 +2408,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/settingsdialog.cpp" line="284"/>
         <source>Master Password Error</source>
-        <translation>Confirmar senha mestra</translation>
+        <translation>Erro na senha mestra</translation>
     </message>
     <message>
         <location filename="../src/settingsdialog.cpp" line="285"/>
@@ -2592,7 +2592,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="346"/>
         <source>Cancel queued</source>
-        <translation>Nova pasta</translation>
+        <translation>Cancelar itens na fila</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="351"/>
@@ -2626,7 +2626,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="593"/>
         <source>SSH Tunnels</source>
-        <translation>Desconectado</translation>
+        <translation>Túneis SSH</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="603"/>
@@ -2636,7 +2636,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="604"/>
         <source>Remote</source>
-        <translation>Local</translation>
+        <translation>Remoto</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="604"/>
@@ -2678,7 +2678,7 @@ Deseja continuar?</translation>
         <location filename="../src/sftpsidebar.cpp" line="701"/>
         <location filename="../src/sftpsidebar.cpp" line="742"/>
         <source>Compare folders</source>
-        <translation>&lt;DIR&gt;</translation>
+        <translation>Comparar pastas</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="697"/>
@@ -2781,7 +2781,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="1307"/>
         <source>Transferring %1 file(s) in parallel...</source>
-        <translation>Aberto no editor personalizado. Monitorando...</translation>
+        <translation>Transferindo %1 arquivo(s) em paralelo...</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="1310"/>
@@ -2817,7 +2817,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="1516"/>
         <source>Transfer cancelled.</source>
-        <translation>Selecionar pasta de download</translation>
+        <translation>Transferência cancelada.</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="1524"/>
@@ -2867,7 +2867,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="849"/>
         <source>%1 Error</source>
-        <translation>Erro de transferência SFTP</translation>
+        <translation>Erro: %1</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="901"/>
@@ -2966,7 +2966,7 @@ Deseja continuar?</translation>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="1187"/>
         <source>Cancel transfer</source>
-        <translation>Selecionar arquivos para enviar</translation>
+        <translation>Cancelar transferência</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="1187"/>
@@ -3056,7 +3056,7 @@ Tem certeza de que deseja continuar conectando e lembrar desta chave?</translati
     <message>
         <location filename="../src/sshconnection.cpp" line="569"/>
         <source>unknown error</source>
-        <translation>Enviando automaticamente as alterações para %1...</translation>
+        <translation>erro desconhecido</translation>
     </message>
 </context>
 <context>
@@ -3192,9 +3192,7 @@ Feche esta aba quando terminar.</translation>
         <source><byte value="xd"/>
 [Unable to set DTR: %1]<byte value="xd"/>
 </source>
-        <translation>Session stopped
-
-</translation>
+        <translation><byte value="xd"/>[Não foi possível ativar DTR: %1]<byte value="xd"/></translation>
     </message>
     <message>
         <location filename="../src/terminaltab.cpp" line="186"/>
@@ -3245,11 +3243,7 @@ Feche esta aba quando terminar.</translation>
         <source><byte value="xd"/>
 [X11 forwarding desactivado: %1]<byte value="xd"/>
 </source>
-        <translation>
-
-[Failed to start &apos;%1&apos; (error 0x%2)]
-
-</translation>
+        <translation><byte value="xd"/>[Encaminhamento X11 desativado: %1]<byte value="xd"/></translation>
     </message>
     <message>
         <location filename="../src/terminaltab.cpp" line="596"/>
@@ -3264,7 +3258,7 @@ Feche esta aba quando terminar.</translation>
     <message>
         <location filename="../src/terminaltab.cpp" line="605"/>
         <source>Special Characters</source>
-        <translation>&amp;Copy</translation>
+        <translation>Caracteres especiais</translation>
     </message>
     <message>
         <location filename="../src/terminaltab.cpp" line="607"/>
@@ -3320,7 +3314,7 @@ Feche esta aba quando terminar.</translation>
     <message>
         <location filename="../src/terminaltab.cpp" line="627"/>
         <source>Cancel serial file transfer</source>
-        <translation>Limpar histórico</translation>
+        <translation>Cancelar transferência de arquivo serial</translation>
     </message>
     <message>
         <location filename="../src/terminaltab.cpp" line="629"/>
@@ -3372,7 +3366,7 @@ Feche esta aba quando terminar.</translation>
         <location filename="../src/terminaltab.cpp" line="1083"/>
         <location filename="../src/terminaltab.cpp" line="1092"/>
         <source>Session is read-only; input was blocked.</source>
-        <translation>Zoom &amp;In</translation>
+        <translation>A sessão é somente leitura; a entrada foi bloqueada.</translation>
     </message>
     <message>
         <location filename="../src/terminaltab.cpp" line="1100"/>
@@ -3495,7 +3489,7 @@ Feche esta aba quando terminar.</translation>
     <message>
         <location filename="../src/terminaltab.cpp" line="1520"/>
         <source>Session is read-only; paste was blocked.</source>
-        <translation>Enviar</translation>
+        <translation>A sessão é somente leitura; a colagem foi bloqueada.</translation>
     </message>
     <message>
         <source>Failed to launch external client.
@@ -3548,9 +3542,7 @@ Feche esta aba quando terminar.</translation>
     <message>
         <location filename="../src/sessiondialog.cpp" line="52"/>
         <source>Optional SOCKS5 username</source>
-        <translation>Failed to launch external client.
-
-</translation>
+        <translation>Nome de usuário SOCKS5 (opcional)</translation>
     </message>
     <message>
         <location filename="../src/sessiondialog.cpp" line="55"/>
@@ -3580,7 +3572,7 @@ Feche esta aba quando terminar.</translation>
     <message>
         <location filename="../src/sessiondialog.cpp" line="61"/>
         <source>SOCKS5 Username:</source>
-        <translation>Tipo de túnel:</translation>
+        <translation>Nome de usuário SOCKS5:</translation>
     </message>
     <message>
         <location filename="../src/sessiondialog.cpp" line="62"/>
@@ -3736,7 +3728,7 @@ Versão atual: %2</translation>
     <message>
         <location filename="../src/vncclientwidget.cpp" line="249"/>
         <source>Fit to window (keep aspect ratio)</source>
-        <translation>Atualizar</translation>
+        <translation>Ajustar à janela (manter a proporção)</translation>
     </message>
     <message>
         <location filename="../src/vncclientwidget.cpp" line="252"/>
