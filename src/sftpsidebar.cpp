@@ -248,8 +248,8 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     m_chmodBtn->setAccessibleName(tr("Permissions"));
     actionsLayout->addWidget(m_chmodBtn);
 
-    const QList<QPushButton*> remoteActionButtons = {m_uploadBtn, m_uploadDirBtn, m_compareBtn, m_tunnelsBtn,
-                                                      m_newFolderBtn, m_renameBtn, m_chmodBtn};
+    const QList<QPushButton*> remoteActionButtons = {m_uploadBtn,    m_uploadDirBtn, m_compareBtn, m_tunnelsBtn,
+                                                     m_newFolderBtn, m_renameBtn,    m_chmodBtn};
     for (QPushButton* button : remoteActionButtons) {
         button->setIconSize(QSize(16, 16));
         button->setFixedSize(32, 32);
@@ -1036,8 +1036,8 @@ void SftpSidebar::onChmodClicked() {
         for (int column = 0; column < roles.size(); ++column) {
             auto* check = new QCheckBox(accessGroup);
             check->setAccessibleName(QStringLiteral("%1: %2").arg(roles.at(column), accessNames.at(row)));
-            check->setToolTip(tr("Allow %1 to %2 this item.").arg(roles.at(column).toLower(),
-                                                               accessNames.at(row).toLower()));
+            check->setToolTip(
+                tr("Allow %1 to %2 this item.").arg(roles.at(column).toLower(), accessNames.at(row).toLower()));
             check->setChecked((initialMode & accessBits[row][column]) != 0);
             accessGrid->addWidget(check, row + 1, column + 1, Qt::AlignCenter);
             modeChecks.append(check);
