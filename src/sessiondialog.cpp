@@ -123,11 +123,19 @@ SessionDialog::SessionDialog(const Session& session, QWidget* parent) : QDialog(
 }
 
 void SessionDialog::setupUi() {
-    resize(450, 350);
+    setObjectName("sessionDialog");
+    setMinimumSize(680, 560);
+    resize(760, 700);
 
     auto* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(20, 20, 20, 20);
-    mainLayout->setSpacing(15);
+    mainLayout->setContentsMargins(24, 20, 24, 18);
+    mainLayout->setSpacing(12);
+
+    auto* identityPanel = new QWidget(this);
+    identityPanel->setObjectName("sessionIdentityPanel");
+    auto* identityLayout = new QVBoxLayout(identityPanel);
+    identityLayout->setContentsMargins(14, 12, 14, 12);
+    identityLayout->setSpacing(8);
 
     auto* typeLayout = new QHBoxLayout();
     auto* typeLabel = new QLabel(tr("Session Type:"), this);
@@ -141,7 +149,7 @@ void SessionDialog::setupUi() {
     m_typeCombo->addItem(tr("FTP Connection"), static_cast<int>(SessionType::FTP));
     typeLayout->addWidget(typeLabel);
     typeLayout->addWidget(m_typeCombo);
-    mainLayout->addLayout(typeLayout);
+    identityLayout->addLayout(typeLayout);
 
     auto* nameLayout = new QHBoxLayout();
     auto* nameLabel = new QLabel(tr("Session Name:"), this);
@@ -149,7 +157,7 @@ void SessionDialog::setupUi() {
     m_nameEdit->setPlaceholderText(tr("My Server"));
     nameLayout->addWidget(nameLabel);
     nameLayout->addWidget(m_nameEdit);
-    mainLayout->addLayout(nameLayout);
+    identityLayout->addLayout(nameLayout);
 
     auto* groupLayout = new QHBoxLayout();
     auto* groupLabel = new QLabel(tr("Group:"), this);
@@ -157,7 +165,8 @@ void SessionDialog::setupUi() {
     m_groupEdit->setPlaceholderText(tr("Optional (e.g. Production)"));
     groupLayout->addWidget(groupLabel);
     groupLayout->addWidget(m_groupEdit);
-    mainLayout->addLayout(groupLayout);
+    identityLayout->addLayout(groupLayout);
+    mainLayout->addWidget(identityPanel);
 
     m_stackedWidget = new QStackedWidget(this);
 

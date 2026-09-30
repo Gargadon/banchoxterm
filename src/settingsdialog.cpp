@@ -4,6 +4,7 @@
 #include <QHBoxLayout>
 #include <QTabWidget>
 #include <QComboBox>
+#include <QAbstractItemView>
 #include <QRadioButton>
 #include <QCheckBox>
 #include <QLineEdit>
@@ -19,6 +20,7 @@
 #include <QInputDialog>
 #include <QListWidget>
 #include <QSpinBox>
+#include <QGroupBox>
 #include <QStandardPaths>
 #include <QFile>
 #include <QRegularExpression>
@@ -26,9 +28,8 @@
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Configuration"));
-    // Keep the complete settings form visible and prevent accidental layout
-    // changes caused by resizing the dialog.
-    setFixedSize(640, 520);
+    setMinimumSize(640, 600);
+    resize(640, 600);
 
     loadSettings();
 
@@ -44,12 +45,19 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     appLayout->setSpacing(15);
     appLayout->setContentsMargins(15, 15, 15, 15);
 
+    auto sizeComboPopup = [](QComboBox* combo, int visibleRows) {
+        combo->setMaxVisibleItems(visibleRows);
+        const int rowHeight = qMax(28, combo->fontMetrics().height() + 10);
+        combo->view()->setMinimumHeight(visibleRows * rowHeight + 2);
+    };
+
     auto* themeLayout = new QHBoxLayout();
     auto* themeLabel = new QLabel(tr("Interface Theme:"), appearanceTab);
     m_themeCombo = new QComboBox(appearanceTab);
     m_themeCombo->addItem(tr("System Default"), "system");
     m_themeCombo->addItem(tr("Light"), "light");
     m_themeCombo->addItem(tr("Dark"), "dark");
+    sizeComboPopup(m_themeCombo, 3);
     const int themeIndex = m_themeCombo->findData(m_themeMode);
     m_themeCombo->setCurrentIndex(themeIndex >= 0 ? themeIndex : 0);
     themeLayout->addWidget(themeLabel);
@@ -63,6 +71,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_langCombo->addItem(tr("English"), "en");
     m_langCombo->addItem(tr("Spanish"), "es");
     m_langCombo->addItem(tr("Portuguese"), "pt");
+    sizeComboPopup(m_langCombo, 3);
     if (m_lang == "es")
         m_langCombo->setCurrentIndex(1);
     else if (m_lang == "pt")
@@ -96,6 +105,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
                    "WhiteOnBlack"};
     }
     m_colorSchemeCombo->addItems(schemes);
+    m_colorSchemeCombo->setMaxVisibleItems(14);
     int schemeIdx = schemes.indexOf(m_colorScheme);
     if (schemeIdx != -1)
         m_colorSchemeCombo->setCurrentIndex(schemeIdx);
@@ -104,18 +114,15 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     appLayout->addLayout(colorSchemeLayout);
 
     // Font selector
-    auto* fontGroupBox = new QWidget(appearanceTab);
+    auto* fontGroupBox = new QGroupBox(tr("Terminal Typography"), appearanceTab);
     auto* fontLayout = new QVBoxLayout(fontGroupBox);
-    fontLayout->setContentsMargins(0, 0, 0, 0);
+    fontLayout->setContentsMargins(12, 12, 12, 10);
     fontLayout->setSpacing(8);
 
-    auto* fontTitle = new QLabel(tr("Terminal Typography:"), appearanceTab);
-    fontLayout->addWidget(fontTitle);
-
     auto* fontBtnLayout = new QHBoxLayout();
-    m_fontPreviewLabel = new QLabel(appearanceTab);
+    m_fontPreviewLabel = new QLabel(fontGroupBox);
     updateFontLabel();
-    auto* changeFontBtn = new QPushButton(tr("Choose Font..."), appearanceTab);
+    auto* changeFontBtn = new QPushButton(tr("Choose Font..."), fontGroupBox);
     fontBtnLayout->addWidget(m_fontPreviewLabel, 1);
     fontBtnLayout->addWidget(changeFontBtn);
     fontLayout->addLayout(fontBtnLayout);

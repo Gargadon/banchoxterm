@@ -2526,8 +2526,28 @@ Do you want to continue?</source>
         <translation>Subir</translation>
     </message>
     <message>
+        <location filename="../src/sftpsidebar.cpp" line="210"/>
+        <source>Upload files to the current remote folder</source>
+        <translation>Subir archivos a la carpeta remota actual</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="211"/>
+        <source>Upload files</source>
+        <translation>Subir archivos</translation>
+    </message>
+    <message>
         <location filename="../src/sftpsidebar.cpp" line="209"/>
         <source>Upload Folder</source>
+        <translation>Subir carpeta</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="216"/>
+        <source>Upload a folder to the current remote folder</source>
+        <translation>Subir una carpeta a la carpeta remota actual</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="217"/>
+        <source>Upload folder</source>
         <translation>Subir carpeta</translation>
     </message>
     <message>
@@ -2549,6 +2569,26 @@ Do you want to continue?</source>
         <location filename="../src/sftpsidebar.cpp" line="217"/>
         <source>Start or stop individual SSH tunnels</source>
         <translation>Iniciar o detener túneles SSH individuales</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="228"/>
+        <source>Manage SSH tunnels</source>
+        <translation>Administrar túneles SSH</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="234"/>
+        <source>Create a folder in the current remote folder</source>
+        <translation>Crear una carpeta en la carpeta remota actual</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="240"/>
+        <source>Rename the selected remote item</source>
+        <translation>Renombrar el elemento remoto seleccionado</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="246"/>
+        <source>Change permissions of the selected remote item</source>
+        <translation>Cambiar los permisos del elemento remoto seleccionado</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="229"/>
@@ -2674,6 +2714,7 @@ Do you want to continue?</source>
         <translation>&lt;Directorio&gt;</translation>
     </message>
     <message>
+        <location filename="../src/sftpsidebar.cpp" line="223"/>
         <location filename="../src/sftpsidebar.cpp" line="697"/>
         <location filename="../src/sftpsidebar.cpp" line="701"/>
         <location filename="../src/sftpsidebar.cpp" line="742"/>

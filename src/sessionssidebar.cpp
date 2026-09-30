@@ -55,29 +55,38 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     layout->addLayout(quickConnectRow);
 
     auto* actionsLayout = new QHBoxLayout();
-    auto* newRemoteBtn = new QPushButton(QIcon(":/icons/add.svg"), tr("New Remote Session"), this);
-    newRemoteBtn->setObjectName("primaryButton");
-    newRemoteBtn->setProperty("sidebarAction", true);
+    actionsLayout->setSpacing(4);
+    actionsLayout->setAlignment(Qt::AlignLeft);
+    auto* newRemoteBtn = new QPushButton(QIcon(":/icons/add.svg"), QString(), this);
+    newRemoteBtn->setObjectName("sessionActionButton");
     newRemoteBtn->setToolTip(tr("Create a new SSH or remote session"));
+    newRemoteBtn->setAccessibleName(tr("New Remote Session"));
     actionsLayout->addWidget(newRemoteBtn);
 
-    auto* newLocalBtn = new QPushButton(QIcon(":/icons/terminal.svg"), tr("Local Session"), this);
-    newLocalBtn->setObjectName("sidebarAction");
+    auto* newLocalBtn = new QPushButton(QIcon(":/icons/terminal.svg"), QString(), this);
+    newLocalBtn->setObjectName("sessionActionButton");
     newLocalBtn->setToolTip(tr("Open a local terminal session"));
+    newLocalBtn->setAccessibleName(tr("Local Session"));
     actionsLayout->addWidget(newLocalBtn);
 
-    layout->addLayout(actionsLayout);
-
-    auto* ioLayout = new QHBoxLayout();
-    auto* importBtn = new QPushButton(QIcon(":/icons/upload.svg"), tr("Import"), this);
-    auto* exportBtn = new QPushButton(QIcon(":/icons/download.svg"), tr("Export"), this);
-    importBtn->setObjectName("sidebarAction");
-    exportBtn->setObjectName("sidebarAction");
+    auto* importBtn = new QPushButton(QIcon(":/icons/upload.svg"), QString(), this);
+    importBtn->setObjectName("sessionActionButton");
     importBtn->setToolTip(tr("Import JSON, OpenSSH, PuTTY, MobaXterm, SecureCRT or Royal TS sessions"));
+    importBtn->setAccessibleName(tr("Import"));
+    actionsLayout->addWidget(importBtn);
+
+    auto* exportBtn = new QPushButton(QIcon(":/icons/download.svg"), QString(), this);
+    exportBtn->setObjectName("sessionActionButton");
     exportBtn->setToolTip(tr("Export saved sessions"));
-    ioLayout->addWidget(importBtn);
-    ioLayout->addWidget(exportBtn);
-    layout->addLayout(ioLayout);
+    exportBtn->setAccessibleName(tr("Export"));
+    actionsLayout->addWidget(exportBtn);
+
+    const QList<QPushButton*> sessionActionButtons = {newRemoteBtn, newLocalBtn, importBtn, exportBtn};
+    for (QPushButton* button : sessionActionButtons) {
+        button->setIconSize(QSize(16, 16));
+        button->setFixedSize(32, 32);
+    }
+    layout->addLayout(actionsLayout);
 
     m_treeWidget = new QTreeWidget(this);
     m_treeWidget->setColumnCount(2);
@@ -192,6 +201,10 @@ void SessionsSidebar::loadSessions() {
                 groupItem->setText(0, session.group);
                 groupItem->setFirstColumnSpanned(true);
                 groupItem->setIcon(0, QIcon(":/icons/folder.svg"));
+                QFont groupFont = m_treeWidget->font();
+                groupFont.setWeight(QFont::DemiBold);
+                groupItem->setFont(0, groupFont);
+                groupItem->setToolTip(0, tr("Session group: %1").arg(session.group));
                 groupItem->setData(0, kIsGroupRole, true);
                 groupItem->setData(0, kSessionIdRole, QString());
                 groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDropEnabled);

@@ -33,6 +33,8 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QListWidget>
+#include <QCheckBox>
+#include <QGroupBox>
 #include <QThread>
 #include <QUuid>
 #include <QMap>
@@ -168,8 +170,9 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     mainLayout->setSpacing(8);
 
     auto* remotePanel = new QWidget(this);
+    remotePanel->setObjectName("sftpRemotePanel");
     auto* remoteLayout = new QVBoxLayout(remotePanel);
-    remoteLayout->setContentsMargins(0, 0, 0, 0);
+    remoteLayout->setContentsMargins(10, 8, 10, 8);
     remoteLayout->setSpacing(6);
 
     auto* titleLabel = new QLabel(tr("Remote files"), remotePanel);
@@ -199,46 +202,60 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
 
     remoteLayout->addLayout(navLayout);
 
-    auto* toolsLayout = new QGridLayout();
-    toolsLayout->setHorizontalSpacing(6);
-    toolsLayout->setVerticalSpacing(6);
+    auto* actionsLayout = new QHBoxLayout();
+    actionsLayout->setSpacing(4);
+    actionsLayout->setAlignment(Qt::AlignLeft);
 
-    m_uploadBtn = new QPushButton(QIcon(":/icons/upload.svg"), tr("Upload"), remotePanel);
-    toolsLayout->addWidget(m_uploadBtn, 0, 0);
+    m_uploadBtn = new QPushButton(QIcon(":/icons/upload.svg"), QString(), remotePanel);
+    m_uploadBtn->setObjectName("remoteActionButton");
+    m_uploadBtn->setToolTip(tr("Upload files to the current remote folder"));
+    m_uploadBtn->setAccessibleName(tr("Upload files"));
+    actionsLayout->addWidget(m_uploadBtn);
 
-    m_uploadDirBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("Upload Folder"), remotePanel);
-    toolsLayout->addWidget(m_uploadDirBtn, 0, 1);
+    m_uploadDirBtn = new QPushButton(QIcon(":/icons/upload-folder.svg"), QString(), remotePanel);
+    m_uploadDirBtn->setObjectName("remoteActionButton");
+    m_uploadDirBtn->setToolTip(tr("Upload a folder to the current remote folder"));
+    m_uploadDirBtn->setAccessibleName(tr("Upload Folder"));
+    actionsLayout->addWidget(m_uploadDirBtn);
 
-    m_compareBtn = new QPushButton(QIcon(":/icons/refresh.svg"), tr("Compare"), remotePanel);
+    m_compareBtn = new QPushButton(QIcon(":/icons/compare.svg"), QString(), remotePanel);
+    m_compareBtn->setObjectName("remoteActionButton");
     m_compareBtn->setToolTip(tr("Compare the active local and remote folders"));
-    toolsLayout->addWidget(m_compareBtn, 1, 0);
+    m_compareBtn->setAccessibleName(tr("Compare folders"));
+    actionsLayout->addWidget(m_compareBtn);
 
-    m_tunnelsBtn = new QPushButton(QIcon(":/icons/server.svg"), tr("Tunnels"), remotePanel);
+    m_tunnelsBtn = new QPushButton(QIcon(":/icons/tunnel.svg"), QString(), remotePanel);
+    m_tunnelsBtn->setObjectName("remoteActionButton");
     m_tunnelsBtn->setToolTip(tr("Start or stop individual SSH tunnels"));
-    toolsLayout->addWidget(m_tunnelsBtn, 1, 1);
+    m_tunnelsBtn->setAccessibleName(tr("Manage SSH tunnels"));
+    actionsLayout->addWidget(m_tunnelsBtn);
 
-    toolsLayout->setColumnStretch(0, 1);
-    toolsLayout->setColumnStretch(1, 1);
+    m_newFolderBtn = new QPushButton(QIcon(":/icons/new-folder.svg"), QString(), remotePanel);
+    m_newFolderBtn->setObjectName("remoteActionButton");
+    m_newFolderBtn->setToolTip(tr("Create a folder in the current remote folder"));
+    m_newFolderBtn->setAccessibleName(tr("New Folder"));
+    actionsLayout->addWidget(m_newFolderBtn);
 
-    remoteLayout->addLayout(toolsLayout);
+    m_renameBtn = new QPushButton(QIcon(":/icons/rename.svg"), QString(), remotePanel);
+    m_renameBtn->setObjectName("remoteActionButton");
+    m_renameBtn->setToolTip(tr("Rename the selected remote item"));
+    m_renameBtn->setAccessibleName(tr("Rename"));
+    actionsLayout->addWidget(m_renameBtn);
 
-    auto* fileOpsLayout = new QGridLayout();
-    fileOpsLayout->setHorizontalSpacing(6);
-    fileOpsLayout->setVerticalSpacing(6);
+    m_chmodBtn = new QPushButton(QIcon(":/icons/permissions.svg"), QString(), remotePanel);
+    m_chmodBtn->setObjectName("remoteActionButton");
+    m_chmodBtn->setToolTip(tr("Change permissions of the selected remote item"));
+    m_chmodBtn->setAccessibleName(tr("Permissions"));
+    actionsLayout->addWidget(m_chmodBtn);
 
-    m_newFolderBtn = new QPushButton(QIcon(":/icons/folder.svg"), tr("New Folder"), remotePanel);
-    fileOpsLayout->addWidget(m_newFolderBtn, 0, 0);
+    const QList<QPushButton*> remoteActionButtons = {m_uploadBtn, m_uploadDirBtn, m_compareBtn, m_tunnelsBtn,
+                                                      m_newFolderBtn, m_renameBtn, m_chmodBtn};
+    for (QPushButton* button : remoteActionButtons) {
+        button->setIconSize(QSize(16, 16));
+        button->setFixedSize(32, 32);
+    }
 
-    m_renameBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Rename"), remotePanel);
-    fileOpsLayout->addWidget(m_renameBtn, 0, 1);
-
-    m_chmodBtn = new QPushButton(QIcon(":/icons/edit.svg"), tr("Permissions"), remotePanel);
-    fileOpsLayout->addWidget(m_chmodBtn, 1, 0);
-
-    fileOpsLayout->setColumnStretch(0, 1);
-    fileOpsLayout->setColumnStretch(1, 1);
-
-    remoteLayout->addLayout(fileOpsLayout);
+    remoteLayout->addLayout(actionsLayout);
 
     m_treeWidget = new SftpTreeWidget(remotePanel);
     m_treeWidget->setHeaderLabels({tr("Name"), tr("Size"), tr("Modified")});
@@ -262,8 +279,9 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     fileSplitter->setObjectName("sftpFileSplitter");
 
     auto* localPanel = new QWidget(fileSplitter);
+    localPanel->setObjectName("sftpLocalPanel");
     auto* localLayout = new QVBoxLayout(localPanel);
-    localLayout->setContentsMargins(0, 4, 0, 0);
+    localLayout->setContentsMargins(10, 8, 10, 8);
     auto* localTitle = new QLabel(tr("Local files"), localPanel);
     localTitle->setObjectName("sftpPaneTitle");
     QFont localTitleFont = localTitle->font();
@@ -332,10 +350,12 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     });
 
     m_progressLabel = new QLabel(remotePanel);
+    m_progressLabel->setObjectName("sftpTransferLabel");
     m_progressLabel->hide();
     remoteLayout->addWidget(m_progressLabel);
 
     m_progressBar = new QProgressBar(remotePanel);
+    m_progressBar->setObjectName("sftpTransferProgress");
     m_progressBar->setTextVisible(false);
     m_progressBar->setFixedHeight(6);
     m_progressBar->setRange(0, 100);
@@ -344,11 +364,13 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     remoteLayout->addWidget(m_progressBar);
 
     m_cancelTransferBtn = new QPushButton(tr("Cancel queued"), remotePanel);
+    m_cancelTransferBtn->setObjectName("sftpTransferAction");
     m_cancelTransferBtn->setEnabled(false);
     m_cancelTransferBtn->hide();
     remoteLayout->addWidget(m_cancelTransferBtn);
 
     m_pauseTransferBtn = new QPushButton(tr("Pause transfer"), remotePanel);
+    m_pauseTransferBtn->setObjectName("sftpTransferAction");
     m_pauseTransferBtn->setEnabled(false);
     m_pauseTransferBtn->hide();
     remoteLayout->addWidget(m_pauseTransferBtn);
@@ -590,6 +612,7 @@ void SftpSidebar::onManageTunnels() {
         return;
 
     QDialog dialog(this);
+    dialog.setObjectName("sftpUtilityDialog");
     dialog.setWindowTitle(tr("SSH Tunnels"));
     dialog.resize(520, 300);
     auto* layout = new QVBoxLayout(&dialog);
@@ -739,6 +762,7 @@ void SftpSidebar::onCompareFoldersClicked() {
     }
 
     QDialog dialog(this);
+    dialog.setObjectName("sftpUtilityDialog");
     dialog.setWindowTitle(tr("Compare folders"));
     dialog.resize(620, 420);
     auto* layout = new QVBoxLayout(&dialog);
@@ -976,18 +1000,122 @@ void SftpSidebar::onChmodClicked() {
     if (special == "." || special == "..")
         return;
 
-    QString name = item->text(0);
-    bool ok = false;
-    QString modeStr =
-        QInputDialog::getText(this, tr("Permissions"), tr("Mode (octal, e.g. 755):"), QLineEdit::Normal, "755", &ok);
-    if (!ok)
+    const QString name = item->text(0);
+    QDialog dialog(this);
+    dialog.setObjectName("sftpUtilityDialog");
+    dialog.setWindowTitle(tr("Permissions — %1").arg(name));
+    dialog.setMinimumWidth(440);
+
+    auto* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(20, 18, 20, 16);
+    layout->setSpacing(12);
+
+    auto* description = new QLabel(tr("Choose what each group can do:"), &dialog);
+    layout->addWidget(description);
+
+    auto* accessGroup = new QGroupBox(tr("File access"), &dialog);
+    auto* accessGrid = new QGridLayout(accessGroup);
+    accessGrid->setContentsMargins(12, 16, 12, 12);
+    accessGrid->setHorizontalSpacing(20);
+    accessGrid->setVerticalSpacing(8);
+    accessGrid->addWidget(new QLabel(QString(), accessGroup), 0, 0);
+    const QStringList roles = {tr("Owner"), tr("Group"), tr("Others")};
+    for (int column = 0; column < roles.size(); ++column) {
+        auto* roleLabel = new QLabel(roles.at(column), accessGroup);
+        roleLabel->setAlignment(Qt::AlignCenter);
+        accessGrid->addWidget(roleLabel, 0, column + 1);
+    }
+
+    const QStringList accessNames = {tr("Read"), tr("Write"), tr("Execute")};
+    const int accessBits[3][3] = {{0400, 0040, 0004}, {0200, 0020, 0002}, {0100, 0010, 0001}};
+    QList<QCheckBox*> modeChecks;
+    QList<int> modeBits;
+    constexpr int initialMode = 0755;
+    for (int row = 0; row < accessNames.size(); ++row) {
+        accessGrid->addWidget(new QLabel(accessNames.at(row), accessGroup), row + 1, 0);
+        for (int column = 0; column < roles.size(); ++column) {
+            auto* check = new QCheckBox(accessGroup);
+            check->setAccessibleName(QStringLiteral("%1: %2").arg(roles.at(column), accessNames.at(row)));
+            check->setToolTip(tr("Allow %1 to %2 this item.").arg(roles.at(column).toLower(),
+                                                               accessNames.at(row).toLower()));
+            check->setChecked((initialMode & accessBits[row][column]) != 0);
+            accessGrid->addWidget(check, row + 1, column + 1, Qt::AlignCenter);
+            modeChecks.append(check);
+            modeBits.append(accessBits[row][column]);
+        }
+    }
+    layout->addWidget(accessGroup);
+
+    auto* specialGroup = new QGroupBox(tr("Special permissions"), &dialog);
+    auto* specialLayout = new QHBoxLayout(specialGroup);
+    specialLayout->setContentsMargins(12, 16, 12, 12);
+    const QList<QPair<QString, int>> specialModes = {
+        {tr("Set user ID"), 04000}, {tr("Set group ID"), 02000}, {tr("Sticky bit"), 01000}};
+    for (const auto& specialMode : specialModes) {
+        auto* check = new QCheckBox(specialMode.first, specialGroup);
+        check->setToolTip(tr("Enable the %1 permission bit.").arg(specialMode.first));
+        specialLayout->addWidget(check);
+        modeChecks.append(check);
+        modeBits.append(specialMode.second);
+    }
+    layout->addWidget(specialGroup);
+
+    auto* previewRow = new QHBoxLayout();
+    auto* modePreview = new QLabel(&dialog);
+    modePreview->setStyleSheet(QStringLiteral("font-weight: 600;"));
+    auto* symbolicPreview = new QLabel(&dialog);
+    symbolicPreview->setObjectName("permissionSymbolicPreview");
+    previewRow->addWidget(modePreview);
+    previewRow->addStretch();
+    previewRow->addWidget(symbolicPreview);
+    layout->addLayout(previewRow);
+
+    auto updatePreview = [modeChecks, modeBits, modePreview, symbolicPreview]() {
+        int mode = 0;
+        for (int i = 0; i < modeChecks.size(); ++i) {
+            if (modeChecks.at(i)->isChecked())
+                mode |= modeBits.at(i);
+        }
+        QString symbolic;
+        const int bits[3][3] = {{0400, 0200, 0100}, {0040, 0020, 0010}, {0004, 0002, 0001}};
+        const QChar symbols[3] = {QChar('r'), QChar('w'), QChar('x')};
+        for (int group = 0; group < 3; ++group) {
+            for (int permission = 0; permission < 3; ++permission) {
+                if (permission != 2) {
+                    symbolic.append((mode & bits[group][permission]) ? symbols[permission] : QChar('-'));
+                    continue;
+                }
+
+                const bool executable = (mode & bits[group][permission]) != 0;
+                const int specialBit = group == 0 ? 04000 : (group == 1 ? 02000 : 01000);
+                if (mode & specialBit)
+                    symbolic.append(group == 2 ? (executable ? QChar('t') : QChar('T'))
+                                               : (executable ? QChar('s') : QChar('S')));
+                else
+                    symbolic.append(executable ? QChar('x') : QChar('-'));
+            }
+        }
+        modePreview->setText(QObject::tr("Mode: %1").arg(mode, 4, 8, QChar('0')));
+        symbolicPreview->setText(symbolic);
+    };
+    for (QCheckBox* check : modeChecks)
+        connect(check, &QCheckBox::toggled, &dialog, [updatePreview](bool) { updatePreview(); });
+    updatePreview();
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Apply"));
+    buttons->button(QDialogButtonBox::Ok)->setDefault(true);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted)
         return;
 
-    bool parseOk = false;
-    int mode = modeStr.trimmed().toInt(&parseOk, 8);
-    if (!parseOk || mode < 0 || mode > 07777) {
-        QMessageBox::warning(this, tr("Invalid Permissions"), tr("Please enter a valid octal mode (e.g. 755)."));
-        return;
+    int mode = 0;
+    for (int i = 0; i < modeChecks.size(); ++i) {
+        if (modeChecks.at(i)->isChecked())
+            mode |= modeBits.at(i);
     }
 
     QString base = m_currentPath;

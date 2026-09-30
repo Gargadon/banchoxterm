@@ -2526,14 +2526,34 @@ Deseja continuar?</translation>
         <translation>Enviar</translation>
     </message>
     <message>
+        <location filename="../src/sftpsidebar.cpp" line="210"/>
+        <source>Upload files to the current remote folder</source>
+        <translation>Enviar arquivos para a pasta remota atual</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="211"/>
+        <source>Upload files</source>
+        <translation>Enviar arquivos</translation>
+    </message>
+    <message>
         <location filename="../src/sftpsidebar.cpp" line="209"/>
         <source>Upload Folder</source>
         <translation>Enviar pasta</translation>
     </message>
     <message>
+        <location filename="../src/sftpsidebar.cpp" line="216"/>
+        <source>Upload a folder to the current remote folder</source>
+        <translation>Enviar uma pasta para a pasta remota atual</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="217"/>
+        <source>Upload folder</source>
+        <translation>Enviar pasta</translation>
+    </message>
+    <message>
         <location filename="../src/sftpsidebar.cpp" line="212"/>
         <source>Compare</source>
-        <translation>Desativar senha mestra</translation>
+        <translation>Comparar</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="213"/>
@@ -2549,6 +2569,26 @@ Deseja continuar?</translation>
         <location filename="../src/sftpsidebar.cpp" line="217"/>
         <source>Start or stop individual SSH tunnels</source>
         <translation>Iniciar ou parar túneis SSH individuais</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="228"/>
+        <source>Manage SSH tunnels</source>
+        <translation>Gerenciar túneis SSH</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="234"/>
+        <source>Create a folder in the current remote folder</source>
+        <translation>Criar uma pasta na pasta remota atual</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="240"/>
+        <source>Rename the selected remote item</source>
+        <translation>Renomear o item remoto selecionado</translation>
+    </message>
+    <message>
+        <location filename="../src/sftpsidebar.cpp" line="246"/>
+        <source>Change permissions of the selected remote item</source>
+        <translation>Alterar as permissões do item remoto selecionado</translation>
     </message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="229"/>
@@ -2674,6 +2714,7 @@ Deseja continuar?</translation>
         <translation>&lt;Diretório&gt;</translation>
     </message>
     <message>
+        <location filename="../src/sftpsidebar.cpp" line="223"/>
         <location filename="../src/sftpsidebar.cpp" line="697"/>
         <location filename="../src/sftpsidebar.cpp" line="701"/>
         <location filename="../src/sftpsidebar.cpp" line="742"/>
