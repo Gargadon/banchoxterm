@@ -585,7 +585,7 @@ void MainWindow::setupUi() {
     rebuildMacrosRibbon();
 
     auto helpPage = makeRibbonPage(tr("Help"));
-    auto* aboutRibbonAction = new QAction(QIcon(":/icons/logo.svg"), tr("About"), this);
+    auto* aboutRibbonAction = new QAction(QIcon(":/icons/about.svg"), tr("About"), this);
     connect(aboutRibbonAction, &QAction::triggered, this, &MainWindow::showAbout);
     addRibbonAction(helpPage.second, aboutRibbonAction);
     auto* updateRibbonAction = new QAction(QIcon(":/icons/refresh.svg"), tr("Updates"), this);
@@ -746,35 +746,90 @@ void MainWindow::setupUi() {
     m_welcomeWidget = new QWidget(m_tabSplitter);
     m_welcomeWidget->setObjectName("welcomeScreen");
     auto* welcomeLayout = new QVBoxLayout(m_welcomeWidget);
-    welcomeLayout->setContentsMargins(30, 30, 30, 30);
-    welcomeLayout->setSpacing(12);
-    welcomeLayout->setAlignment(Qt::AlignCenter);
+    welcomeLayout->setContentsMargins(32, 28, 32, 32);
+    welcomeLayout->setSpacing(0);
 
-    auto* welcomeTitle = new QLabel(tr("Welcome to BanchoXterm"), m_welcomeWidget);
+    auto* welcomeContent = new QWidget(m_welcomeWidget);
+    welcomeContent->setObjectName("welcomeContent");
+    welcomeContent->setMaximumWidth(980);
+    auto* contentLayout = new QVBoxLayout(welcomeContent);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(24);
+
+    auto* welcomeHeader = new QHBoxLayout();
+    welcomeHeader->setSpacing(16);
+    auto* welcomeLogo = new QLabel(welcomeContent);
+    welcomeLogo->setObjectName("welcomeLogo");
+    welcomeLogo->setPixmap(QIcon(":/icons/logo.svg").pixmap(QSize(36, 36)));
+    welcomeLogo->setFixedSize(52, 52);
+    welcomeHeader->addWidget(welcomeLogo, 0, Qt::AlignTop);
+
+    auto* welcomeHeading = new QVBoxLayout();
+    welcomeHeading->setSpacing(3);
+    auto* welcomeTitle = new QLabel(tr("Welcome to BanchoXterm"), welcomeContent);
     welcomeTitle->setObjectName("welcomeTitle");
-    welcomeTitle->setAlignment(Qt::AlignCenter);
-    welcomeLayout->addWidget(welcomeTitle);
-
-    auto* welcomeSubtitle = new QLabel(tr("Open a saved session or start a new terminal to begin."), m_welcomeWidget);
+    welcomeHeading->addWidget(welcomeTitle);
+    auto* welcomeSubtitle = new QLabel(tr("Your workspace for terminals and remote connections."), welcomeContent);
     welcomeSubtitle->setObjectName("welcomeSubtitle");
-    welcomeSubtitle->setAlignment(Qt::AlignCenter);
     welcomeSubtitle->setWordWrap(true);
-    welcomeLayout->addWidget(welcomeSubtitle);
+    welcomeHeading->addWidget(welcomeSubtitle);
+    welcomeHeader->addLayout(welcomeHeading, 1);
+    contentLayout->addLayout(welcomeHeader);
 
-    auto* welcomeActions = new QHBoxLayout();
-    welcomeActions->setSpacing(8);
-    auto* welcomeRemoteButton = new QPushButton(QIcon(":/icons/add.svg"), tr("New Session"), m_welcomeWidget);
+    auto* welcomeCards = new QHBoxLayout();
+    welcomeCards->setSpacing(18);
+
+    auto* connectCard = new QFrame(welcomeContent);
+    connectCard->setObjectName("welcomeCard");
+    connectCard->setMinimumWidth(300);
+    auto* connectLayout = new QVBoxLayout(connectCard);
+    connectLayout->setContentsMargins(24, 22, 24, 22);
+    connectLayout->setSpacing(12);
+    auto* connectTitle = new QLabel(tr("Connect"), connectCard);
+    connectTitle->setObjectName("welcomeCardTitle");
+    connectLayout->addWidget(connectTitle);
+    auto* connectDescription = new QLabel(
+        tr("Open a local shell or configure a connection to another system."), connectCard);
+    connectDescription->setObjectName("welcomeCardDescription");
+    connectDescription->setWordWrap(true);
+    connectLayout->addWidget(connectDescription);
+    connectLayout->addSpacing(4);
+
+    auto* welcomeRemoteButton = new QPushButton(QIcon(":/icons/add.svg"), tr("New Session"), connectCard);
     welcomeRemoteButton->setObjectName("primaryButton");
-    auto* welcomeLocalButton = new QPushButton(QIcon(":/icons/terminal.svg"), tr("Local Terminal"), m_welcomeWidget);
-    welcomeLocalButton->setObjectName("sidebarAction");
-    welcomeActions->addWidget(welcomeRemoteButton);
-    welcomeActions->addWidget(welcomeLocalButton);
-    welcomeLayout->addLayout(welcomeActions);
+    welcomeRemoteButton->setMinimumHeight(42);
+    welcomeRemoteButton->setIconSize(QSize(18, 18));
+    connectLayout->addWidget(welcomeRemoteButton);
+    auto* welcomeLocalButton = new QPushButton(QIcon(":/icons/terminal.svg"), tr("Local Terminal"), connectCard);
+    welcomeLocalButton->setObjectName("welcomeSecondaryButton");
+    welcomeLocalButton->setMinimumHeight(42);
+    welcomeLocalButton->setIconSize(QSize(18, 18));
+    connectLayout->addWidget(welcomeLocalButton);
+    connectLayout->addStretch();
 
-    auto* recentTitle = new QLabel(tr("Recent sessions"), m_welcomeWidget);
-    recentTitle->setObjectName("welcomeSectionTitle");
-    recentTitle->setAlignment(Qt::AlignCenter);
-    welcomeLayout->addWidget(recentTitle);
+    auto* protocolLabel = new QLabel(tr("SSH  ·  Telnet  ·  Serial  ·  RDP  ·  VNC"), connectCard);
+    protocolLabel->setObjectName("welcomeProtocols");
+    protocolLabel->setWordWrap(true);
+    connectLayout->addWidget(protocolLabel);
+    welcomeCards->addWidget(connectCard, 2);
+
+    auto* recentCard = new QFrame(welcomeContent);
+    recentCard->setObjectName("welcomeCard");
+    recentCard->setMinimumWidth(390);
+    auto* recentLayout = new QVBoxLayout(recentCard);
+    recentLayout->setContentsMargins(24, 22, 24, 22);
+    recentLayout->setSpacing(9);
+
+    auto* recentHeader = new QHBoxLayout();
+    auto* recentTitle = new QLabel(tr("Recent sessions"), recentCard);
+    recentTitle->setObjectName("welcomeCardTitle");
+    recentHeader->addWidget(recentTitle);
+    recentHeader->addStretch();
+    auto* allSessionsButton = new QPushButton(tr("View all"), recentCard);
+    allSessionsButton->setObjectName("welcomeLinkButton");
+    allSessionsButton->setFlat(true);
+    recentHeader->addWidget(allSessionsButton);
+    recentLayout->addLayout(recentHeader);
 
     const QList<Session> savedSessions = SessionManager::loadSessions();
     const QStringList recentNames = QSettings().value("sessions/recent").toStringList();
@@ -783,14 +838,38 @@ void MainWindow::setupUi() {
         for (const Session& recentSession : savedSessions) {
             if (recentSession.name != recentName)
                 continue;
+            QString endpoint;
+            if (recentSession.type == SessionType::Local) {
+                endpoint = recentSession.shellPath.isEmpty() ? tr("Local shell") : recentSession.shellPath;
+            } else {
+                endpoint = recentSession.user.isEmpty() ? recentSession.host
+                                                        : QStringLiteral("%1@%2").arg(recentSession.user,
+                                                                                    recentSession.host);
+                if (recentSession.port > 0)
+                    endpoint += QStringLiteral(":%1").arg(recentSession.port);
+            }
+            const QString favorite = recentSession.favorite ? QStringLiteral("★  ") : QString();
             auto* recentButton = new QPushButton(
-                recentSession.favorite ? QStringLiteral("★  %1").arg(recentName) : recentName, m_welcomeWidget);
+                QStringLiteral("%1%2\n%3  ·  %4")
+                    .arg(favorite, recentName, sessionTypeName(recentSession.type), endpoint),
+                recentCard);
             recentButton->setObjectName("welcomeRecentButton");
-            recentButton->setIcon(
-                QIcon(recentSession.type == SessionType::SSH ? ":/icons/server.svg" : ":/icons/terminal.svg"));
-            recentButton->setToolTip(
-                QStringLiteral("%1@%2:%3").arg(recentSession.user, recentSession.host).arg(recentSession.port));
-            welcomeLayout->addWidget(recentButton, 0, Qt::AlignHCenter);
+            QString iconPath = QStringLiteral(":/icons/terminal.svg");
+            if (recentSession.type == SessionType::SSH)
+                iconPath = QStringLiteral(":/icons/server.svg");
+            else if (recentSession.type == SessionType::Telnet)
+                iconPath = QStringLiteral(":/icons/telnet.svg");
+            else if (recentSession.type == SessionType::Serial)
+                iconPath = QStringLiteral(":/icons/serial.svg");
+            else if (recentSession.type == SessionType::RDP)
+                iconPath = QStringLiteral(":/icons/rdp.svg");
+            else if (recentSession.type == SessionType::VNC)
+                iconPath = QStringLiteral(":/icons/vnc.svg");
+            recentButton->setIcon(QIcon(iconPath));
+            recentButton->setIconSize(QSize(22, 22));
+            recentButton->setToolTip(endpoint);
+            recentButton->setMinimumHeight(55);
+            recentLayout->addWidget(recentButton);
             connect(recentButton, &QPushButton::clicked, this,
                     [this, recentSession]() { onConnectSession(recentSession); });
             if (++recentCount >= 5)
@@ -799,7 +878,22 @@ void MainWindow::setupUi() {
         if (recentCount >= 5)
             break;
     }
-    recentTitle->setVisible(recentCount > 0);
+    if (recentCount == 0) {
+        auto* emptyRecent = new QLabel(
+            tr("Your recently opened sessions will appear here."), recentCard);
+        emptyRecent->setObjectName("welcomeEmptyState");
+        emptyRecent->setAlignment(Qt::AlignCenter);
+        emptyRecent->setWordWrap(true);
+        emptyRecent->setMinimumHeight(150);
+        recentLayout->addWidget(emptyRecent);
+    }
+    recentLayout->addStretch();
+    welcomeCards->addWidget(recentCard, 3);
+    contentLayout->addLayout(welcomeCards);
+
+    welcomeLayout->addStretch();
+    welcomeLayout->addWidget(welcomeContent, 0, Qt::AlignHCenter);
+    welcomeLayout->addStretch();
 
     m_tabGrid->addWidget(m_welcomeWidget, 0, 0, 2, 2);
 
@@ -809,6 +903,11 @@ void MainWindow::setupUi() {
             onConnectSession(dialog.getSession());
     });
     connect(welcomeLocalButton, &QPushButton::clicked, this, &MainWindow::onNewLocalTerminal);
+    connect(allSessionsButton, &QPushButton::clicked, this, [this]() {
+        switchSidebarTab(0);
+        if (m_sidebarContainer)
+            m_sidebarContainer->show();
+    });
 
     m_tabWidget2->hide();
     m_tabWidget3->hide();
@@ -1351,8 +1450,18 @@ void MainWindow::applyThemeMode(const QString& mode) {
             "QFrame#verticalTabStrip QToolButton:checked { background: %3; border-left: 3px solid %7; }"
             "QFrame#verticalTabStrip QToolButton:hover { background: %6; }"
             "QWidget#welcomeScreen { background: %1; }"
-            "QPushButton#sidebarAction, QPushButton#welcomeRecentButton { background: %3; }"
-            "QPushButton#sidebarAction:hover, QPushButton#welcomeRecentButton:hover { background: %6; }"
+            "QFrame#welcomeCard { background: %3; border: 1px solid %4; border-radius: 12px; }"
+            "QLabel#welcomeLogo { background: %3; border: 1px solid %4; border-radius: 12px; padding: 7px; }"
+            "QLabel#welcomeCardTitle { color: %2; font-size: 16px; font-weight: 650; }"
+            "QLabel#welcomeCardDescription, QLabel#welcomeProtocols, QLabel#welcomeEmptyState { color: %5; }"
+            "QLabel#welcomeProtocols { border-top: 1px solid %4; padding-top: 12px; }"
+            "QPushButton#welcomeSecondaryButton { background: %3; text-align: left; padding: 8px 14px; }"
+            "QPushButton#welcomeSecondaryButton:hover { background: %6; }"
+            "QPushButton#welcomeRecentButton { background: %1; text-align: left; padding: 8px 12px;"
+            " border: 1px solid %4; border-radius: 7px; }"
+            "QPushButton#welcomeRecentButton:hover { background: %6; border-color: %7; }"
+            "QPushButton#welcomeLinkButton { color: %7; background: transparent; border: 0; padding: 4px 6px; }"
+            "QPushButton#welcomeLinkButton:hover { color: %10; text-decoration: underline; }"
             "QLabel#sftpPaneTitle { color: %2; font-weight: 600; padding: 5px 0; }"
             "QWidget#sftpRemotePanel, QWidget#sftpLocalPanel { background: %3; border: 1px solid %4;"
             " border-radius: 8px; }"
@@ -1389,7 +1498,7 @@ void MainWindow::applyThemeMode(const QString& mode) {
             " border-bottom: 3px solid %7; font-weight: 600; }"
             "QLabel#sidebarSectionTitle, QLabel#welcomeSectionTitle { color: %5; font-weight: 600; }"
             "QLabel#sidebarSectionMeta, QLabel#welcomeSubtitle { color: %5; }"
-            "QLabel#welcomeTitle { color: %2; font-size: 22px; font-weight: 600; }"
+            "QLabel#welcomeTitle { color: %2; font-size: 26px; font-weight: 650; }"
             "QLabel#toolbarSectionLabel { color: %5; }"
             "QFrame#remoteStatsCard { background: %1; border: 1px solid %4; border-radius: 7px; }"
             "QScrollBar:vertical { background: transparent; width: 12px; margin: 2px; }"

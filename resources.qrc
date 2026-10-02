@@ -1,6 +1,7 @@
 <!DOCTYPE RCC><RCC version="1.0">
 <qresource>
     <file>icons/logo.svg</file>
+    <file>icons/about.svg</file>
     <file>icons/terminal.svg</file>
     <file>icons/server.svg</file>
     <file>icons/folder.svg</file>

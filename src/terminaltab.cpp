@@ -33,6 +33,7 @@
 #include <QSerialPort>
 #include <QListWidget>
 #include <QDialogButtonBox>
+#include <QDesktopServices>
 
 #ifdef Q_OS_WIN
 #include "conpty.h"
@@ -124,6 +125,10 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         connect(m_terminal, &QWidget::customContextMenuRequested, this, &TerminalTab::showTerminalContextMenu);
         connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
         connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
+        connect(m_terminal, &QTermWidget::urlActivated, this, [this](const QUrl& url, bool) {
+            if (!QDesktopServices::openUrl(url))
+                feedTerminalData(tr("\r\n[Unable to open link: %1]\r\n").arg(url.toString()).toUtf8());
+        });
 
         layout->addWidget(m_terminal);
 
@@ -463,6 +468,10 @@ void TerminalTab::setupLocalTerminal() {
             shell = "/bin/bash";
         }
     }
+    // Keep the local PTY's erase character and the keys emitted by the
+    // terminal consistent: Backspace is DEL and Delete is CSI 3 ~.
+    if (QTermWidget::availableKeyBindings().contains(QStringLiteral("linux")))
+        m_terminal->setKeyBindings(QStringLiteral("linux"));
     m_terminal->setShellProgram(shell);
     m_terminal->startShellProgram();
 #endif

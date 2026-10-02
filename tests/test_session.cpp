@@ -17,6 +17,8 @@
 #include <QElapsedTimer>
 #include <QThread>
 #include <QTabWidget>
+#include <QFrame>
+#include <QPushButton>
 #include <QPointer>
 #include <QStandardPaths>
 #include <memory>
@@ -35,6 +37,7 @@
 #include "ftpclient.h"
 #include "sshconnection.h"
 #include "sftptransferworker.h"
+#include <qtermwidget.h>
 
 class ExplicitTlsTestServer : public QTcpServer {
 protected:
@@ -1050,6 +1053,26 @@ private slots:
         QVERIFY(application.waitForFinished(3000));
     }
 
+    void testWelcomeScreenLayout() {
+        MainWindow window;
+        window.resize(1280, 800);
+        window.show();
+        QTest::qWait(100);
+
+        auto* welcome = window.findChild<QWidget*>(QStringLiteral("welcomeScreen"));
+        QVERIFY(welcome != nullptr);
+        QVERIFY(welcome->isVisible());
+        const auto cards = welcome->findChildren<QFrame*>(QStringLiteral("welcomeCard"));
+        QCOMPARE(cards.size(), 2);
+        QVERIFY(cards.at(0)->geometry().right() < cards.at(1)->geometry().left());
+        QVERIFY(welcome->findChild<QPushButton*>(QStringLiteral("welcomeSecondaryButton")) != nullptr);
+        QVERIFY(welcome->findChild<QPushButton*>(QStringLiteral("welcomeLinkButton")) != nullptr);
+
+        const QString screenshotPath = qEnvironmentVariable("BANCHO_WELCOME_SCREENSHOT");
+        if (!screenshotPath.isEmpty())
+            QVERIFY(window.grab().save(screenshotPath));
+    }
+
     void testMainWindowTabLifecycle() {
 #ifdef Q_OS_WIN
         QSKIP("The local process lifecycle test uses the Unix /bin/true command.");
@@ -1344,6 +1367,26 @@ private slots:
         QCOMPARE(dataSpy.at(2).at(0).toByteArray(), QByteArray("\x7f", 1));
         QCOMPARE(dataSpy.at(3).at(0).toByteArray(), QByteArray("\t", 1));
         QCOMPARE(dataSpy.at(4).at(0).toByteArray(), QByteArray("\x1b[A", 3));
+    }
+
+    void testLinuxTerminalDeleteAndBackspaceSequences() {
+        QVERIFY(QTermWidget::availableKeyBindings().contains(QStringLiteral("linux")));
+
+        QTermWidget widget(0);
+        widget.setKeyBindings(QStringLiteral("linux"));
+        widget.startExternal();
+        QList<QByteArray> emittedData;
+        connect(&widget, &QTermWidget::sendData, &widget,
+                [&emittedData](const char* data, int size) { emittedData.append(QByteArray(data, size)); });
+
+        QKeyEvent backspaceEvent(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+        widget.sendKeyEvent(&backspaceEvent);
+        QKeyEvent deleteEvent(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier);
+        widget.sendKeyEvent(&deleteEvent);
+
+        QCOMPARE(emittedData.size(), 2);
+        QCOMPARE(emittedData.at(0), QByteArray("\x7f", 1));
+        QCOMPARE(emittedData.at(1), QByteArray("\x1b[3~", 4));
     }
 
     void testVtTerminalRendering() {
