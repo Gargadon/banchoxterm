@@ -118,8 +118,11 @@ private:
     static void x11OpenCallback(LIBSSH2_SESSION* session, LIBSSH2_CHANNEL* channel, const char* shost, int sport,
                                 void** abstract);
 
-    bool uploadOneFile(const QString& localPath, const QString& remotePath);
-    bool uploadDirRecursive(const QString& localDir, const QString& remoteDir);
+    bool finishUploadedFile(LIBSSH2_SFTP_HANDLE* handle, qint64 expectedSize, const QString& remotePath,
+                            QString& error);
+    bool ensureRemoteDirectory(const QString& remotePath, QString& error);
+    bool uploadOneFile(const QString& localPath, const QString& remotePath, QString& error);
+    bool uploadDirRecursive(const QString& localDir, const QString& remoteDir, QString& error);
     bool transferCancelled() const {
         return m_transferCancelRequested.load(std::memory_order_relaxed);
     }

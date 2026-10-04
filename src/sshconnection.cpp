@@ -1324,15 +1324,10 @@ void SshConnection::uploadFile(const QString& localPath, const QString& remotePa
         emit transferProgress(displayName, doneBytes, totalBytes);
     }
 
-    LIBSSH2_SFTP_ATTRIBUTES remoteAttrs;
-    memset(&remoteAttrs, 0, sizeof(remoteAttrs));
-    const bool remoteSizeKnown =
-        libssh2_sftp_fstat(handle, &remoteAttrs) == 0 && (remoteAttrs.flags & LIBSSH2_SFTP_ATTR_SIZE);
-    const qint64 remoteSize = remoteSizeKnown ? static_cast<qint64>(remoteAttrs.filesize) : -1;
     localFile.close();
-    libssh2_sftp_close(handle);
-    if (remoteSizeKnown && remoteSize != doneBytes) {
-        emit operationFinished(false, "Uploaded file size does not match local file: " + localPath);
+    QString error;
+    if (!finishUploadedFile(handle, doneBytes, remotePath, error)) {
+        emit operationFinished(false, error);
         return;
     }
     emit transferProgress(displayName, totalBytes, totalBytes);
@@ -1404,18 +1399,86 @@ void SshConnection::chmodPath(const QString& path, int mode) {
     }
 }
 
-bool SshConnection::uploadOneFile(const QString& localPath, const QString& remotePath) {
-    QFile f(localPath);
-    if (!f.open(QIODevice::ReadOnly))
-        return false;
+bool SshConnection::finishUploadedFile(LIBSSH2_SFTP_HANDLE* handle, qint64 expectedSize, const QString& remotePath,
+                                       QString& error) {
+    LIBSSH2_SFTP_ATTRIBUTES remoteAttrs;
+    memset(&remoteAttrs, 0, sizeof(remoteAttrs));
+    const int statResult = retry([handle, &remoteAttrs] { return libssh2_sftp_fstat(handle, &remoteAttrs); });
+    const unsigned long statSftpError = statResult == 0 ? 0 : libssh2_sftp_last_error(m_sftp);
+    const int closeResult = retry([handle] { return libssh2_sftp_close(handle); });
 
-    LIBSSH2_SFTP_HANDLE* handle = retryPtr([this, &remotePath]() {
-        return libssh2_sftp_open(
-            m_sftp, remotePath.toUtf8().constData(), LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
-            LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR | LIBSSH2_SFTP_S_IRGRP | LIBSSH2_SFTP_S_IROTH);
+    if (statResult != 0) {
+        error = tr("Failed to verify remote file %1 (libssh2 error %2, SFTP error %3)")
+                    .arg(remotePath)
+                    .arg(statResult)
+                    .arg(statSftpError);
+        return false;
+    }
+    constexpr auto sizeFlag = static_cast<unsigned long>(LIBSSH2_SFTP_ATTR_SIZE);
+    if ((remoteAttrs.flags & sizeFlag) == 0U) {
+        error = tr("The server did not return the size of uploaded file: %1").arg(remotePath);
+        return false;
+    }
+    if (static_cast<qint64>(remoteAttrs.filesize) != expectedSize) {
+        error = tr("Uploaded file size does not match local file: %1").arg(remotePath);
+        return false;
+    }
+    if (closeResult != 0) {
+        error = tr("Failed to close remote file %1 (libssh2 error %2, SFTP error %3)")
+                    .arg(remotePath)
+                    .arg(closeResult)
+                    .arg(libssh2_sftp_last_error(m_sftp));
+        return false;
+    }
+    return true;
+}
+
+bool SshConnection::ensureRemoteDirectory(const QString& remotePath, QString& error) {
+    const int mkdirResult =
+        retry([this, &remotePath] { return libssh2_sftp_mkdir(m_sftp, remotePath.toUtf8().constData(), 0755); });
+    if (mkdirResult == 0) {
+        return true;
+    }
+
+    LIBSSH2_SFTP_ATTRIBUTES attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    const int statResult = retry(
+        [this, &remotePath, &attrs] { return libssh2_sftp_stat(m_sftp, remotePath.toUtf8().constData(), &attrs); });
+    constexpr auto permissionsFlag = static_cast<unsigned long>(LIBSSH2_SFTP_ATTR_PERMISSIONS);
+    constexpr auto fileTypeMask = static_cast<unsigned long>(LIBSSH2_SFTP_S_IFMT);
+    constexpr auto directoryType = static_cast<unsigned long>(LIBSSH2_SFTP_S_IFDIR);
+    if (statResult == 0 && (attrs.flags & permissionsFlag) != 0U &&
+        (attrs.permissions & fileTypeMask) == directoryType) {
+        return true;
+    }
+
+    error = tr("Failed to create remote folder %1 (libssh2 error %2, SFTP error %3)")
+                .arg(remotePath)
+                .arg(mkdirResult)
+                .arg(libssh2_sftp_last_error(m_sftp));
+    return false;
+}
+
+bool SshConnection::uploadOneFile(const QString& localPath, const QString& remotePath, QString& error) {
+    QFile f(localPath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        error = tr("Failed to open local file %1: %2").arg(localPath, f.errorString());
+        return false;
+    }
+
+    LIBSSH2_SFTP_HANDLE* handle = retryPtr([this, &remotePath] {
+        constexpr unsigned long openFlags = static_cast<unsigned long>(LIBSSH2_FXF_WRITE) |
+                                            static_cast<unsigned long>(LIBSSH2_FXF_CREAT) |
+                                            static_cast<unsigned long>(LIBSSH2_FXF_TRUNC);
+        constexpr auto permissionBits =
+            static_cast<unsigned long>(LIBSSH2_SFTP_S_IRUSR) | static_cast<unsigned long>(LIBSSH2_SFTP_S_IWUSR) |
+            static_cast<unsigned long>(LIBSSH2_SFTP_S_IRGRP) | static_cast<unsigned long>(LIBSSH2_SFTP_S_IROTH);
+        constexpr auto permissions = static_cast<long>(permissionBits);
+        return libssh2_sftp_open(m_sftp, remotePath.toUtf8().constData(), openFlags, permissions);
     });
-    if (!handle) {
-        f.close();
+    if (handle == nullptr) {
+        error =
+            tr("Failed to create remote file %1 (SFTP error %2)").arg(remotePath).arg(libssh2_sftp_last_error(m_sftp));
         return false;
     }
 
@@ -1431,8 +1494,9 @@ bool SshConnection::uploadOneFile(const QString& localPath, const QString& remot
             break;
         }
         qint64 n = f.read(buffer, sizeof(buffer));
-        if (n <= 0)
+        if (n <= 0) {
             break;
+        }
         char* p = buffer;
         qint64 remaining = n;
         while (remaining > 0) {
@@ -1441,8 +1505,12 @@ bool SshConnection::uploadOneFile(const QString& localPath, const QString& remot
                 ok = false;
                 break;
             }
-            int w = retry([this, &handle, &p, &remaining]() { return libssh2_sftp_write(handle, p, remaining); });
+            int w = retry([this, &handle, &p, &remaining] { return libssh2_sftp_write(handle, p, remaining); });
             if (w < 0) {
+                error = tr("Failed to write remote file %1 (libssh2 error %2, SFTP error %3)")
+                            .arg(remotePath)
+                            .arg(w)
+                            .arg(libssh2_sftp_last_error(m_sftp));
                 ok = false;
                 break;
             }
@@ -1450,48 +1518,57 @@ bool SshConnection::uploadOneFile(const QString& localPath, const QString& remot
             remaining -= w;
             doneBytes += w;
         }
-        if (!ok)
+        if (!ok) {
             break;
+        }
         emit transferProgress(displayName, doneBytes, totalBytes);
     }
 
-    LIBSSH2_SFTP_ATTRIBUTES remoteAttrs;
-    memset(&remoteAttrs, 0, sizeof(remoteAttrs));
-    const bool remoteSizeKnown =
-        libssh2_sftp_fstat(handle, &remoteAttrs) == 0 && (remoteAttrs.flags & LIBSSH2_SFTP_ATTR_SIZE);
-    const qint64 remoteSize = remoteSizeKnown ? static_cast<qint64>(remoteAttrs.filesize) : -1;
     f.close();
-    libssh2_sftp_close(handle);
-    if (remoteSizeKnown && remoteSize != doneBytes)
+    if (transferCancelled()) {
+        error = tr("Transfer cancelled by user");
+    }
+    QString finishError;
+    if (!finishUploadedFile(handle, doneBytes, remotePath, finishError) && ok) {
+        error = std::move(finishError);
         ok = false;
+    }
     emit transferProgress(displayName, totalBytes, totalBytes);
     return ok;
 }
 
-bool SshConnection::uploadDirRecursive(const QString& localDir, const QString& remoteDir) {
+bool SshConnection::uploadDirRecursive(const QString& localDir, const QString& remoteDir, QString& error) {
     waitIfTransferPaused();
-    if (transferCancelled())
+    if (transferCancelled()) {
+        error = tr("Transfer cancelled by user");
         return false;
-    // mkdir; ignore "already exists" errors (best effort).
-    retry([this, &remoteDir]() { return libssh2_sftp_mkdir(m_sftp, remoteDir.toUtf8().constData(), 0755); });
+    }
+    if (!ensureRemoteDirectory(remoteDir, error)) {
+        return false;
+    }
 
     QDir dir(localDir);
     const QFileInfoList entries = dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden);
     for (const QFileInfo& info : entries) {
         waitIfTransferPaused();
-        if (transferCancelled())
+        if (transferCancelled()) {
+            error = tr("Transfer cancelled by user");
             return false;
+        }
         QString remotePath = remoteDir;
-        if (!remotePath.endsWith('/'))
+        if (!remotePath.endsWith('/')) {
             remotePath += '/';
+        }
         remotePath += info.fileName();
 
         if (info.isDir()) {
-            if (!uploadDirRecursive(info.absoluteFilePath(), remotePath))
+            if (!uploadDirRecursive(info.absoluteFilePath(), remotePath, error)) {
                 return false;
+            }
         } else {
-            if (!uploadOneFile(info.absoluteFilePath(), remotePath))
+            if (!uploadOneFile(info.absoluteFilePath(), remotePath, error)) {
                 return false;
+            }
         }
     }
     return true;
@@ -1500,7 +1577,7 @@ bool SshConnection::uploadDirRecursive(const QString& localDir, const QString& r
 void SshConnection::uploadDirectory(const QString& localPath, const QString& remoteBasePath) {
     m_transferCancelRequested.store(false, std::memory_order_relaxed);
     m_transferPaused.store(false, std::memory_order_relaxed);
-    if (!m_sftp) {
+    if (m_sftp == nullptr) {
         emit operationFinished(false, "SFTP session not active");
         return;
     }
@@ -1512,14 +1589,16 @@ void SshConnection::uploadDirectory(const QString& localPath, const QString& rem
     }
 
     QString remoteRoot = remoteBasePath;
-    if (!remoteRoot.endsWith('/'))
+    if (!remoteRoot.endsWith('/')) {
         remoteRoot += '/';
+    }
     remoteRoot += li.fileName();
 
-    if (uploadDirRecursive(localPath, remoteRoot)) {
+    QString error;
+    if (uploadDirRecursive(localPath, remoteRoot, error)) {
         emit operationFinished(true, "Folder uploaded successfully");
     } else {
-        emit operationFinished(false, "Folder upload failed");
+        emit operationFinished(false, tr("Folder upload failed: %1").arg(error));
     }
 }
 

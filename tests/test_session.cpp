@@ -842,6 +842,35 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(directorySpy.count(), 1, 3000);
         QVERIFY(!qvariant_cast<QList<SftpFile>>(directorySpy.first().at(1)).isEmpty());
 
+        const QString uploadSource = serverDir.filePath(QStringLiteral("folder-upload-source"));
+        const QString nestedUploadSource = QDir(uploadSource).filePath(QStringLiteral("nested"));
+        QVERIFY(QDir().mkpath(nestedUploadSource));
+        const QList<QPair<QString, QByteArray>> folderFiles = {
+            {QStringLiteral("first.txt"), QByteArrayLiteral("first")},
+            {QStringLiteral("second.txt"), QByteArrayLiteral("second")},
+            {QStringLiteral("third.txt"), QByteArrayLiteral("third")},
+            {QStringLiteral("fourth.txt"), QByteArrayLiteral("fourth")},
+            {QStringLiteral("nested/fifth.txt"), QByteArrayLiteral("fifth")},
+        };
+        for (const auto& file : folderFiles) {
+            QFile output(QDir(uploadSource).filePath(file.first));
+            QVERIFY(output.open(QIODevice::WriteOnly));
+            QCOMPARE(output.write(file.second), file.second.size());
+        }
+
+        const QString uploadDestination = serverDir.filePath(QStringLiteral("folder-upload-destination"));
+        QVERIFY(QDir().mkpath(uploadDestination));
+        QSignalSpy folderUploadSpy(&connection, &SshConnection::operationFinished);
+        connection.uploadDirectory(uploadSource, uploadDestination);
+        QTRY_COMPARE_WITH_TIMEOUT(folderUploadSpy.count(), 1, 10000);
+        QVERIFY2(folderUploadSpy.first().at(0).toBool(), qPrintable(folderUploadSpy.first().at(1).toString()));
+        const QString uploadedRoot = QDir(uploadDestination).filePath(QFileInfo(uploadSource).fileName());
+        for (const auto& file : folderFiles) {
+            QFile uploaded(QDir(uploadedRoot).filePath(file.first));
+            QVERIFY(uploaded.open(QIODevice::ReadOnly));
+            QCOMPARE(uploaded.readAll(), file.second);
+        }
+
         auto allTunnelsActive = [&]() {
             bool active[3] = {false, false, false};
             for (const auto& signal : tunnelStateSpy) {

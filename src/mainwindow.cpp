@@ -788,8 +788,8 @@ void MainWindow::setupUi() {
     auto* connectTitle = new QLabel(tr("Connect"), connectCard);
     connectTitle->setObjectName("welcomeCardTitle");
     connectLayout->addWidget(connectTitle);
-    auto* connectDescription = new QLabel(
-        tr("Open a local shell or configure a connection to another system."), connectCard);
+    auto* connectDescription =
+        new QLabel(tr("Open a local shell or configure a connection to another system."), connectCard);
     connectDescription->setObjectName("welcomeCardDescription");
     connectDescription->setWordWrap(true);
     connectLayout->addWidget(connectDescription);
@@ -842,17 +842,17 @@ void MainWindow::setupUi() {
             if (recentSession.type == SessionType::Local) {
                 endpoint = recentSession.shellPath.isEmpty() ? tr("Local shell") : recentSession.shellPath;
             } else {
-                endpoint = recentSession.user.isEmpty() ? recentSession.host
-                                                        : QStringLiteral("%1@%2").arg(recentSession.user,
-                                                                                    recentSession.host);
+                endpoint = recentSession.user.isEmpty()
+                               ? recentSession.host
+                               : QStringLiteral("%1@%2").arg(recentSession.user, recentSession.host);
                 if (recentSession.port > 0)
                     endpoint += QStringLiteral(":%1").arg(recentSession.port);
             }
             const QString favorite = recentSession.favorite ? QStringLiteral("★  ") : QString();
-            auto* recentButton = new QPushButton(
-                QStringLiteral("%1%2\n%3  ·  %4")
-                    .arg(favorite, recentName, sessionTypeName(recentSession.type), endpoint),
-                recentCard);
+            auto* recentButton =
+                new QPushButton(QStringLiteral("%1%2\n%3  ·  %4")
+                                    .arg(favorite, recentName, sessionTypeName(recentSession.type), endpoint),
+                                recentCard);
             recentButton->setObjectName("welcomeRecentButton");
             QString iconPath = QStringLiteral(":/icons/terminal.svg");
             if (recentSession.type == SessionType::SSH)
@@ -879,8 +879,7 @@ void MainWindow::setupUi() {
             break;
     }
     if (recentCount == 0) {
-        auto* emptyRecent = new QLabel(
-            tr("Your recently opened sessions will appear here."), recentCard);
+        auto* emptyRecent = new QLabel(tr("Your recently opened sessions will appear here."), recentCard);
         emptyRecent->setObjectName("welcomeEmptyState");
         emptyRecent->setAlignment(Qt::AlignCenter);
         emptyRecent->setWordWrap(true);
