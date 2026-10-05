@@ -1039,6 +1039,29 @@ private slots:
         QVERIFY(sshd.waitForFinished(3000));
     }
 
+    void testTerminalSearchApi() {
+        QTermWidget terminal(0);
+        terminal.startExternal();
+        terminal.setCodec(QStringLiteral("UTF-8"));
+        terminal.feedData(QString::fromUtf8("Alpha café a.b\r\nalpha second\r\n").toUtf8());
+        QTest::qWait(50);
+        QSignalSpy results(&terminal, &QTermWidget::searchResult);
+        terminal.searchText(QStringLiteral("café"), true, true, true);
+        QCOMPARE(results.takeFirst().at(0).toBool(), true);
+        QCOMPARE(terminal.selectedText(), QStringLiteral("café"));
+        terminal.searchText(QStringLiteral("a.b"), true, true, true);
+        QCOMPARE(results.takeFirst().at(0).toBool(), true);
+        QCOMPARE(terminal.selectedText(), QStringLiteral("a.b"));
+        terminal.searchText(QStringLiteral("ALPHA"), true, true, true);
+        QCOMPARE(results.takeFirst().at(0).toBool(), false);
+        terminal.searchText(QStringLiteral("ALPHA"), true, true, false);
+        QCOMPARE(results.takeFirst().at(0).toBool(), true);
+        terminal.searchText(QStringLiteral("missing"), false, false, false);
+        QCOMPARE(results.takeFirst().at(0).toBool(), false);
+        terminal.searchText(QString(), true, true, false);
+        QCOMPARE(results.takeFirst().at(0).toBool(), false);
+    }
+
     void testTerminalTabLifecycle() {
         Session session;
         session.id = QStringLiteral("terminal-tab-lifecycle");
