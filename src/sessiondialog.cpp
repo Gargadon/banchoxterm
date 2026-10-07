@@ -8,6 +8,7 @@
 #include <QPushButton>
 #include <QLabel>
 #include <QStackedWidget>
+#include <QScrollArea>
 #include <QFileDialog>
 #include <QFontDialog>
 #include <QCheckBox>
@@ -131,6 +132,19 @@ void SessionDialog::setupUi() {
     mainLayout->setContentsMargins(24, 20, 24, 18);
     mainLayout->setSpacing(12);
 
+    auto* scrollArea = new QScrollArea(this);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    auto* contentWidget = new QWidget(scrollArea);
+    auto* contentLayout = new QVBoxLayout(contentWidget);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(12);
+    // Preserve the forms' minimum heights when the window or Windows DPI
+    // scaling leaves less space than the complete session editor requires.
+    contentLayout->setSizeConstraint(QLayout::SetMinimumSize);
+    scrollArea->setWidget(contentWidget);
+    mainLayout->addWidget(scrollArea, 1);
+
     auto* identityPanel = new QWidget(this);
     identityPanel->setObjectName("sessionIdentityPanel");
     auto* identityLayout = new QVBoxLayout(identityPanel);
@@ -166,7 +180,7 @@ void SessionDialog::setupUi() {
     groupLayout->addWidget(groupLabel);
     groupLayout->addWidget(m_groupEdit);
     identityLayout->addLayout(groupLayout);
-    mainLayout->addWidget(identityPanel);
+    contentLayout->addWidget(identityPanel);
 
     m_stackedWidget = new QStackedWidget(this);
 
@@ -316,11 +330,13 @@ void SessionDialog::setupUi() {
 
     sshTabs->addTab(tunnelsTab, tr("Port Forwarding"));
 
-    // Tab 3: Advanced (keep-alive, algorithms)
+    // Tab 3: Advanced (SSH options and shared terminal settings)
     auto* advancedTab = new QWidget(sshTabs);
-    auto* advancedForm = new QFormLayout(advancedTab);
-    advancedTab->setLayout(advancedForm);
-    advancedForm->setContentsMargins(10, 10, 10, 10);
+    auto* advancedLayout = new QVBoxLayout(advancedTab);
+    advancedLayout->setContentsMargins(10, 10, 10, 10);
+    advancedLayout->setSpacing(12);
+    auto* advancedForm = new QFormLayout();
+    advancedLayout->addLayout(advancedForm);
     advancedForm->setSpacing(10);
 
     m_keepAliveSpin = new QSpinBox(advancedTab);
@@ -557,7 +573,7 @@ void SessionDialog::setupUi() {
 
     m_stackedWidget->addWidget(ftpWidget); // index 6
 
-    mainLayout->addWidget(m_stackedWidget);
+    contentLayout->addWidget(m_stackedWidget);
 
     // ── Shared terminal settings (scrollback, font) ──
     // Applies to SSH / Local / Telnet / Serial; hidden for RDP / VNC / FTP.
@@ -678,13 +694,20 @@ void SessionDialog::setupUi() {
         }
     });
 
-    mainLayout->addWidget(m_terminalSettingsWidget);
+    contentLayout->addWidget(m_terminalSettingsWidget);
+    contentLayout->addStretch();
 
-    auto updateTerminalSettingsVisibility = [this](int index) {
+    auto updateTerminalSettingsVisibility = [this, advancedLayout, contentLayout](int index) {
         // SSH(0), Local(1), Telnet(2), Serial(5) use a terminal emulator.
         const bool visible = (index == 0 || index == 1 || index == 2 || index == 5);
+        // Reuse the same controls so switching session types preserves edits.
+        advancedLayout->removeWidget(m_terminalSettingsWidget);
+        contentLayout->removeWidget(m_terminalSettingsWidget);
+        if (index == 0)
+            advancedLayout->addWidget(m_terminalSettingsWidget);
+        else
+            contentLayout->insertWidget(contentLayout->count() - 1, m_terminalSettingsWidget);
         m_terminalSettingsWidget->setVisible(visible);
-        adjustSize();
     };
     updateTerminalSettingsVisibility(0);
     connect(m_typeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, updateTerminalSettingsVisibility);

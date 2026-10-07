@@ -149,9 +149,10 @@ without KPty, so local shells are bridged through ConPTY).
   A custom executable can be selected with the `x11/vcxsrvPath` setting or the
   `BANCHOTERM_VCXSRV` environment variable. X410 and Xming remain compatible
   when already running on `127.0.0.1:6000`.
-- **RDP** on Windows is embedded via the native Remote Desktop ActiveX control
-  when Qt ActiveQt is available (falls back to `mstsc.exe` otherwise). On Linux
-  it uses `xfreerdp`.
+- **RDP** on Windows is embedded via the native Remote Desktop ActiveX control.
+  Windows builds require Qt ActiveQt (`AxContainer`); if the Windows control
+  cannot be created at runtime, the app falls back to a separate `mstsc.exe`
+  window. On Linux it uses `xfreerdp`.
 - **VNC** supports a limited set of encodings (Raw, Hextile, CopyRect; Tight and
   ZRLE are disabled because the embedded libvncclient builds without zlib).
   VNC is not currently available in the Windows ARM64 build because the bundled

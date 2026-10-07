@@ -41,6 +41,7 @@
 
 #ifdef BANCHO_HAVE_RDP_AX
 #include <QAxWidget>
+#include <QAxObject>
 #endif
 
 #ifdef BANCHO_HAVE_VNC
@@ -323,14 +324,17 @@ TerminalTab::~TerminalTab() {
 void TerminalTab::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
 #ifdef BANCHO_HAVE_RDP_AX
-    if (m_rdpWidget && m_isActive && m_embeddedContainer) {
-        int w = m_embeddedContainer->width();
-        int h = m_embeddedContainer->height();
-        if (w > 1 && h > 1) {
-            m_rdpWidget->setProperty("DesktopWidth", w);
-            m_rdpWidget->setProperty("DesktopHeight", h);
-        }
-    }
+    // Wait for the child layouts to receive their new geometry. DesktopWidth
+    // and DesktopHeight only set the initial resolution, before Connect().
+    QTimer::singleShot(0, this, [this]() {
+        if (!m_rdpWidget || !m_isActive || m_rdpWidget->property("Connected").toInt() != 1)
+            return;
+        const int w = qBound(200, m_rdpWidget->width(), 8192);
+        const int h = qBound(200, m_rdpWidget->height(), 8192);
+        QList<QVariant> settings{w, h, 0, 0, 0, 100, 100};
+        m_rdpWidget->dynamicCall(
+            "UpdateSessionDisplaySettings(uint,uint,uint,uint,uint,uint,uint)", settings);
+    });
 #endif
 
     syncTerminalSize();
@@ -849,15 +853,16 @@ void TerminalTab::setupWindowsRdpActiveX() {
         return;
     }
 
-    m_rdpWidget->setProperty("Server", m_session.host + ":" + QString::number(m_session.port));
+    m_rdpWidget->setProperty("Server", m_session.host);
+    if (auto* settings = m_rdpWidget->querySubObject("AdvancedSettings7")) {
+        settings->setProperty("RDPPort", m_session.port);
+        settings->setProperty("EnableCredSspSupport", true);
+        settings->setProperty("SmartSizing", true);
+        delete settings;
+    }
     m_rdpWidget->setProperty("Domain", QString());
     if (!m_session.user.isEmpty())
         m_rdpWidget->setProperty("UserName", m_session.user);
-
-    if (m_embeddedContainer->width() > 1 && m_embeddedContainer->height() > 1) {
-        m_rdpWidget->setProperty("DesktopWidth", m_embeddedContainer->width());
-        m_rdpWidget->setProperty("DesktopHeight", m_embeddedContainer->height());
-    }
 
     if (m_statusLabel)
         m_statusLabel->hide();
@@ -894,7 +899,17 @@ void TerminalTab::setupWindowsRdpActiveX() {
     });
     m_rdpPollTimer->start(2000);
 
-    m_rdpWidget->dynamicCall("Connect()");
+    // The container was hidden during setup and still had its default tiny
+    // geometry. Resolve both layouts before negotiating the remote desktop.
+    QTimer::singleShot(0, this, [this]() {
+        if (!m_rdpWidget || m_closing)
+            return;
+        layout()->activate();
+        m_embeddedContainer->layout()->activate();
+        m_rdpWidget->setProperty("DesktopWidth", qBound(200, m_rdpWidget->width(), 8192));
+        m_rdpWidget->setProperty("DesktopHeight", qBound(200, m_rdpWidget->height(), 8192));
+        m_rdpWidget->dynamicCall("Connect()");
+    });
 }
 #endif
 
@@ -956,14 +971,16 @@ void TerminalTab::launchExternalClient() {
     if (m_session.type == SessionType::RDP) {
 #ifdef Q_OS_WIN
         program = "mstsc";
-        args << "/v:" + m_session.host + ":" + QString::number(m_session.port) << "/parent:" + QString::number(winId);
+        // mstsc has no parent-window option. Embedded RDP uses ActiveQt;
+        // this fallback opens the native client in a separate window.
+        args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
 #else
         program = "xfreerdp";
         args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
         args << "/parent-window:" + QString::number(winId);
         args << "/cert:ignore";
         args << "/dynamic-resolution";
-        args << "+decoration";
+        args << "+decorations";
         if (!m_session.user.isEmpty()) {
             args << "/u:" + m_session.user;
         }
@@ -983,10 +1000,18 @@ void TerminalTab::launchExternalClient() {
         m_isActive = true;
         if (m_reconnectButton)
             m_reconnectButton->setVisible(false);
-        if (m_statusLabel)
+        bool separateWindow = false;
+#ifdef Q_OS_WIN
+        separateWindow = m_session.type == SessionType::RDP;
+#endif
+        if (m_statusLabel && separateWindow) {
+            m_statusLabel->setText(tr("Remote Desktop is running in a separate window."));
+            m_statusLabel->show();
+        } else if (m_statusLabel) {
             m_statusLabel->hide();
+        }
         if (m_embeddedContainer)
-            m_embeddedContainer->show();
+            m_embeddedContainer->setVisible(!separateWindow);
     });
 
     connect(m_externalProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,

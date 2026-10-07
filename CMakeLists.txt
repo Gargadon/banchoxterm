@@ -38,6 +38,9 @@ include(FetchContent)
 # Fetch libssh2
 if(WIN32)
     set(CRYPTO_BACKEND "WinCNG" CACHE STRING "" FORCE)
+    # Modern OpenSSH servers may offer only Curve25519 and ECDH key
+    # exchange. WinCNG needs this option to enable ECDH/ECDSA on Windows 10+.
+    set(ENABLE_ECDSA_WINCNG ON CACHE BOOL "Enable modern SSH key exchange on Windows" FORCE)
 endif()
 set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -328,10 +331,10 @@ if(WIN32)
     )
 endif()
 
-# Optional: embed RDP on Windows via the native Remote Desktop ActiveX control
-# (ActiveQt). When ActiveQt is not available we fall back to launching mstsc.exe.
+# Embed RDP on Windows via the native Remote Desktop ActiveX control.
+# Require ActiveQt so Windows builds cannot silently lose embedded RDP.
 if(WIN32)
-    find_package(Qt6 QUIET COMPONENTS AxContainer)
+    find_package(Qt6 REQUIRED COMPONENTS AxContainer)
     if(TARGET Qt6::AxContainer)
         target_link_libraries(banchoxterm PRIVATE Qt6::AxContainer)
         target_compile_definitions(banchoxterm PRIVATE BANCHO_HAVE_RDP_AX)
