@@ -14,6 +14,9 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QTimer>
+#include <QDialog>
+#include <QLineEdit>
 #include <QElapsedTimer>
 #include <QThread>
 #include <QTabWidget>
@@ -1047,18 +1050,24 @@ private slots:
         QTest::qWait(50);
         QSignalSpy results(&terminal, &QTermWidget::searchResult);
         terminal.searchText(QStringLiteral("café"), true, true, true);
+        QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), true);
         QCOMPARE(terminal.selectedText(), QStringLiteral("café"));
         terminal.searchText(QStringLiteral("a.b"), true, true, true);
+        QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), true);
         QCOMPARE(terminal.selectedText(), QStringLiteral("a.b"));
         terminal.searchText(QStringLiteral("ALPHA"), true, true, true);
+        QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), false);
         terminal.searchText(QStringLiteral("ALPHA"), true, true, false);
+        QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), true);
         terminal.searchText(QStringLiteral("missing"), false, false, false);
+        QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), false);
         terminal.searchText(QString(), true, true, false);
+        QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), false);
     }
 
@@ -1185,10 +1194,12 @@ private slots:
 
 #ifndef Q_OS_WIN
     void testRdpReconnectRequestAfterClientFailure() {
+#ifndef BANCHO_HAVE_FREERDP
         QTemporaryDir emptyPath;
         QVERIFY(emptyPath.isValid());
         const QByteArray oldPath = qgetenv("PATH");
         qputenv("PATH", emptyPath.path().toUtf8());
+#endif
 
         Session session;
         session.id = QStringLiteral("rdp-reconnect-test");
@@ -1196,8 +1207,24 @@ private slots:
         session.type = SessionType::RDP;
         session.host = QStringLiteral("127.0.0.1");
         session.port = 1;
+        session.user = QStringLiteral("test-user");
         session.autoReconnect = true;
 
+#ifdef BANCHO_HAVE_FREERDP
+        // The embedded client collects credentials in Qt rather than failing
+        // to find xfreerdp in PATH. Answer every reconnect's modal dialog.
+        QTimer credentials;
+        connect(&credentials, &QTimer::timeout, this, [] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            if (!dialog || dialog->windowTitle() != QStringLiteral("RDP credentials"))
+                return;
+            for (auto* edit : dialog->findChildren<QLineEdit*>())
+                if (edit->echoMode() == QLineEdit::Password)
+                    edit->setText(QStringLiteral("test-password"));
+            dialog->accept();
+        });
+        credentials.start(10);
+#endif
         MainWindow window;
         window.show();
         QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
@@ -1206,7 +1233,9 @@ private slots:
         QPointer<TerminalTab> firstTab = tabs.first();
         QTRY_VERIFY_WITH_TIMEOUT(firstTab.isNull(), 8000);
         QCOMPARE(window.findChildren<TerminalTab*>().size(), 1);
+#ifndef BANCHO_HAVE_FREERDP
         qputenv("PATH", oldPath);
+#endif
     }
 #endif
 
