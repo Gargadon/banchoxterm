@@ -67,6 +67,12 @@ use an installed X server such as Xming or X410.
 - C++17 compiler (GCC, Clang, or MSVC)
 - Qt 6.6+ (Core, Widgets, Gui, Network, Test, LinguistTools)
 - [libssh2](https://www.libssh2.org) — fetched automatically by CMake (FetchContent)
+- Linux RDP: [FreeRDP](https://www.freerdp.com/) 3 and WinPR 3 are required
+  for compilation and at runtime. Install `freerdp3-dev`, `libwinpr3-dev`,
+  and `pkg-config` on Debian/Ubuntu; `freerdp-devel`, `winpr-devel`, and
+  `pkgconf-pkg-config` on Fedora; or `freerdp` and `pkgconf` on Arch Linux.
+  CMake requires the `freerdp3` and `winpr3` pkg-config modules; `xfreerdp`
+  is not required.
 - Linux password storage: `secret-tool` (`libsecret-tools` on Debian/Ubuntu,
   `libsecret` on Fedora). This is a runtime dependency.
 - Optional Linux keyring providers (choose one if your desktop does not already
@@ -94,12 +100,12 @@ desktop session.
 # Install dependencies (Ubuntu/Debian)
 sudo apt install build-essential cmake ninja-build \
   qt6-base-dev qt6-serialport-dev qt6-tools-dev qt6-tools-dev-tools \
-  libssl-dev zlib1g-dev libsecret-tools lrzsz
+  libssl-dev zlib1g-dev libsecret-tools lrzsz pkg-config freerdp3-dev libwinpr3-dev
 
 # Install dependencies (Fedora)
 sudo dnf install cmake ninja-build \
   qt6-qtbase-devel qt6-qtserialport-devel qt6-qttools-devel \
-  openssl-devel zlib-devel libsecret lrzsz
+  openssl-devel zlib-devel libsecret lrzsz pkgconf-pkg-config freerdp-devel winpr-devel
 
 # Build
 cmake -B build -G Ninja
@@ -152,7 +158,16 @@ without KPty, so local shells are bridged through ConPTY).
 - **RDP** on Windows is embedded via the native Remote Desktop ActiveX control.
   Windows builds require Qt ActiveQt (`AxContainer`); if the Windows control
   cannot be created at runtime, the app falls back to a separate `mstsc.exe`
-  window. On Linux it uses `xfreerdp`.
+  window. Linux builds require the FreeRDP 3 and WinPR 3 development libraries
+  (`freerdp3` and `winpr3` pkg-config modules). RDP runs inside the tab using
+  `libfreerdp`, with Qt rendering and input on both X11 and Wayland; no external
+  `xfreerdp` executable is needed. A graphical dialog collects the username,
+  optional domain, and password. Passwords can be saved in the same credential
+  store as SSH, from the session settings or connection dialog; saved credentials
+  connect without prompting. Use `DOMAIN\username` in the profile for domain
+  accounts. The desktop scales to fit the tab; clipboard,
+  audio, drive redirection, and dynamic remote resolution are not yet supported.
+  Certificate validation follows the previous client's ignore policy.
 - **VNC** supports a limited set of encodings (Raw, Hextile, CopyRect; Tight and
   ZRLE are disabled because the embedded libvncclient builds without zlib).
   VNC is not currently available in the Windows ARM64 build because the bundled

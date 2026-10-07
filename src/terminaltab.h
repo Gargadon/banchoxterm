@@ -19,6 +19,7 @@ class QFile;
 class QEvent;
 class QAxWidget;
 class VncClientWidget;
+class RdpClientWidget;
 class QSerialPort;
 
 class TerminalTab : public QWidget {
@@ -99,6 +100,7 @@ private:
     void applySshOptions();
     void setupWindowsRdpActiveX();
     void setupEmbeddedVnc();
+    void setupEmbeddedRdp();
     void startConPtyPolling();
     void pollConPtyOutput();
     void startLogging();
@@ -141,6 +143,7 @@ private:
     QTimer* m_rdpPollTimer = nullptr;
     bool m_rdpWasConnected = false;
     VncClientWidget* m_vncWidget = nullptr;
+    RdpClientWidget* m_nativeRdpWidget = nullptr;
     QSerialPort* m_serialPort = nullptr;
 #ifdef Q_OS_WIN
     ConPty* m_conpty = nullptr;

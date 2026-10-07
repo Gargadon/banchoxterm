@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(banchoxterm VERSION 1.2.2 LANGUAGES C CXX)
+project(banchoxterm VERSION 1.2.3 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -341,6 +341,15 @@ if(WIN32)
     endif()
 endif()
 
+# Linux RDP is rendered directly in Qt, including under Wayland.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FREERDP REQUIRED IMPORTED_TARGET freerdp3>=3.0 winpr3>=3.0)
+    target_sources(banchoxterm PRIVATE src/rdpclientwidget.cpp src/rdpclientwidget.h)
+    target_link_libraries(banchoxterm PRIVATE PkgConfig::FREERDP)
+    target_compile_definitions(banchoxterm PRIVATE BANCHO_HAVE_FREERDP)
+endif()
+
 # Optional: embedded VNC client via libvncclient (libvncserver project).
 if(BANCHO_ENABLE_VNC)
     set(WITH_ZLIB OFF CACHE BOOL "" FORCE)
@@ -522,6 +531,20 @@ if(BANCHO_ENABLE_VNC)
         ${libvncserver_BINARY_DIR}
     )
     target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_HAVE_VNC)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(banchoxterm_tests PRIVATE src/rdpclientwidget.cpp src/rdpclientwidget.h)
+    target_link_libraries(banchoxterm_tests PRIVATE PkgConfig::FREERDP)
+    target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_HAVE_FREERDP)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(banchoxterm_rdp_tests tests/test_rdp.cpp src/rdpclientwidget.cpp src/rdpclientwidget.h)
+    target_include_directories(banchoxterm_rdp_tests PRIVATE src)
+    target_link_libraries(banchoxterm_rdp_tests PRIVATE Qt6::Widgets Qt6::Test Qt6::Network PkgConfig::FREERDP)
+    add_test(NAME RdpTests COMMAND banchoxterm_rdp_tests)
+    set_tests_properties(RdpTests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 # Keep a persistent QtTest report even when Windows console output is absent.

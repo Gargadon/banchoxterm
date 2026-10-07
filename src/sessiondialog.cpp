@@ -415,8 +415,14 @@ void SessionDialog::setupUi() {
     rdpForm->addRow(tr("Port:"), m_rdpPortSpin);
 
     m_rdpUserEdit = new QLineEdit(rdpWidget);
-    m_rdpUserEdit->setPlaceholderText(tr("Administrator / username"));
+    m_rdpUserEdit->setPlaceholderText(tr("username or DOMAIN\\username"));
     rdpForm->addRow(tr("Username:"), m_rdpUserEdit);
+    m_rdpPasswordEdit = new QLineEdit(rdpWidget);
+    m_rdpPasswordEdit->setEchoMode(QLineEdit::Password);
+    m_rdpPasswordEdit->setPlaceholderText(tr("Optional (stored in Keyring)"));
+    rdpForm->addRow(tr("Password:"), m_rdpPasswordEdit);
+    m_rdpSavePasswordCheck = new QCheckBox(tr("Save securely in system keyring"), rdpWidget);
+    rdpForm->addRow("", m_rdpSavePasswordCheck);
 
     m_stackedWidget->addWidget(rdpWidget); // index 3
 
@@ -793,6 +799,11 @@ void SessionDialog::loadSession(const Session& session) {
         m_rdpHostEdit->setText(session.host);
         m_rdpPortSpin->setValue(session.port > 0 ? session.port : 3389);
         m_rdpUserEdit->setText(session.user);
+        {
+            const QString password = Keyring::lookupPassword(session.id);
+            m_rdpPasswordEdit->setText(password);
+            m_rdpSavePasswordCheck->setChecked(!password.isEmpty());
+        }
         break;
     case SessionType::VNC:
         m_typeCombo->setCurrentIndex(4);
@@ -1045,6 +1056,11 @@ void SessionDialog::accept() {
             else
                 Keyring::deletePassword(key);
         }
+    } else if (m_typeCombo->currentIndex() == 3) {
+        if (m_rdpSavePasswordCheck->isChecked() && !m_rdpPasswordEdit->text().isEmpty())
+            Keyring::storePassword(m_id, m_rdpPasswordEdit->text());
+        else
+            Keyring::deletePassword(m_id);
     } else if (m_typeCombo->currentIndex() == 4) {
         QString pwd = m_vncPasswordEdit ? m_vncPasswordEdit->text() : QString();
         if (!pwd.isEmpty()) {

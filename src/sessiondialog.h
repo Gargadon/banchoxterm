@@ -80,6 +80,8 @@ private:
     QLineEdit* m_rdpHostEdit;
     QSpinBox* m_rdpPortSpin;
     QLineEdit* m_rdpUserEdit;
+    QLineEdit* m_rdpPasswordEdit;
+    QCheckBox* m_rdpSavePasswordCheck;
 
     // VNC
     QLineEdit* m_vncHostEdit;

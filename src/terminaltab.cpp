@@ -33,6 +33,8 @@
 #include <QSerialPort>
 #include <QListWidget>
 #include <QDialogButtonBox>
+#include <QDialog>
+#include <QFormLayout>
 #include <QDesktopServices>
 
 #ifdef Q_OS_WIN
@@ -42,6 +44,10 @@
 #ifdef BANCHO_HAVE_RDP_AX
 #include <QAxWidget>
 #include <QAxObject>
+#endif
+
+#ifdef BANCHO_HAVE_FREERDP
+#include "rdpclientwidget.h"
 #endif
 
 #ifdef BANCHO_HAVE_VNC
@@ -80,6 +86,11 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 #ifdef BANCHO_HAVE_RDP_AX
         if (session.type == SessionType::RDP) {
             QTimer::singleShot(100, this, &TerminalTab::setupWindowsRdpActiveX);
+        } else
+#endif
+#ifdef BANCHO_HAVE_FREERDP
+            if (session.type == SessionType::RDP) {
+            QTimer::singleShot(100, this, &TerminalTab::setupEmbeddedRdp);
         } else
 #endif
 #ifdef BANCHO_HAVE_VNC
@@ -250,6 +261,10 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
 TerminalTab::~TerminalTab() {
     m_closing = true;
     closeExternalProcess();
+#ifdef BANCHO_HAVE_FREERDP
+    if (m_nativeRdpWidget)
+        m_nativeRdpWidget->stop();
+#endif
 
     if (m_reconnectTimer) {
         m_reconnectTimer->stop();
@@ -332,8 +347,7 @@ void TerminalTab::resizeEvent(QResizeEvent* event) {
         const int w = qBound(200, m_rdpWidget->width(), 8192);
         const int h = qBound(200, m_rdpWidget->height(), 8192);
         QList<QVariant> settings{w, h, 0, 0, 0, 100, 100};
-        m_rdpWidget->dynamicCall(
-            "UpdateSessionDisplaySettings(uint,uint,uint,uint,uint,uint,uint)", settings);
+        m_rdpWidget->dynamicCall("UpdateSessionDisplaySettings(uint,uint,uint,uint,uint,uint,uint)", settings);
     });
 #endif
 
@@ -963,31 +977,115 @@ void TerminalTab::setupEmbeddedVnc() {
 }
 #endif
 
+#ifdef BANCHO_HAVE_FREERDP
+void TerminalTab::setupEmbeddedRdp() {
+    m_isActive = false;
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("RDP credentials"));
+    auto* form = new QFormLayout(&dialog);
+    auto* userEdit = new QLineEdit(m_session.user, &dialog);
+    auto* domainEdit = new QLineEdit(&dialog);
+    const int separator = m_session.user.indexOf(QLatin1Char('\\'));
+    if (separator >= 0) {
+        domainEdit->setText(m_session.user.left(separator));
+        userEdit->setText(m_session.user.mid(separator + 1));
+    }
+    domainEdit->setPlaceholderText(tr("Optional; leave empty for a local account"));
+    auto* passwordEdit = new QLineEdit(&dialog);
+    passwordEdit->setEchoMode(QLineEdit::Password);
+    passwordEdit->setText(Keyring::lookupPassword(m_session.id));
+    form->addRow(tr("Username:"), userEdit);
+    form->addRow(tr("Domain:"), domainEdit);
+    form->addRow(tr("Password:"), passwordEdit);
+    auto* savePassword = new QCheckBox(tr("Save securely in system keyring"), &dialog);
+    form->addRow("", savePassword);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    form->addRow(buttons);
+    buttons->button(QDialogButtonBox::Ok)->setEnabled(!userEdit->text().trimmed().isEmpty());
+    connect(userEdit, &QLineEdit::textChanged, &dialog, [buttons](const QString& text) {
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(!text.trimmed().isEmpty());
+    });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    passwordEdit->setFocus();
+    const bool savedCredentials = !passwordEdit->text().isEmpty() && !userEdit->text().trimmed().isEmpty();
+    if (!savedCredentials && dialog.exec() != QDialog::Accepted) {
+        m_statusLabel->setText(tr("Connection cancelled."));
+        m_reconnectButton->show();
+        return;
+    }
+
+    if (savePassword->isChecked() && !passwordEdit->text().isEmpty())
+        Keyring::storePassword(m_session.id, passwordEdit->text());
+
+    m_nativeRdpWidget = new RdpClientWidget(m_embeddedContainer);
+    auto* rdpLayout = new QVBoxLayout(m_embeddedContainer);
+    rdpLayout->setContentsMargins(0, 0, 0, 0);
+    rdpLayout->addWidget(m_nativeRdpWidget);
+    connect(m_nativeRdpWidget, &RdpClientWidget::connected, this, [this] {
+        m_isActive = true;
+        m_statusLabel->hide();
+        m_reconnectButton->hide();
+        m_embeddedContainer->show();
+        m_nativeRdpWidget->setFocus();
+    });
+    auto closed = [this](const QString& message) {
+        m_isActive = false;
+        m_embeddedContainer->hide();
+        m_statusLabel->setText(message);
+        m_statusLabel->show();
+        m_reconnectButton->show();
+        emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+        maybeScheduleReconnect();
+    };
+    connect(m_nativeRdpWidget, &RdpClientWidget::errorOccurred, this, closed);
+    connect(m_nativeRdpWidget, &RdpClientWidget::disconnected, this,
+            [this, closed] { closed(tr("Session closed. Close this tab to continue.")); });
+    // Negotiate the desktop size only after the tab has allocated its full
+    // viewport. The connecting label otherwise consumes half the height.
+    m_statusLabel->hide();
+    m_reconnectButton->hide();
+    m_embeddedContainer->show();
+    layout()->activate();
+    m_embeddedContainer->layout()->activate();
+    m_nativeRdpWidget->start(m_session.host, m_session.port, userEdit->text().trimmed(), domainEdit->text().trimmed(),
+                             passwordEdit->text());
+}
+#endif
+
 void TerminalTab::launchExternalClient() {
     QString program;
     QStringList args;
-    WId winId = m_embeddedContainer->winId();
+    bool separateWindow = false;
 
     if (m_session.type == SessionType::RDP) {
 #ifdef Q_OS_WIN
         program = "mstsc";
+        separateWindow = true;
         // mstsc has no parent-window option. Embedded RDP uses ActiveQt;
         // this fallback opens the native client in a separate window.
         args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
 #else
-        program = "xfreerdp";
+        program = QStandardPaths::findExecutable(QStringLiteral("xfreerdp3"));
+        if (program.isEmpty())
+            program = QStandardPaths::findExecutable(QStringLiteral("xfreerdp"));
+        // Keep the usual launch error when neither FreeRDP executable is installed.
+        if (program.isEmpty())
+            program = QStringLiteral("xfreerdp3");
+        separateWindow = QGuiApplication::platformName() != QStringLiteral("xcb");
         args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
-        args << "/parent-window:" + QString::number(winId);
+        if (!separateWindow)
+            args << "/parent-window:" + QString::number(m_embeddedContainer->winId());
         args << "/cert:ignore";
         args << "/dynamic-resolution";
         args << "+decorations";
-        if (!m_session.user.isEmpty()) {
+        if (!m_session.user.isEmpty())
             args << "/u:" + m_session.user;
-        }
 #endif
     } else if (m_session.type == SessionType::VNC) {
         program = "vncviewer";
-        args << m_session.host + "::" + QString::number(m_session.port) << "-parentwindow" << QString::number(winId);
+        args << m_session.host + "::" + QString::number(m_session.port) << "-parentwindow"
+             << QString::number(m_embeddedContainer->winId());
     }
 
     if (program.isEmpty())
@@ -996,14 +1094,10 @@ void TerminalTab::launchExternalClient() {
     m_externalProcess = new QProcess(this);
     m_externalProcess->setProcessChannelMode(QProcess::ForwardedChannels);
 
-    connect(m_externalProcess, &QProcess::started, this, [this]() {
+    connect(m_externalProcess, &QProcess::started, this, [this, separateWindow]() {
         m_isActive = true;
         if (m_reconnectButton)
             m_reconnectButton->setVisible(false);
-        bool separateWindow = false;
-#ifdef Q_OS_WIN
-        separateWindow = m_session.type == SessionType::RDP;
-#endif
         if (m_statusLabel && separateWindow) {
             m_statusLabel->setText(tr("Remote Desktop is running in a separate window."));
             m_statusLabel->show();
@@ -1036,10 +1130,10 @@ void TerminalTab::launchExternalClient() {
             m_embeddedContainer->hide();
         if (m_statusLabel) {
             m_statusLabel->show();
-            m_statusLabel->setText(tr("Failed to launch embedded client.\n\n") +
-                                   tr("Make sure the required program is installed:\n") +
-                                   (m_session.type == SessionType::RDP ? tr("RDP: xfreerdp (Linux) or mstsc (Windows)")
-                                                                       : tr("VNC: vncviewer")));
+            m_statusLabel->setText(
+                tr("Failed to launch embedded client.\n\n") + tr("Make sure the required program is installed:\n") +
+                (m_session.type == SessionType::RDP ? tr("RDP: xfreerdp3 or xfreerdp (Linux), mstsc (Windows)")
+                                                    : tr("VNC: vncviewer")));
         }
         m_isActive = false;
         if (m_reconnectButton)
