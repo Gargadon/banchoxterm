@@ -25,6 +25,7 @@
 #include <QPointer>
 #include <QStandardPaths>
 #include <memory>
+#include <vector>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QSslConfiguration>
@@ -727,12 +728,14 @@ private slots:
             }
         });
 
+        std::vector<std::unique_ptr<QTcpServer>> portReservations;
         auto reservePort = [&]() {
-            QTcpServer probe;
-            if (!probe.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
+            auto probe = std::make_unique<QTcpServer>();
+            if (!probe->listen(QHostAddress(QStringLiteral("127.0.0.1"))))
                 return quint16(0);
-            const quint16 reserved = probe.serverPort();
-            probe.close();
+            const quint16 reserved = probe->serverPort();
+            // Keep earlier ports bound while selecting the other tunnel ports.
+            portReservations.push_back(std::move(probe));
             return reserved;
         };
 
@@ -824,6 +827,7 @@ private slots:
         socksTunnel.socksUsername = QStringLiteral("proxy-user");
         socksTunnel.socksPassword = QStringLiteral("proxy-password");
         const QList<TunnelConfig> tunnels = {localTunnel, remoteTunnel, socksTunnel};
+        portReservations.clear();
 
         SshConnection connection;
         QSignalSpy connectedSpy(&connection, &SshConnection::connectionSuccess);
@@ -887,9 +891,7 @@ private slots:
         tunnelTimer.start();
         while (!allTunnelsActive() && tunnelTimer.elapsed() < 5000)
             QTest::qWait(50);
-        if (!allTunnelsActive()) {
-            QCOMPARE(tunnelStateSpy.count(), 6);
-        }
+        QVERIFY2(allTunnelsActive(), "All three SSH tunnels must be listening before testing their protocols");
 
         auto waitForBytes = [&](QTcpSocket& socket, qint64 bytes) {
             QElapsedTimer timer;
@@ -927,7 +929,7 @@ private slots:
         while (socksSocket.state() != QAbstractSocket::ConnectedState && socksTimer.elapsed() < 3000)
             QTest::qWait(25);
         QVERIFY(socksSocket.state() == QAbstractSocket::ConnectedState);
-        socksSocket.write(QByteArray::fromHex("050100"));
+        socksSocket.write(QByteArray::fromHex("050102"));
         QVERIFY(socksSocket.waitForBytesWritten(1000));
         QVERIFY(waitForBytes(socksSocket, 2));
         QCOMPARE(socksSocket.read(2), QByteArray::fromHex("0502"));
