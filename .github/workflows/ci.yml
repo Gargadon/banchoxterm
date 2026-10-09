@@ -107,8 +107,10 @@ jobs:
           # aqt-list-server and supports the MSVC Windows ARM64 target.
           version: '6.8.3'
           arch: ${{ matrix.arch.qt_arch }}
-          modules: 'qtserialport'
+          # ActiveQt supplies AxContainer for the embedded Windows RDP client.
+          modules: 'qtserialport qtactiveqt'
           cache: true
+          cache-key-prefix: 'install-qt-action-activeqt-v1'
 
       - name: Download VcXsrv companion
         shell: pwsh
