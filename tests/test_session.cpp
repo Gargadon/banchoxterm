@@ -19,6 +19,7 @@
 #include <QLineEdit>
 #include <QElapsedTimer>
 #include <QThread>
+#include <QScopeGuard>
 #include <QTabWidget>
 #include <QFrame>
 #include <QPushButton>
@@ -980,6 +981,17 @@ private slots:
 
         QList<SftpTransferWorker*> workers;
         QList<QThread*> workerThreads;
+        std::atomic_bool uploadPaused{false};
+        const auto cleanupWorkers = qScopeGuard([&]() {
+            for (int i = 0; i < workerThreads.size(); ++i) {
+                workers.at(i)->cancel();
+                workerThreads.at(i)->quit();
+                workerThreads.at(i)->wait();
+                delete workers.at(i);
+                delete workerThreads.at(i);
+            }
+        });
+        QSignalSpy shellDuringTransfer(&connection, &SshConnection::shellDataReceived);
         QSignalSpy parallelFinishedSpy(this, &TestSession::parallelTransferFinished);
         const QList<QPair<QString, QString>> parallelTransfers = {
             {localSourceA, QStringLiteral("/tmp/banchoxterm-parallel-a.txt")},
@@ -993,6 +1005,13 @@ private slots:
             request.isUpload = true;
 
             auto* worker = new SftpTransferWorker(parallelSession, request);
+            if (i == 0) {
+                connect(worker, &SftpTransferWorker::progress, worker,
+                        [worker, &uploadPaused](const QString&, const QString&, qint64 done, qint64) {
+                            if (done > 0 && !uploadPaused.exchange(true))
+                                worker->pause();
+                        }, Qt::DirectConnection);
+            }
             auto* thread = new QThread;
             worker->moveToThread(thread);
             connect(thread, &QThread::started, worker, &SftpTransferWorker::start);
@@ -1005,11 +1024,19 @@ private slots:
             workerThreads.append(thread);
             thread->start();
         }
+        QTRY_VERIFY_WITH_TIMEOUT(uploadPaused.load(), 10000);
+        connection.sendToShell(QByteArrayLiteral("printf '%s%s\\n' '__SFTP_' 'INTERACTIVE__'\n"));
+        auto receivedShellMarker = [&]() {
+            QByteArray output;
+            for (const auto& event : shellDuringTransfer)
+                output += event.first().toByteArray();
+            return output.contains("__SFTP_INTERACTIVE__");
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(receivedShellMarker(), 5000);
+        workers.first()->resume();
         QTRY_COMPARE_WITH_TIMEOUT(parallelFinishedSpy.count(), 2, 10000);
         for (int i = 0; i < workerThreads.size(); ++i) {
             QVERIFY(workerThreads.at(i)->wait(3000));
-            delete workers.at(i);
-            delete workerThreads.at(i);
         }
         QSignalSpy downloadSpy(&connection, &SshConnection::operationFinished);
         const QString downloadedA = serverDir.filePath(QStringLiteral("parallel-downloaded-a.txt"));

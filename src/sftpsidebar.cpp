@@ -932,6 +932,10 @@ void SftpSidebar::onUploadFolderClicked() {
         return;
     QString path = QFileDialog::getExistingDirectory(this, tr("Select Folder to Upload"), QDir::homePath());
     if (!path.isEmpty()) {
+        if (!m_ftp) {
+            enqueueUpload({path});
+            return;
+        }
         if (m_ftp) {
             m_activeTransfer = {QString(), path, false, true, 0};
             m_transferActive = true;
@@ -1330,7 +1334,7 @@ void SftpSidebar::onToggleTransferPause() {
             QMetaObject::invokeMethod(m_ftp, "resumeTransfer", Qt::DirectConnection);
         else if (!m_parallelTransfers.isEmpty()) {
             for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers))
-                QMetaObject::invokeMethod(transfer.worker, "resume", Qt::QueuedConnection);
+                QMetaObject::invokeMethod(transfer.worker, "resume", Qt::DirectConnection);
         } else
             QMetaObject::invokeMethod(m_connection, "resumeTransfer", Qt::DirectConnection);
         m_transferPaused = false;
@@ -1340,7 +1344,7 @@ void SftpSidebar::onToggleTransferPause() {
             QMetaObject::invokeMethod(m_ftp, "pauseTransfer", Qt::DirectConnection);
         else if (!m_parallelTransfers.isEmpty()) {
             for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers))
-                QMetaObject::invokeMethod(transfer.worker, "pause", Qt::QueuedConnection);
+                QMetaObject::invokeMethod(transfer.worker, "pause", Qt::DirectConnection);
         } else
             QMetaObject::invokeMethod(m_connection, "pauseTransfer", Qt::DirectConnection);
         m_transferPaused = true;
@@ -1361,7 +1365,7 @@ void SftpSidebar::onCancelQueuedTransfers() {
             QMetaObject::invokeMethod(m_ftp, "cancelTransfer", Qt::DirectConnection);
         else if (!m_parallelTransfers.isEmpty()) {
             for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers))
-                QMetaObject::invokeMethod(transfer.worker, "cancel", Qt::QueuedConnection);
+                QMetaObject::invokeMethod(transfer.worker, "cancel", Qt::DirectConnection);
         } else
             QMetaObject::invokeMethod(m_connection, "cancelTransfer", Qt::DirectConnection);
     }
@@ -1381,7 +1385,7 @@ void SftpSidebar::onWatchedFileChanged(const QString& path) {
 }
 
 void SftpSidebar::startParallelTransfers() {
-    if (m_currentSession.type != SessionType::SSH || m_maxParallelTransfers <= 1)
+    if (m_currentSession.type != SessionType::SSH)
         return startNextTransfer();
 
     while (!m_transferQueue.isEmpty() && m_parallelTransfers.size() < m_maxParallelTransfers) {
@@ -1471,7 +1475,7 @@ void SftpSidebar::stopParallelTransfers() {
     m_transferQueue.clear();
     for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers)) {
         if (transfer.worker)
-            QMetaObject::invokeMethod(transfer.worker, "cancel", Qt::QueuedConnection);
+            QMetaObject::invokeMethod(transfer.worker, "cancel", Qt::DirectConnection);
         if (transfer.thread)
             transfer.thread->quit();
     }
@@ -1483,7 +1487,7 @@ void SftpSidebar::enqueueUpload(const QStringList& localPaths) {
     if (!m_isConnected)
         return;
 
-    const bool parallel = m_currentSession.type == SessionType::SSH && m_maxParallelTransfers > 1;
+    const bool parallel = m_currentSession.type == SessionType::SSH;
 
     for (const QString& localPath : localPaths) {
         QFileInfo info(localPath);
@@ -1551,7 +1555,7 @@ void SftpSidebar::enqueueDownloadTo(const QStringList& remotePaths, const QStrin
     if (!m_isConnected || destinationDir.isEmpty())
         return;
 
-    const bool parallel = m_currentSession.type == SessionType::SSH && m_maxParallelTransfers > 1;
+    const bool parallel = m_currentSession.type == SessionType::SSH;
 
     int added = 0;
     for (const QString& remotePath : remotePaths) {

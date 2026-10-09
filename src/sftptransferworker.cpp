@@ -5,6 +5,10 @@
 
 SftpTransferWorker::SftpTransferWorker(const Session& session, const SftpTransferRequest& request, QObject* parent)
     : QObject(parent), m_session(session), m_request(request) {
+    // Construct before moving the worker to its thread. Control slots only
+    // touch SshConnection's atomic transfer flags and can be called directly.
+    m_connection = new SshConnection();
+    m_connection->setParent(this);
 }
 
 SftpTransferWorker::~SftpTransferWorker() {
@@ -12,10 +16,14 @@ SftpTransferWorker::~SftpTransferWorker() {
 }
 
 void SftpTransferWorker::start() {
-    if (m_connection || m_finished)
+    if (m_started || m_finished)
         return;
+    m_started = true;
 
-    m_connection = new SshConnection();
+    m_connection->setKeepAliveSeconds(m_session.keepAliveSeconds);
+    m_connection->setCipherAlgorithms(m_session.cryptCipher);
+    m_connection->setKexAlgorithm(m_session.kexAlgo);
+    m_connection->setMacAlgorithm(m_session.macAlgo);
     connect(m_connection, &SshConnection::connectionSuccess, this, &SftpTransferWorker::onConnected);
     connect(m_connection, &SshConnection::connectionFailed, this, &SftpTransferWorker::onConnectionFailed);
     connect(m_connection, &SshConnection::operationFinished, this, &SftpTransferWorker::onOperationFinished);
@@ -23,14 +31,13 @@ void SftpTransferWorker::start() {
 
     const QString password = Keyring::lookupPassword(m_session.id);
     m_connection->connectToHost(m_session.host, m_session.port, m_session.user, m_session.keyPath, password,
-                                m_session.tunnels, m_session.jumpHost, m_session.jumpPort, m_session.jumpUser,
+                                {}, m_session.jumpHost, m_session.jumpPort, m_session.jumpUser,
                                 m_session.jumpKeyPath, m_session.id);
 }
 
 void SftpTransferWorker::onConnected() {
-    if (m_started || m_finished)
+    if (m_finished)
         return;
-    m_started = true;
 
     if (m_request.isDirUpload) {
         m_connection->uploadDirectory(m_request.localPath, m_request.remotePath);
