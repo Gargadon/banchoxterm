@@ -30,9 +30,9 @@ void SftpTransferWorker::start() {
     connect(m_connection, &SshConnection::transferProgress, this, &SftpTransferWorker::onTransferProgress);
 
     const QString password = Keyring::lookupPassword(m_session.id);
-    m_connection->connectToHost(m_session.host, m_session.port, m_session.user, m_session.keyPath, password,
-                                {}, m_session.jumpHost, m_session.jumpPort, m_session.jumpUser,
-                                m_session.jumpKeyPath, m_session.id);
+    m_connection->connectToHost(m_session.host, m_session.port, m_session.user, m_session.keyPath, password, {},
+                                m_session.jumpHost, m_session.jumpPort, m_session.jumpUser, m_session.jumpKeyPath,
+                                m_session.id);
 }
 
 void SftpTransferWorker::onConnected() {

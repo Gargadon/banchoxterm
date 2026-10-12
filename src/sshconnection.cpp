@@ -706,8 +706,8 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
         for (const Session& bastion : savedSessions) {
             if (bastion.id != saved.jumpSessionId)
                 continue;
-            if (bastion.id == saved.id || bastion.type != SessionType::SSH || !bastion.jumpHost.trimmed().isEmpty()
-                || !bastion.jumpSessionId.isEmpty() || bastion.host.trimmed().isEmpty())
+            if (bastion.id == saved.id || bastion.type != SessionType::SSH || !bastion.jumpHost.trimmed().isEmpty() ||
+                !bastion.jumpSessionId.isEmpty() || bastion.host.trimmed().isEmpty())
                 break;
             resolvedJumpHost = bastion.host.trimmed();
             resolvedJumpPort = bastion.port;
@@ -750,9 +750,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
         m_session = m_jumpSession;
         configureSession(m_jumpSession, false);
         int jumpRc = retry([this]() { return libssh2_session_handshake(m_jumpSession, m_jumpSock); });
-        const QString jumpPassword = jumpCredentialId.isEmpty()
-                                         ? QString()
-                                         : Keyring::lookupPassword(jumpCredentialId);
+        const QString jumpPassword = jumpCredentialId.isEmpty() ? QString() : Keyring::lookupPassword(jumpCredentialId);
         if (jumpRc != 0 || !verifyHostKey() || !authenticateSession(m_user, m_keyPath, jumpPassword, true)) {
             emit connectionFailed("SSH bastion connection failed");
             disconnectFromHost();

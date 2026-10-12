@@ -270,9 +270,8 @@ QList<Session> SessionManager::loadSessions() {
         if (session.jumpSessionId.isEmpty())
             continue;
         for (const Session& bastion : sessions) {
-            if (bastion.id == session.jumpSessionId && bastion.id != session.id
-                && bastion.type == SessionType::SSH && bastion.jumpSessionId.isEmpty()
-                && bastion.jumpHost.trimmed().isEmpty()) {
+            if (bastion.id == session.jumpSessionId && bastion.id != session.id && bastion.type == SessionType::SSH &&
+                bastion.jumpSessionId.isEmpty() && bastion.jumpHost.trimmed().isEmpty()) {
                 session.jumpHost = bastion.host;
                 session.jumpPort = bastion.port;
                 session.jumpUser = bastion.user;

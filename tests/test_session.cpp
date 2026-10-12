@@ -1091,11 +1091,13 @@ private slots:
 
             auto* worker = new SftpTransferWorker(parallelSession, request);
             if (i == 0) {
-                connect(worker, &SftpTransferWorker::progress, worker,
-                        [worker, &uploadPaused](const QString&, const QString&, qint64 done, qint64) {
-                            if (done > 0 && !uploadPaused.exchange(true))
-                                worker->pause();
-                        }, Qt::DirectConnection);
+                connect(
+                    worker, &SftpTransferWorker::progress, worker,
+                    [worker, &uploadPaused](const QString&, const QString&, qint64 done, qint64) {
+                        if (done > 0 && !uploadPaused.exchange(true))
+                            worker->pause();
+                    },
+                    Qt::DirectConnection);
             }
             auto* thread = new QThread;
             worker->moveToThread(thread);
@@ -1159,7 +1161,7 @@ private slots:
         connection.connectToHost(QStringLiteral("127.0.0.1"), port, user, clientKey, QString(), {},
                                  QStringLiteral("127.0.0.1"), port, user, clientKey);
         QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() == 3 || !failureSpy.isEmpty(), 5000);
-        QVERIFY2(failureSpy.isEmpty(), qPrintable(failureSpy.first().first().toString()));
+        QVERIFY2(failureSpy.isEmpty(), qPrintable(failureSpy.value(0).value(0).toString()));
         QCOMPARE(connectedSpy.count(), 3);
         connection.listDirectory(QStringLiteral("."));
         QTRY_COMPARE_WITH_TIMEOUT(directorySpy.count(), 3, 3000);
@@ -1184,7 +1186,7 @@ private slots:
         connection.connectToHost(QStringLiteral("127.0.0.1"), port, user, clientKey, QString(), {},
                                  QStringLiteral("stale.invalid"), 1, QString(), QString(), targetProfile.id);
         QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() == 4 || !failureSpy.isEmpty(), 5000);
-        QVERIFY2(failureSpy.isEmpty(), qPrintable(failureSpy.first().first().toString()));
+        QVERIFY2(failureSpy.isEmpty(), qPrintable(failureSpy.value(0).value(0).toString()));
         QCOMPARE(connectedSpy.count(), 4);
         connection.listDirectory(QStringLiteral("."));
         QTRY_COMPARE_WITH_TIMEOUT(directorySpy.count(), 4, 3000);

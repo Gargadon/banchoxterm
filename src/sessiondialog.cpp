@@ -252,10 +252,10 @@ void SessionDialog::setupUi() {
     m_jumpSessionCombo->setMaxVisibleItems(8);
     m_jumpSessionCombo->addItem(tr("Manual bastion configuration"), QString());
     for (const Session& saved : SessionManager::loadSessions()) {
-        if (saved.id != m_id && saved.type == SessionType::SSH && saved.jumpHost.trimmed().isEmpty()
-            && saved.jumpSessionId.isEmpty())
-            m_jumpSessionCombo->addItem(QStringLiteral("%1 (%2@%3:%4)")
-                                           .arg(saved.name, saved.user, saved.host).arg(saved.port), saved.id);
+        if (saved.id != m_id && saved.type == SessionType::SSH && saved.jumpHost.trimmed().isEmpty() &&
+            saved.jumpSessionId.isEmpty())
+            m_jumpSessionCombo->addItem(
+                QStringLiteral("%1 (%2@%3:%4)").arg(saved.name, saved.user, saved.host).arg(saved.port), saved.id);
     }
     const int jumpRows = qMin(8, m_jumpSessionCombo->count());
     const int jumpRowHeight = qMax(28, m_jumpSessionCombo->fontMetrics().height() + 10);
@@ -291,28 +291,29 @@ void SessionDialog::setupUi() {
     sshForm->addRow("", m_saveJumpPasswordCheck);
     m_jumpPasswordEdit->setEnabled(false);
     connect(m_saveJumpPasswordCheck, &QCheckBox::toggled, m_jumpPasswordEdit, &QWidget::setEnabled);
-    connect(m_jumpSessionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, jumpKeyBrowseBtn](int) {
-        const QString id = m_jumpSessionCombo->currentData().toString();
-        const bool manual = id.isEmpty();
-        if (!manual) {
-            for (const Session& saved : SessionManager::loadSessions()) {
-                if (saved.id != id)
-                    continue;
-                m_jumpHostEdit->setText(saved.host);
-                m_jumpPortSpin->setValue(saved.port);
-                m_jumpUserEdit->setText(saved.user);
-                m_jumpKeyEdit->setText(saved.keyPath);
-                break;
-            }
-        }
-        m_jumpHostEdit->setEnabled(manual);
-        m_jumpPortSpin->setEnabled(manual);
-        m_jumpUserEdit->setEnabled(manual);
-        m_jumpKeyEdit->setEnabled(manual);
-        jumpKeyBrowseBtn->setEnabled(manual);
-        m_saveJumpPasswordCheck->setEnabled(manual);
-        m_jumpPasswordEdit->setEnabled(manual && m_saveJumpPasswordCheck->isChecked());
-    });
+    connect(m_jumpSessionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+            [this, jumpKeyBrowseBtn](int) {
+                const QString id = m_jumpSessionCombo->currentData().toString();
+                const bool manual = id.isEmpty();
+                if (!manual) {
+                    for (const Session& saved : SessionManager::loadSessions()) {
+                        if (saved.id != id)
+                            continue;
+                        m_jumpHostEdit->setText(saved.host);
+                        m_jumpPortSpin->setValue(saved.port);
+                        m_jumpUserEdit->setText(saved.user);
+                        m_jumpKeyEdit->setText(saved.keyPath);
+                        break;
+                    }
+                }
+                m_jumpHostEdit->setEnabled(manual);
+                m_jumpPortSpin->setEnabled(manual);
+                m_jumpUserEdit->setEnabled(manual);
+                m_jumpKeyEdit->setEnabled(manual);
+                jumpKeyBrowseBtn->setEnabled(manual);
+                m_saveJumpPasswordCheck->setEnabled(manual);
+                m_jumpPasswordEdit->setEnabled(manual && m_saveJumpPasswordCheck->isChecked());
+            });
 
     connect(jumpKeyBrowseBtn, &QPushButton::clicked, this, [this]() {
         const QString path =

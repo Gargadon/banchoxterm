@@ -524,9 +524,10 @@ void SftpSidebar::startSession(const Session& session) {
         return;
     }
 
-    m_statusLabel->setText(session.jumpHost.trimmed().isEmpty()
-                               ? tr("Connecting to %1...").arg(session.host)
-                               : tr("Connecting to %1 via bastion %2...").arg(session.host, session.jumpHost.trimmed()));
+    m_statusLabel->setText(
+        session.jumpHost.trimmed().isEmpty()
+            ? tr("Connecting to %1...").arg(session.host)
+            : tr("Connecting to %1 via bastion %2...").arg(session.host, session.jumpHost.trimmed()));
 
     QString password = Keyring::lookupPassword(session.id);
     emit requestConnect(session.host, session.port, session.user, session.keyPath, password, session.tunnels,

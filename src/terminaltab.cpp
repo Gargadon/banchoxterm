@@ -508,7 +508,8 @@ void TerminalTab::setupSshTerminal() {
     bool enableX11 = m_session.x11Forwarding;
     if (!m_session.jumpHost.trimmed().isEmpty())
         feedTerminalData(tr("\r\n[Connecting to %1 via bastion %2...]\r\n")
-                             .arg(m_session.host, m_session.jumpHost.trimmed()).toUtf8());
+                             .arg(m_session.host, m_session.jumpHost.trimmed())
+                             .toUtf8());
 #ifdef Q_OS_WIN
     if (enableX11) {
         QString x11Error;
