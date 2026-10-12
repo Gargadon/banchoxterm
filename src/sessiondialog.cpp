@@ -3,6 +3,7 @@
 #include <QHBoxLayout>
 #include <QFormLayout>
 #include <QComboBox>
+#include <QAbstractItemView>
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QPushButton>
@@ -246,6 +247,21 @@ void SessionDialog::setupUi() {
     auto* jumpLabel = new QLabel(tr("Optional SSH bastion (ProxyJump)"), connTab);
     sshForm->addRow(QString(), jumpLabel);
 
+    m_jumpSessionCombo = new QComboBox(connTab);
+    m_jumpSessionCombo->setObjectName("jumpSessionCombo");
+    m_jumpSessionCombo->setMaxVisibleItems(8);
+    m_jumpSessionCombo->addItem(tr("Manual bastion configuration"), QString());
+    for (const Session& saved : SessionManager::loadSessions()) {
+        if (saved.id != m_id && saved.type == SessionType::SSH && saved.jumpHost.trimmed().isEmpty()
+            && saved.jumpSessionId.isEmpty())
+            m_jumpSessionCombo->addItem(QStringLiteral("%1 (%2@%3:%4)")
+                                           .arg(saved.name, saved.user, saved.host).arg(saved.port), saved.id);
+    }
+    const int jumpRows = qMin(8, m_jumpSessionCombo->count());
+    const int jumpRowHeight = qMax(28, m_jumpSessionCombo->fontMetrics().height() + 10);
+    m_jumpSessionCombo->view()->setMinimumHeight(jumpRows * jumpRowHeight + 2);
+    sshForm->addRow(tr("Use saved SSH session:"), m_jumpSessionCombo);
+
     m_jumpHostEdit = new QLineEdit(connTab);
     m_jumpHostEdit->setPlaceholderText(tr("bastion.example.com (empty = direct)"));
     sshForm->addRow(tr("Jump host:"), m_jumpHostEdit);
@@ -266,6 +282,37 @@ void SessionDialog::setupUi() {
     jumpKeyLayout->addWidget(m_jumpKeyEdit);
     jumpKeyLayout->addWidget(jumpKeyBrowseBtn);
     sshForm->addRow(tr("Jump private key:"), jumpKeyLayout);
+
+    m_jumpPasswordEdit = new QLineEdit(connTab);
+    m_jumpPasswordEdit->setEchoMode(QLineEdit::Password);
+    m_jumpPasswordEdit->setPlaceholderText(tr("Optional (stored in Keyring)"));
+    sshForm->addRow(tr("Jump password:"), m_jumpPasswordEdit);
+    m_saveJumpPasswordCheck = new QCheckBox(tr("Save bastion password securely in system keyring"), connTab);
+    sshForm->addRow("", m_saveJumpPasswordCheck);
+    m_jumpPasswordEdit->setEnabled(false);
+    connect(m_saveJumpPasswordCheck, &QCheckBox::toggled, m_jumpPasswordEdit, &QWidget::setEnabled);
+    connect(m_jumpSessionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this, jumpKeyBrowseBtn](int) {
+        const QString id = m_jumpSessionCombo->currentData().toString();
+        const bool manual = id.isEmpty();
+        if (!manual) {
+            for (const Session& saved : SessionManager::loadSessions()) {
+                if (saved.id != id)
+                    continue;
+                m_jumpHostEdit->setText(saved.host);
+                m_jumpPortSpin->setValue(saved.port);
+                m_jumpUserEdit->setText(saved.user);
+                m_jumpKeyEdit->setText(saved.keyPath);
+                break;
+            }
+        }
+        m_jumpHostEdit->setEnabled(manual);
+        m_jumpPortSpin->setEnabled(manual);
+        m_jumpUserEdit->setEnabled(manual);
+        m_jumpKeyEdit->setEnabled(manual);
+        jumpKeyBrowseBtn->setEnabled(manual);
+        m_saveJumpPasswordCheck->setEnabled(manual);
+        m_jumpPasswordEdit->setEnabled(manual && m_saveJumpPasswordCheck->isChecked());
+    });
 
     connect(jumpKeyBrowseBtn, &QPushButton::clicked, this, [this]() {
         const QString path =
@@ -724,6 +771,7 @@ void SessionDialog::setupUi() {
     auto* btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
     auto* cancelBtn = new QPushButton(tr("Cancel"), this);
+    cancelBtn->setObjectName("cancelButton");
     auto* saveBtn = new QPushButton(tr("Save"), this);
     saveBtn->setObjectName("primaryButton");
 
@@ -754,6 +802,14 @@ void SessionDialog::loadSession(const Session& session) {
             m_jumpUserEdit->setText(session.jumpUser);
         if (m_jumpKeyEdit)
             m_jumpKeyEdit->setText(session.jumpKeyPath);
+        if (!session.jumpSessionId.isEmpty()) {
+            int index = m_jumpSessionCombo->findData(session.jumpSessionId);
+            if (index < 0) {
+                m_jumpSessionCombo->addItem(tr("Unavailable bastion session"), session.jumpSessionId);
+                index = m_jumpSessionCombo->count() - 1;
+            }
+            m_jumpSessionCombo->setCurrentIndex(index);
+        }
         if (m_x11ForwardCheck)
             m_x11ForwardCheck->setChecked(session.x11Forwarding);
         if (m_autoReconnectCheck)
@@ -778,6 +834,10 @@ void SessionDialog::loadSession(const Session& session) {
         }
 
         {
+            const QString jumpPassword = Keyring::lookupPassword(session.id + QStringLiteral(":jump"));
+            m_jumpPasswordEdit->setText(jumpPassword);
+            m_saveJumpPasswordCheck->setChecked(!jumpPassword.isEmpty());
+            m_jumpPasswordEdit->setEnabled(m_jumpSessionCombo->currentIndex() == 0 && !jumpPassword.isEmpty());
             QString password = Keyring::lookupPassword(session.id);
             if (!password.isEmpty()) {
                 m_passwordEdit->setText(password);
@@ -942,6 +1002,7 @@ Session SessionDialog::getSession() const {
         s.jumpPort = m_jumpPortSpin ? m_jumpPortSpin->value() : 22;
         s.jumpUser = m_jumpUserEdit ? m_jumpUserEdit->text().trimmed() : QString();
         s.jumpKeyPath = m_jumpKeyEdit ? m_jumpKeyEdit->text().trimmed() : QString();
+        s.jumpSessionId = m_jumpSessionCombo->currentData().toString();
         s.x11Forwarding = m_x11ForwardCheck ? m_x11ForwardCheck->isChecked() : false;
         s.autoReconnect = m_autoReconnectCheck ? m_autoReconnectCheck->isChecked() : false;
         s.tunnels = m_tunnels;
@@ -1041,6 +1102,18 @@ void SessionDialog::accept() {
         return;
     }
     if (m_typeCombo->currentIndex() == 0) {
+        const QString jumpPasswordKey = m_id + QStringLiteral(":jump");
+        // The linked session owns its credentials; do not copy or overwrite them.
+        if (m_jumpSessionCombo->currentIndex() == 0) {
+            if (m_saveJumpPasswordCheck->isChecked() && !m_jumpPasswordEdit->text().isEmpty()) {
+                if (!Keyring::storePassword(jumpPasswordKey, m_jumpPasswordEdit->text())) {
+                    QMessageBox::warning(this, tr("SSH Authentication"), tr("Could not save the bastion password."));
+                    return;
+                }
+            } else {
+                Keyring::deletePassword(jumpPasswordKey);
+            }
+        }
         if (m_savePasswordCheck->isChecked()) {
             QString pwd = m_passwordEdit->text();
             if (!pwd.isEmpty()) {

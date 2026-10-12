@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
-project(banchoxterm VERSION 1.2.3 LANGUAGES C CXX)
+if(CMAKE_GENERATOR MATCHES "NMake Makefiles")
+    # Localized /showIncludes output can lose header dependencies with JOM /
+    # NMake, leaving objects with incompatible class layouts after an edit.
+    # Use CMake's include scanner instead of parsing the compiler's output.
+    set(CMAKE_DEPENDS_USE_COMPILER FALSE)
+endif()
+project(banchoxterm VERSION 1.2.4 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 

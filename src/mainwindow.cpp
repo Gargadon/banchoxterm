@@ -1161,7 +1161,9 @@ void MainWindow::updateSessionContext() {
     TerminalTab* tab = currentTerminalTab();
     if (!tab) {
         m_contextProtocolLabel->setText(tr("NO SESSION"));
+        m_contextProtocolLabel->setToolTip(QString());
         m_contextSessionLabel->setText(tr("Open a session to begin"));
+        m_contextSessionLabel->setToolTip(QString());
         m_contextStateLabel->clear();
         m_contextStateLabel->setStyleSheet(QString());
         if (m_statusConnectionLabel)
@@ -1182,13 +1184,25 @@ void MainWindow::updateSessionContext() {
     }
 
     const bool active = tab->isSessionActive();
-    m_contextProtocolLabel->setText(sessionTypeName(session.type));
+    const bool viaBastion = session.type == SessionType::SSH && !session.jumpHost.trimmed().isEmpty();
+    const QString protocol = viaBastion ? tr("SSH via bastion") : sessionTypeName(session.type);
+    QString route = endpoint;
+    if (viaBastion) {
+        const QString jumpUser = session.jumpUser.trimmed().isEmpty() ? session.user : session.jumpUser.trimmed();
+        const QString bastion = QStringLiteral("%1@%2:%3")
+                                    .arg(jumpUser, session.jumpHost.trimmed())
+                                    .arg(session.jumpPort > 0 ? session.jumpPort : 22);
+        route = tr("Bastion: %1\nDestination: %2").arg(bastion, endpoint);
+    }
+    m_contextProtocolLabel->setText(protocol);
+    m_contextProtocolLabel->setToolTip(route);
+    m_contextSessionLabel->setToolTip(route);
     m_contextSessionLabel->setText(QStringLiteral("%1  ·  %2").arg(session.name, endpoint));
     m_contextStateLabel->setText(active ? tr("Connected") : tr("Disconnected"));
     m_contextStateLabel->setStyleSheet(active ? QStringLiteral("color: #36b37e; font-weight: 600;")
                                               : QStringLiteral("color: #e06c75; font-weight: 600;"));
     if (m_statusConnectionLabel)
-        m_statusConnectionLabel->setText(QStringLiteral("%1  |  %2").arg(sessionTypeName(session.type), endpoint));
+        m_statusConnectionLabel->setText(QStringLiteral("%1  |  %2").arg(protocol, endpoint));
 }
 
 void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {

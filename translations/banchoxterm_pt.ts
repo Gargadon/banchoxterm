@@ -155,6 +155,10 @@
 </context>
 <context>
     <name>MainWindow</name>
+    <message><source>SSH via bastion</source><translation>SSH via bastião</translation></message>
+    <message><source>Bastion: %1
+Destination: %2</source><translation>Bastião: %1
+Destino: %2</translation></message>
     <message>
         <location filename="../src/mainwindow.cpp" line="522"/>
         <source>Session</source>
@@ -1301,6 +1305,11 @@ Deseja continuar?</translation>
 </context>
 <context>
     <name>SessionDialog</name>
+    <message><source>Manual bastion configuration</source><translation>Configuração manual do bastião</translation></message>
+    <message><source>Use saved SSH session:</source><translation>Usar sessão SSH salva:</translation></message>
+    <message><source>Unavailable bastion session</source><translation>Sessão do bastião indisponível</translation></message>
+    <message><source>Jump password:</source><translation>Senha do bastião:</translation></message>
+    <message><source>Save bastion password securely in system keyring</source><translation>Salvar a senha do bastião no gerenciador de credenciais</translation></message>
     <message>
         <location filename="../src/sessiondialog.cpp" line="115"/>
         <source>New Session</source>
@@ -2527,6 +2536,8 @@ Deseja continuar?</translation>
 </context>
 <context>
     <name>SftpSidebar</name>
+    <message><source>Connecting to %1 via bastion %2...</source><translation>Conectando a %1 via bastião %2...</translation></message>
+    <message><source>Connected via bastion %1</source><translation>Conectado via bastião %1</translation></message>
     <message>
         <location filename="../src/sftpsidebar.cpp" line="178"/>
         <source>Remote files</source>
@@ -3164,6 +3175,7 @@ Deseja continuar?</translation>
 </context>
 <context>
     <name>SshConnection</name>
+    <message><source>The saved bastion session is unavailable or is not a direct SSH session.</source><translation>A sessão salva do bastião está indisponível ou não é uma sessão SSH direta.</translation></message>
     <message>
         <location filename="../src/sshconnection.cpp" line="283"/>
         <source>WARNING: The host key for &apos;%1&apos; has CHANGED!
@@ -3218,6 +3230,11 @@ Tem certeza de que deseja continuar conectando e lembrar desta chave?</translati
 </context>
 <context>
     <name>TerminalTab</name>
+    <message><source>&#13;
+[Connecting to %1 via bastion %2...]&#13;
+</source><translation>&#13;
+[Conectando a %1 via bastião %2...]&#13;
+</translation></message>
     <message>
         <location filename="../src/terminaltab.cpp" line="789"/>
         <source>Session stopped<byte value="xd"/>

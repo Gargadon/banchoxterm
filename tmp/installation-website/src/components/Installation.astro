@@ -1,0 +1,180 @@
+---
+import { useTranslations, type Locale } from '../i18n/translations';
+import { installationPaths, installationGuide } from '../i18n/installation';
+
+interface Props {
+  lang?: Locale;
+}
+
+const { lang = 'es' } = Astro.props;
+const t = useTranslations(lang);
+---
+
+<section class="install-section" id="instalacion">
+  <div class="container">
+    <div class="section-header">
+      <span class="section-tag">{t.install.tag}</span>
+      <h2 class="section-title">{t.install.title}</h2>
+      <p class="section-desc">
+        {t.install.desc}
+      </p>
+      <a class="btn btn-secondary" href={installationPaths[lang]}>{installationGuide[lang].guideLink} →</a>
+    </div>
+
+    <!-- Download cards -->
+    <div class="download-cards-grid">
+      <!-- Windows Card -->
+      <div class="download-card glass-panel">
+        <div class="os-header">
+          <div class="os-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.949-1.801"/>
+            </svg>
+          </div>
+          <div>
+            <h3 class="os-title">{t.install.windowsTitle}</h3>
+            <span class="os-meta">{t.install.windowsMeta}</span>
+          </div>
+        </div>
+
+        <p class="os-desc">
+          {t.install.windowsDesc}
+        </p>
+
+        <div class="os-actions">
+          <a
+            href="https://github.com/Gargadon/banchoxterm/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-primary"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span>{t.install.btnInstaller}</span>
+          </a>
+
+          <a
+            href="https://github.com/Gargadon/banchoxterm/releases"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-secondary"
+          >
+            <span>{t.install.btnPortable}</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Linux Card -->
+      <div class="download-card glass-panel">
+        <div class="os-header">
+          <div class="os-icon">
+            <img src="/icons/linux.svg" width="30" height="30" alt="Linux Tux Logo" class="tux-icon" loading="lazy" decoding="async" />
+          </div>
+          <div>
+            <h3 class="os-title">{t.install.linuxTitle}</h3>
+            <span class="os-meta">{t.install.linuxMeta}</span>
+          </div>
+        </div>
+
+        <p class="os-desc">
+          {t.install.linuxDesc}
+        </p>
+
+        <div class="os-actions">
+          <a href={installationPaths[lang] + "#linux"} class="btn btn-primary">
+            <span>{t.install.btnViewLinux}</span>
+          </a>
+          <a
+            href="https://github.com/Gargadon/banchoxterm/blob/main/README.md#build-from-source"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="btn btn-secondary"
+          >
+            <span>{t.install.btnGithubGuide}</span>
+          </a>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+
+
+<style>
+  .install-section {
+    padding: 6rem 0;
+  }
+
+  .download-cards-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+
+  @media (min-width: 768px) {
+    .download-cards-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  .download-card {
+    padding: 2.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    background: rgba(16, 22, 34, 0.7);
+  }
+
+  .os-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .os-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: var(--radius-md);
+    background: rgba(6, 182, 212, 0.12);
+    border: 1px solid rgba(6, 182, 212, 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent-cyan);
+  }
+
+  .tux-icon {
+    display: block;
+    filter: brightness(0) saturate(100%) invert(67%) sepia(85%) saturate(3062%) hue-rotate(152deg) brightness(96%) contrast(92%);
+  }
+
+  .os-title {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .os-meta {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  .os-desc {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+
+  .os-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: auto;
+    padding-top: 1rem;
+  }
+
+</style>

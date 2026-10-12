@@ -108,6 +108,7 @@ https%3a%2f%2fmirrors.kernel.org%2fsourceware%2fcygwin%2f/
 *.tmp
 *.temp
 *.log
+temp/
 
 # Web landing page dependencies and build
 web/node_modules/

@@ -471,7 +471,8 @@ void SshConnection::configureSession(LIBSSH2_SESSION* session, bool enableX11) {
     }
 }
 
-bool SshConnection::authenticateSession(const QString& user, const QString& keyPath, const QString& password) {
+bool SshConnection::authenticateSession(const QString& user, const QString& keyPath, const QString& password,
+                                        bool bastion) {
     // libssh2's public-key authentication is a multi-packet exchange. Keep
     // this short initial exchange blocking so it cannot be interrupted between
     // the public-key probe and the signed request; the interactive session
@@ -561,6 +562,18 @@ bool SshConnection::authenticateSession(const QString& user, const QString& keyP
                                              : QStringLiteral("SSH keyboard-interactive authentication failed"));
     }
 
+    if (!authenticated && bastion) {
+        QStringList answers;
+        const QByteArray prompt = tr("Bastion password for %1@%2:").arg(user, m_host).toUtf8();
+        if (promptKbdInteractive(QString(), QString(), {prompt}, {true}, answers) && !answers.isEmpty()) {
+            const QByteArray passwordBytes = answers.first().toUtf8();
+            rc = retry([this, &userBytes, &passwordBytes]() {
+                return libssh2_userauth_password(m_session, userBytes.constData(), passwordBytes.constData());
+            });
+            authenticated = rc == 0;
+        }
+    }
+
     if (!authenticated) {
         char* errorMessage = nullptr;
         const int errorCode = libssh2_session_last_error(m_session, &errorMessage, nullptr, 0);
@@ -570,7 +583,8 @@ bool SshConnection::authenticateSession(const QString& user, const QString& keyP
                 .arg(errorCode);
         emit diagnosticMessage(detail);
         emit connectionFailed(detail);
-        emit passwordRequired(QStringLiteral("Password required for %1@%2").arg(user, m_host));
+        if (!bastion)
+            emit passwordRequired(QStringLiteral("Password required for %1@%2").arg(user, m_host));
     }
     libssh2_session_set_blocking(m_session, 0);
     return authenticated;
@@ -673,13 +687,44 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
             tunnel.socksPassword = Keyring::lookupPassword(QStringLiteral("%1:socks:%2").arg(m_sessionId).arg(i));
         }
     }
-    m_abstract = this;
     m_connectionTimer.start();
 
     static std::once_flag init_flag;
     std::call_once(init_flag, []() { libssh2_init(0); });
 
-    const bool useJump = !jumpHost.trimmed().isEmpty();
+    QString resolvedJumpHost = jumpHost.trimmed();
+    int resolvedJumpPort = jumpPort;
+    QString resolvedJumpUser = jumpUser;
+    QString resolvedJumpKey = jumpKeyPath;
+    QString jumpCredentialId = m_sessionId.isEmpty() ? QString() : m_sessionId + QStringLiteral(":jump");
+    bool linkedBastion = false;
+    const QList<Session> savedSessions = SessionManager::loadSessions();
+    for (const Session& saved : savedSessions) {
+        if (saved.id != m_sessionId || saved.jumpSessionId.isEmpty())
+            continue;
+        bool found = false;
+        for (const Session& bastion : savedSessions) {
+            if (bastion.id != saved.jumpSessionId)
+                continue;
+            if (bastion.id == saved.id || bastion.type != SessionType::SSH || !bastion.jumpHost.trimmed().isEmpty()
+                || !bastion.jumpSessionId.isEmpty() || bastion.host.trimmed().isEmpty())
+                break;
+            resolvedJumpHost = bastion.host.trimmed();
+            resolvedJumpPort = bastion.port;
+            resolvedJumpUser = bastion.user;
+            resolvedJumpKey = bastion.keyPath;
+            jumpCredentialId = bastion.id;
+            linkedBastion = true;
+            found = true;
+            break;
+        }
+        if (!found) {
+            emit connectionFailed(tr("The saved bastion session is unavailable or is not a direct SSH session."));
+            return;
+        }
+        break;
+    }
+    const bool useJump = !resolvedJumpHost.isEmpty();
     if (useJump) {
         // Establish and authenticate the bastion first. The active fields are
         // temporarily pointed at the bastion because retry(), host-key
@@ -688,15 +733,15 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
         const int targetPort = m_port;
         const QString targetUser = m_user;
         const QString targetKey = m_keyPath;
-        m_host = jumpHost.trimmed();
-        m_port = jumpPort > 0 ? jumpPort : 22;
-        m_user = jumpUser.trimmed().isEmpty() ? targetUser : jumpUser.trimmed();
-        m_keyPath = jumpKeyPath.trimmed().isEmpty() ? targetKey : jumpKeyPath.trimmed();
+        m_host = resolvedJumpHost;
+        m_port = resolvedJumpPort > 0 ? resolvedJumpPort : 22;
+        m_user = !linkedBastion && resolvedJumpUser.trimmed().isEmpty() ? targetUser : resolvedJumpUser.trimmed();
+        m_keyPath = !linkedBastion && resolvedJumpKey.trimmed().isEmpty() ? targetKey : resolvedJumpKey.trimmed();
         if (!openSocket())
             return;
         emit diagnosticMessage(QStringLiteral("SSH TCP connection to bastion established"));
         m_jumpSock = m_sock;
-        m_jumpSession = libssh2_session_init_ex(nullptr, nullptr, nullptr, &m_abstract);
+        m_jumpSession = libssh2_session_init_ex(nullptr, nullptr, nullptr, this);
         if (!m_jumpSession) {
             emit connectionFailed("Failed to initialize SSH bastion session");
             disconnectFromHost();
@@ -705,7 +750,10 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
         m_session = m_jumpSession;
         configureSession(m_jumpSession, false);
         int jumpRc = retry([this]() { return libssh2_session_handshake(m_jumpSession, m_jumpSock); });
-        if (jumpRc != 0 || !verifyHostKey() || !authenticateSession(m_user, m_keyPath, password)) {
+        const QString jumpPassword = jumpCredentialId.isEmpty()
+                                         ? QString()
+                                         : Keyring::lookupPassword(jumpCredentialId);
+        if (jumpRc != 0 || !verifyHostKey() || !authenticateSession(m_user, m_keyPath, jumpPassword, true)) {
             emit connectionFailed("SSH bastion connection failed");
             disconnectFromHost();
             return;
@@ -732,7 +780,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     }
     emit diagnosticMessage(QStringLiteral("SSH TCP socket established"));
 
-    m_session = libssh2_session_init_ex(nullptr, nullptr, nullptr, &m_abstract);
+    m_session = libssh2_session_init_ex(nullptr, nullptr, nullptr, this);
     if (!m_session) {
         emit connectionFailed("Failed to initialize SSH session");
         disconnectFromHost();

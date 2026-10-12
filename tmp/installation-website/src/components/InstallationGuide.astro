@@ -1,0 +1,121 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Navbar from './Navbar.astro';
+import Footer from './Footer.astro';
+import { installationGuide, installationPaths } from '../i18n/installation';
+import type { Locale } from '../i18n/translations';
+interface Props { lang: Locale }
+const { lang } = Astro.props;
+const t = installationGuide[lang];
+const home = lang === 'es' ? '/' : `/${lang}/`;
+const commands = {
+  debian: `sudo apt update
+sudo apt install git build-essential cmake ninja-build \\
+  qt6-base-dev qt6-serialport-dev qt6-tools-dev qt6-tools-dev-tools \\
+  libssl-dev zlib1g-dev libsecret-tools lrzsz pkg-config \\
+  freerdp3-dev libwinpr3-dev`,
+  fedora: `sudo dnf install git gcc-c++ cmake ninja-build \\
+  qt6-qtbase-devel qt6-qtserialport-devel qt6-qttools-devel \\
+  openssl-devel zlib-devel libsecret lrzsz pkgconf-pkg-config \\
+  freerdp-devel winpr-devel`,
+  clone: `git clone --recurse-submodules https://github.com/Gargadon/banchoxterm.git
+cd banchoxterm`,
+  msvc: `cmake -B build-msvc -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH=C:/Qt/6.8.3/msvc2022_64
+cmake --build build-msvc --config Release
+build-msvc\\Release\\banchoxterm.exe`,
+  build: `cmake -B build -G Ninja
+cmake --build build
+./build/banchoxterm`
+};
+---
+<Layout lang={lang} title={`${t.title} | BanchoXterm`} description={t.description} pagePaths={installationPaths}>
+  <Navbar lang={lang} installationPage />
+  <main class="container guide">
+    <a class="back-link" href={home}>← {t.back}</a>
+    <header class="guide-heading">
+      <span class="section-tag">{t.tag}</span>
+      <h1>{t.title}</h1>
+      <p>{t.description}</p>
+      <nav class="guide-nav" aria-label={t.title}>
+        <a class="btn btn-secondary" href="#windows">Windows</a>
+        <a class="btn btn-secondary" href="#linux">Linux</a>
+        <a class="btn btn-secondary" href="#macos">macOS</a>
+        <a class="btn btn-ghost" href="#first-connection">{t.first}</a>
+      </nav>
+    </header>
+
+    <section id="windows" class="glass-panel guide-section">
+      <h2>{t.windows}</h2>
+      <p>{t.windowsIntro}</p>
+      <a class="btn btn-primary" href="https://github.com/Gargadon/banchoxterm/releases">{t.download} ↗</a>
+      <div class="windows-options">
+        <div><h3>{t.installer}</h3><ol>{t.installerSteps.map(step => <li>{step}</li>)}</ol></div>
+        <div><h3>{t.portable}</h3><ol>{t.portableSteps.map(step => <li>{step}</li>)}</ol></div>
+      </div>
+      <aside class="guide-note">{t.portableNote}</aside>
+      <h3 id="windows-msvc">{t.msvc}</h3>
+      <ul>{t.msvcRequirements.map(requirement => <li>{requirement}</li>)}</ul>
+      <ol>
+        <li>{t.msvcSteps[0]}</li>
+        <li>{t.msvcSteps[1]}<pre><code>{commands.clone}</code></pre></li>
+        <li>{t.msvcSteps[2]}<pre><code>{commands.msvc}</code></pre></li>
+      </ol>
+    </section>
+
+    <section id="linux" class="glass-panel guide-section">
+      <h2>{t.linux}</h2>
+      <p>{t.linuxIntro}</p>
+      <h3>{t.dependencies}</h3>
+      <h4>Ubuntu / Debian</h4>
+      <pre><code>{commands.debian}</code></pre>
+      <h4>Fedora</h4>
+      <pre><code>{commands.fedora}</code></pre>
+      <aside class="guide-note">{t.distroNote}</aside>
+      <h3>{t.clone}</h3>
+      <p>{t.cloneNote}</p>
+      <pre><code>{commands.clone}</code></pre>
+      <h3>{t.build}</h3>
+      <p>{t.buildNote}</p>
+      <pre><code>{commands.build}</code></pre>
+      <h3>{t.credentials}</h3>
+      <p>{t.credentialsNote}</p>
+    </section>
+
+    <section id="macos" class="glass-panel guide-section">
+      <h2>{t.macos}</h2>
+      <p>{t.macosNote}</p>
+    </section>
+
+    <section id="first-connection" class="glass-panel guide-section">
+      <h2>{t.first}</h2>
+      <ol>{t.firstSteps.map(step => <li>{step}</li>)}</ol>
+      <h3>{t.optional}</h3>
+      <p>{t.optionalNote}</p>
+    </section>
+  </main>
+  <Footer lang={lang} />
+</Layout>
+
+<style>
+  .guide { max-width: 1000px; padding-top: 2.5rem; padding-bottom: 5rem; }
+  .back-link { color: var(--accent-cyan); }
+  .back-link:hover { text-decoration: underline; }
+  .guide-heading { padding: 2.5rem 0; }
+  h1 { font-size: clamp(2.2rem, 5vw, 3.5rem); line-height: 1.15; margin: 1rem 0; letter-spacing: -.03em; }
+  .guide-heading p { color: var(--text-muted); max-width: 650px; font-size: 1.1rem; }
+  .guide-nav, .resource-links { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.5rem; }
+  .guide-section { padding: clamp(1.25rem, 4vw, 2.5rem); margin-bottom: 1.5rem; scroll-margin-top: 90px; }
+  h2 { font-size: clamp(1.4rem, 3vw, 1.8rem); margin-bottom: 1rem; line-height: 1.3; }
+  h3 { font-size: 1.15rem; margin: 1.75rem 0 .75rem; }
+  h4 { margin: 1rem 0 .5rem; color: var(--accent-cyan); }
+  p, li, .guide-note { color: var(--text-muted); }
+  p { margin-bottom: 1rem; }
+  ol, ul { padding-left: 1.5rem; }
+  li { padding-left: .25rem; margin: .6rem 0; }
+  li::marker { color: var(--accent-cyan); font-family: var(--font-mono); }
+  .windows-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }
+  .guide-note { background: rgba(6,182,212,.06); border-left: 3px solid var(--accent-cyan); padding: 1rem; margin-top: 1.25rem; }
+  pre { max-width: 100%; overflow-x: auto; background: #06090e; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1.25rem; font-size: .875rem; line-height: 1.7; color: #38bdf8; }
+  a:focus-visible { outline: 2px solid var(--accent-cyan); outline-offset: 4px; }
+  @media (max-width: 640px) { .windows-options { grid-template-columns: 1fr; gap: 0; } }
+</style>

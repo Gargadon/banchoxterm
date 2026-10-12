@@ -40,12 +40,12 @@ struct Session {
     int port = 22;
     QString keyPath;
     QString remoteDirectory;
-    // Optional OpenSSH-style bastion configuration. The transport wiring is
-    // added independently so imported profiles can preserve this data.
+    // Optional manual bastion or a reference to a saved direct SSH profile.
     QString jumpHost;
     QString jumpUser;
     int jumpPort = 22;
     QString jumpKeyPath;
+    QString jumpSessionId;
     bool x11Forwarding = false;
     bool autoReconnect = false;
     bool readOnly = false;

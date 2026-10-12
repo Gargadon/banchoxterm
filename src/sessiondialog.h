@@ -65,9 +65,12 @@ private:
     QCheckBox* m_readOnlyCheck = nullptr;
     QLineEdit* m_keyEdit;
     QLineEdit* m_jumpHostEdit = nullptr;
+    QComboBox* m_jumpSessionCombo = nullptr;
     QSpinBox* m_jumpPortSpin = nullptr;
     QLineEdit* m_jumpUserEdit = nullptr;
     QLineEdit* m_jumpKeyEdit = nullptr;
+    QLineEdit* m_jumpPasswordEdit = nullptr;
+    QCheckBox* m_saveJumpPasswordCheck = nullptr;
 
     // Local
     QLineEdit* m_shellEdit;

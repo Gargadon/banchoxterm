@@ -89,7 +89,8 @@ private:
     void closeSocket();
     bool waitSocket(int timeoutMs);
     int retry(const std::function<int()>& fn);
-    bool authenticateSession(const QString& user, const QString& keyPath, const QString& password);
+    bool authenticateSession(const QString& user, const QString& keyPath, const QString& password,
+                             bool bastion = false);
     void configureSession(LIBSSH2_SESSION* session, bool enableX11);
     static ssize_t proxySend(libssh2_socket_t socket, const void* buffer, size_t length, int flags, void** abstract);
     static ssize_t proxyRecv(libssh2_socket_t socket, void* buffer, size_t length, int flags, void** abstract);
@@ -199,7 +200,6 @@ private:
     QString m_x11Cookie;
     int m_x11Screen = 0;
     QList<X11Bridge*> m_x11Bridges;
-    void* m_abstract = nullptr;
 
     // Tunnels
     QList<TunnelConfig> m_tunnelConfigs;

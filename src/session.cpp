@@ -111,6 +111,7 @@ QJsonObject Session::toJson() const {
     json["jumpUser"] = jumpUser;
     json["jumpPort"] = jumpPort;
     json["jumpKeyPath"] = jumpKeyPath;
+    json["jumpSessionId"] = jumpSessionId;
     json["x11Forwarding"] = x11Forwarding;
     json["autoReconnect"] = autoReconnect;
     json["readOnly"] = readOnly;
@@ -175,6 +176,7 @@ Session Session::fromJson(const QJsonObject& json) {
     s.jumpUser = json["jumpUser"].toString();
     s.jumpPort = json["jumpPort"].toInt(22);
     s.jumpKeyPath = json["jumpKeyPath"].toString();
+    s.jumpSessionId = json["jumpSessionId"].toString();
     s.x11Forwarding = json["x11Forwarding"].toBool(false);
     s.autoReconnect = json["autoReconnect"].toBool(false);
     s.readOnly = json["readOnly"].toBool(false);
@@ -260,6 +262,23 @@ QList<Session> SessionManager::loadSessions() {
         QJsonArray arr = doc.array();
         for (const QJsonValue& val : arr) {
             sessions.append(Session::fromJson(val.toObject()));
+        }
+    }
+    // Refresh the displayed route from the linked profile. Credentials stay
+    // in its keyring entry and are resolved when opening the connection.
+    for (Session& session : sessions) {
+        if (session.jumpSessionId.isEmpty())
+            continue;
+        for (const Session& bastion : sessions) {
+            if (bastion.id == session.jumpSessionId && bastion.id != session.id
+                && bastion.type == SessionType::SSH && bastion.jumpSessionId.isEmpty()
+                && bastion.jumpHost.trimmed().isEmpty()) {
+                session.jumpHost = bastion.host;
+                session.jumpPort = bastion.port;
+                session.jumpUser = bastion.user;
+                session.jumpKeyPath = bastion.keyPath;
+                break;
+            }
         }
     }
     return sessions;

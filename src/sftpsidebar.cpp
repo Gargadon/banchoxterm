@@ -524,7 +524,9 @@ void SftpSidebar::startSession(const Session& session) {
         return;
     }
 
-    m_statusLabel->setText(tr("Connecting to %1...").arg(session.host));
+    m_statusLabel->setText(session.jumpHost.trimmed().isEmpty()
+                               ? tr("Connecting to %1...").arg(session.host)
+                               : tr("Connecting to %1 via bastion %2...").arg(session.host, session.jumpHost.trimmed()));
 
     QString password = Keyring::lookupPassword(session.id);
     emit requestConnect(session.host, session.port, session.user, session.keyPath, password, session.tunnels,
@@ -572,7 +574,9 @@ void SftpSidebar::stopSession() {
 
 void SftpSidebar::onConnectionSuccess() {
     m_isConnected = true;
-    m_statusLabel->setText(tr("Connected"));
+    m_statusLabel->setText(m_currentSession.type == SessionType::SSH && !m_currentSession.jumpHost.trimmed().isEmpty()
+                               ? tr("Connected via bastion %1").arg(m_currentSession.jumpHost.trimmed())
+                               : tr("Connected"));
 
     m_upBtn->setEnabled(true);
     m_pathEdit->setEnabled(true);

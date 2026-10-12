@@ -41,6 +41,9 @@
 #include "mainwindow.h"
 #include "ftpclient.h"
 #include "sshconnection.h"
+#include "sessiondialog.h"
+#include <QComboBox>
+#include <QAbstractItemView>
 #include "sftptransferworker.h"
 #include <qtermwidget.h>
 
@@ -68,6 +71,25 @@ private:
     }
 
 private slots:
+    void testSessionDialogEscape() {
+        for (int type = 0; type < 7; ++type) {
+            for (int action = 0; action < 3; ++action) {
+                Session session;
+                session.type = static_cast<SessionType>(type);
+                SessionDialog dialog(session);
+                QTimer::singleShot(0, &dialog, [&dialog, action]() {
+                    if (action == 0)
+                        QTest::keyClick(&dialog, Qt::Key_Escape);
+                    else if (action == 1)
+                        dialog.findChild<QPushButton*>("cancelButton")->click();
+                    else
+                        dialog.close();
+                });
+                QCOMPARE(dialog.exec(), int(QDialog::Rejected));
+            }
+        }
+    }
+
     void initTestCase() {
         qRegisterMetaType<Session>("Session");
         qRegisterMetaType<SftpFile>("SftpFile");
@@ -102,6 +124,7 @@ private slots:
         original.jumpUser = "jumpadmin";
         original.jumpPort = 2200;
         original.jumpKeyPath = "/home/user/.ssh/jump_rsa";
+        original.jumpSessionId = "saved-bastion";
         original.x11Forwarding = true;
         original.keepAliveSeconds = 30;
         original.cryptCipher = "aes128-ctr,aes256-ctr";
@@ -140,6 +163,7 @@ private slots:
         QCOMPARE(restored.jumpUser, original.jumpUser);
         QCOMPARE(restored.jumpPort, original.jumpPort);
         QCOMPARE(restored.jumpKeyPath, original.jumpKeyPath);
+        QCOMPARE(restored.jumpSessionId, original.jumpSessionId);
         QCOMPARE(restored.x11Forwarding, original.x11Forwarding);
         QCOMPARE(restored.keepAliveSeconds, original.keepAliveSeconds);
         QCOMPARE(restored.cryptCipher, original.cryptCipher);
@@ -151,6 +175,67 @@ private slots:
         QVERIFY(restored.readOnly);
         QCOMPARE(restored.manufacturerProfile, QString("cisco"));
         QCOMPARE(restored.promptPattern, original.promptPattern);
+    }
+
+    void testSavedBastionSelection() {
+        const QList<Session> previous = SessionManager::loadSessions();
+        const auto restore = qScopeGuard([&]() { SessionManager::saveSessions(previous); });
+        Session bastion;
+        bastion.id = "bastion-profile";
+        bastion.name = "Bastion";
+        bastion.type = SessionType::SSH;
+        bastion.host = "bastion.example";
+        bastion.port = 2222;
+        bastion.user = "jump-user";
+        bastion.keyPath = "jump-key";
+        Session target;
+        target.id = "target-profile";
+        target.type = SessionType::SSH;
+        target.host = "target.example";
+        Session nested = target;
+        nested.id = "nested-profile";
+        nested.jumpHost = bastion.host;
+        Session local;
+        local.id = "local-profile";
+        local.type = SessionType::Local;
+        SessionManager::saveSessions({bastion, target, nested, local});
+        {
+            SessionDialog dialog(target);
+            auto* selector = dialog.findChild<QComboBox*>("jumpSessionCombo");
+            QVERIFY(selector);
+            QCOMPARE(selector->count(), 2); // Manual and the direct bastion, excluding self.
+            dialog.show();
+            selector->showPopup();
+            QCoreApplication::processEvents();
+            for (int row = 0; row < 2; ++row) {
+                const QRect item = selector->view()->visualRect(selector->model()->index(row, 0));
+                QVERIFY(!item.isEmpty());
+                QVERIFY(selector->view()->viewport()->rect().contains(item.center()));
+            }
+            selector->hidePopup();
+            selector->setCurrentIndex(selector->findData(bastion.id));
+            const Session selected = dialog.getSession();
+            QCOMPARE(selected.jumpSessionId, bastion.id);
+            QCOMPARE(selected.jumpHost, bastion.host);
+            QCOMPARE(selected.jumpPort, bastion.port);
+            QCOMPARE(selected.jumpUser, bastion.user);
+            QCOMPARE(selected.jumpKeyPath, bastion.keyPath);
+            target = selected;
+        }
+        bastion.host = "updated-bastion.example";
+        bastion.keyPath.clear(); // Agent authentication must remain available.
+        SessionManager::saveSessions({bastion, target});
+        const QList<Session> updated = SessionManager::loadSessions();
+        QCOMPARE(updated.at(1).jumpHost, bastion.host);
+        QVERIFY(updated.at(1).jumpKeyPath.isEmpty());
+        SessionManager::saveSessions({target});
+        SessionDialog missing(target);
+        QCOMPARE(missing.getSession().jumpSessionId, bastion.id);
+        SshConnection connection;
+        QSignalSpy failure(&connection, &SshConnection::connectionFailed);
+        connection.connectToHost(target.host, target.port, target.user, target.keyPath, {}, {}, target.jumpHost,
+                                 target.jumpPort, target.jumpUser, target.jumpKeyPath, target.id);
+        QCOMPARE(failure.count(), 1); // Fail before any socket is opened; never connect directly.
     }
 
     void testSessionFilesArePrivate() {
@@ -1066,6 +1151,44 @@ private slots:
         localSocket.disconnectFromHost();
         remoteSocket.disconnectFromHost();
         socksSocket.disconnectFromHost();
+        connection.disconnectFromHost();
+
+        // Use the local server as both bastion and target to exercise the
+        // nested SSH transport, including its callback context and SFTP.
+        failureSpy.clear();
+        connection.connectToHost(QStringLiteral("127.0.0.1"), port, user, clientKey, QString(), {},
+                                 QStringLiteral("127.0.0.1"), port, user, clientKey);
+        QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() == 3 || !failureSpy.isEmpty(), 5000);
+        QVERIFY2(failureSpy.isEmpty(), qPrintable(failureSpy.first().first().toString()));
+        QCOMPARE(connectedSpy.count(), 3);
+        connection.listDirectory(QStringLiteral("."));
+        QTRY_COMPARE_WITH_TIMEOUT(directorySpy.count(), 3, 3000);
+        QVERIFY(!qvariant_cast<QList<SftpFile>>(directorySpy.last().at(1)).isEmpty());
+        connection.disconnectFromHost();
+
+        const QList<Session> previousProfiles = SessionManager::loadSessions();
+        const auto restoreProfiles = qScopeGuard([&]() { SessionManager::saveSessions(previousProfiles); });
+        Session bastionProfile;
+        bastionProfile.id = "integration-bastion";
+        bastionProfile.type = SessionType::SSH;
+        bastionProfile.host = "127.0.0.1";
+        bastionProfile.port = port;
+        bastionProfile.user = user;
+        bastionProfile.keyPath = clientKey;
+        Session targetProfile;
+        targetProfile.id = "integration-target";
+        targetProfile.type = SessionType::SSH;
+        targetProfile.jumpSessionId = bastionProfile.id;
+        SessionManager::saveSessions({bastionProfile, targetProfile});
+        // A stale snapshot must not override the current saved bastion data.
+        connection.connectToHost(QStringLiteral("127.0.0.1"), port, user, clientKey, QString(), {},
+                                 QStringLiteral("stale.invalid"), 1, QString(), QString(), targetProfile.id);
+        QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() == 4 || !failureSpy.isEmpty(), 5000);
+        QVERIFY2(failureSpy.isEmpty(), qPrintable(failureSpy.first().first().toString()));
+        QCOMPARE(connectedSpy.count(), 4);
+        connection.listDirectory(QStringLiteral("."));
+        QTRY_COMPARE_WITH_TIMEOUT(directorySpy.count(), 4, 3000);
+        QVERIFY(!qvariant_cast<QList<SftpFile>>(directorySpy.last().at(1)).isEmpty());
         connection.disconnectFromHost();
         sshd.terminate();
         QVERIFY(sshd.waitForFinished(3000));
