@@ -1,4 +1,5 @@
 #include "settingsdialog.h"
+#include "terminalappearance.h"
 #include "apppaths.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -112,6 +113,33 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     colorSchemeLayout->addWidget(colorSchemeLabel);
     colorSchemeLayout->addWidget(m_colorSchemeCombo);
     appLayout->addLayout(colorSchemeLayout);
+
+    auto* opacityLayout = new QHBoxLayout();
+    opacityLayout->addWidget(new QLabel(tr("Terminal background opacity:"), appearanceTab));
+    m_backgroundOpacitySpin = new QSpinBox(appearanceTab);
+    m_backgroundOpacitySpin->setObjectName("terminalBackgroundOpacity");
+    m_backgroundOpacitySpin->setRange(0, 100);
+    m_backgroundOpacitySpin->setSuffix(" %");
+    m_backgroundOpacitySpin->setValue(TerminalAppearance::opacityPercent());
+    opacityLayout->addWidget(m_backgroundOpacitySpin);
+    appLayout->addLayout(opacityLayout);
+    m_backgroundBlurCheck = new QCheckBox(tr("Blur behind terminal backgrounds"), appearanceTab);
+    m_backgroundBlurCheck->setObjectName("terminalBackgroundBlur");
+    m_backgroundBlurCheck->setChecked(QSettings().value("terminal/backgroundBlur", false).toBool());
+    m_backgroundBlurCheck->setToolTip(tr("Blur requires Windows 11 and a background opacity below 100%."));
+    auto updateBlur = [this]() {
+        m_backgroundBlurCheck->setEnabled(TerminalAppearance::blurSupported() &&
+                                          m_backgroundOpacitySpin->value() < 100);
+    };
+    connect(m_backgroundOpacitySpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
+            [updateBlur](int) { updateBlur(); });
+    updateBlur();
+    appLayout->addWidget(m_backgroundBlurCheck);
+    auto* opacityNote =
+        new QLabel(tr("Text stays opaque. Restart to enable transparency; further opacity changes apply immediately."),
+                   appearanceTab);
+    opacityNote->setWordWrap(true);
+    appLayout->addWidget(opacityNote);
 
     // Font selector
     auto* fontGroupBox = new QGroupBox(tr("Terminal Typography"), appearanceTab);
@@ -364,6 +392,8 @@ void SettingsDialog::saveSettings() {
     settings.setValue("editor/useCustom", m_useCustomEditor);
     settings.setValue("editor/customPath", m_customEditorPath);
     settings.setValue("terminal/colorScheme", m_colorScheme);
+    settings.setValue("terminal/backgroundOpacity", m_backgroundOpacitySpin->value());
+    settings.setValue("terminal/backgroundBlur", m_backgroundBlurCheck->isChecked());
     settings.setValue("terminal/shellIntegration", m_enableShellIntegration);
     settings.setValue("terminal/loggingEnabled", m_loggingEnabled);
     settings.setValue("terminal/logDirectory", m_logDir);

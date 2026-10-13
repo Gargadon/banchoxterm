@@ -26,6 +26,7 @@
 #include <QPointer>
 #include <QStandardPaths>
 #include <memory>
+#include <cmath>
 #include <vector>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -45,6 +46,16 @@
 #include <QComboBox>
 #include <QAbstractItemView>
 #include "sftptransferworker.h"
+#include "terminalappearance.h"
+#include "settingsdialog.h"
+#include <QSpinBox>
+#include <QCheckBox>
+#include <QScreen>
+#include <QPainter>
+#ifdef Q_OS_WIN
+#include "conpty.h"
+#include <qt_windows.h>
+#endif
 #include <qtermwidget.h>
 
 class ExplicitTlsTestServer : public QTcpServer {
@@ -853,6 +864,7 @@ private slots:
                                                  "UsePAM no\n"
                                                  "StrictModes no\n"
                                                  "PermitRootLogin no\n"
+                                                 "AcceptEnv COLORTERM TERM_PROGRAM\n"
                                                  "Subsystem sftp internal-sftp\n")
                                       .arg(hostKey, authorizedKeys)
                                       .toUtf8();
@@ -930,6 +942,16 @@ private slots:
             QSKIP("libssh2 authentication is unavailable with the local sshd configuration");
         }
         QCOMPARE(failureSpy.count(), 0);
+
+        QSignalSpy colorEnvironmentSpy(&connection, &SshConnection::shellDataReceived);
+        connection.sendToShell(QByteArrayLiteral("printf '\\nBANCHO_COLOR=%s\\n' \"$COLORTERM\"\r"));
+        auto trueColorAnnounced = [&]() {
+            QByteArray received;
+            for (const auto& event : colorEnvironmentSpy)
+                received += event.at(0).toByteArray();
+            return received.contains("BANCHO_COLOR=truecolor");
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(trueColorAnnounced(), 3000);
 
         connection.listDirectory(QStringLiteral("."));
         QTRY_COMPARE_WITH_TIMEOUT(directorySpy.count(), 1, 3000);
@@ -1604,6 +1626,366 @@ private slots:
         QCOMPARE(dataSpy.at(4).at(0).toByteArray(), QByteArray("\x1b[A", 3));
     }
 
+    void testRestoredTerminalSize() {
+#ifdef Q_OS_WIN
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath("console-size.txt");
+        const QByteArray previous = qgetenv("BANCHO_CONSOLE_SIZE_PROBE");
+        const auto restore = qScopeGuard([&]() {
+            if (previous.isNull())
+                qunsetenv("BANCHO_CONSOLE_SIZE_PROBE");
+            else
+                qputenv("BANCHO_CONSOLE_SIZE_PROBE", previous);
+        });
+        qputenv("BANCHO_CONSOLE_SIZE_PROBE", path.toLocal8Bit());
+        Session session;
+        session.type = SessionType::Local;
+        session.shellPath = QDir(QCoreApplication::applicationDirPath()).filePath("conpty_input_probe.exe");
+        QTabWidget tabs;
+        tabs.resize(960, 640);
+        auto* tab = new TerminalTab(session);
+        tabs.addTab(tab, "Restored");
+        tabs.addTab(new QWidget, "Active");
+        tabs.setCurrentIndex(1);
+        tabs.show();
+        QTest::qWait(500);
+        auto* terminal = tab->getTerminalWidget();
+        QVERIFY(terminal);
+        tabs.setCurrentIndex(0);
+        QTest::qWait(100);
+        QKeyEvent key(QEvent::KeyPress, Qt::Key_A, Qt::NoModifier, "a");
+        terminal->sendKeyEvent(&key);
+        const QByteArray expected =
+            QByteArray::number(terminal->screenColumnsCount()) + " " + QByteArray::number(terminal->screenLinesCount());
+        auto consoleSizeMatches = [&]() {
+            QFile file(path);
+            return file.open(QIODevice::ReadOnly) && file.readAll() == expected;
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(consoleSizeMatches(), 5000);
+#else
+        QSKIP("ConPTY is only available on Windows.");
+#endif
+    }
+
+    void testConPtyShiftEnter() {
+#ifdef Q_OS_WIN
+        ConPty console;
+        QVERIFY(
+            console.start(QDir(QCoreApplication::applicationDirPath()).filePath("conpty_input_probe.exe"), {}, 80, 25));
+        QByteArray output;
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("INPUT_READY"), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("COLORTERM=truecolor"), 5000);
+        QVERIFY(console.write(QByteArrayLiteral("\x1b[1;2D")));
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("KEY=37 SHIFT=1"), 5000);
+        QVERIFY(console.write(QByteArrayLiteral("\x1b[13;2u")));
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("KEY=13 SHIFT=1"), 5000);
+#else
+        QSKIP("ConPTY is only available on Windows.");
+#endif
+    }
+
+    void testConPtyColorQueryRoundtrip() {
+#ifdef Q_OS_WIN
+        ConPty console;
+        QVERIFY(console.start(QDir(QCoreApplication::applicationDirPath()).filePath("conpty_input_probe.exe"),
+                              {"--query"}, 80, 25));
+        QTermWidget terminal(0);
+        terminal.startExternal();
+        QByteArray replies;
+        connect(&terminal, &QTermWidget::sendData, &terminal, [&console, &replies](const char* bytes, int size) {
+            replies.append(bytes, size);
+            console.write(QByteArray(bytes, size));
+        });
+        QByteArray output;
+        auto received = [&]() {
+            const QByteArray data = console.read();
+            output += data;
+            terminal.feedData(data);
+            return output.contains("QUERY_REPLY_RECEIVED");
+        };
+        QTRY_VERIFY2_WITH_TIMEOUT(received(), ("output=" + output.toHex() + " replies=" + replies.toHex()).constData(),
+                                  5000);
+#else
+        QSKIP("ConPTY is only available on Windows.");
+#endif
+    }
+
+    void testConPtyRgbRendering() {
+#ifdef Q_OS_WIN
+        ConPty console;
+        QVERIFY(console.start(QDir(QCoreApplication::applicationDirPath()).filePath("conpty_input_probe.exe"),
+                              {"--colors"}, 80, 25));
+        QByteArray output;
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("INPUT_READY"), 5000);
+        QTermWidget terminal(0);
+        terminal.resize(800, 600);
+        terminal.startExternal();
+        terminal.show();
+        terminal.feedData(output);
+        QTest::qWait(50);
+        const QImage image = terminal.grab().toImage();
+        int matchingPixels = 0;
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x)
+                if (image.pixelColor(x, y) == QColor(17, 39, 61))
+                    ++matchingPixels;
+        QVERIFY2(matchingPixels > 100, output.toHex().constData());
+#else
+        QSKIP("ConPTY is only available on Windows.");
+#endif
+    }
+
+    void testTerminalAppearanceSettings() {
+        QSettings settings;
+        const QVariant oldOpacity = settings.value("terminal/backgroundOpacity");
+        const QVariant oldBlur = settings.value("terminal/backgroundBlur");
+        const auto restore = qScopeGuard([&]() {
+            for (const auto& pair : {qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
+                                     qMakePair(QString("terminal/backgroundBlur"), oldBlur)}) {
+                if (pair.second.isValid())
+                    settings.setValue(pair.first, pair.second);
+                else
+                    settings.remove(pair.first);
+            }
+        });
+        settings.setValue("terminal/backgroundOpacity", 100);
+        settings.setValue("terminal/backgroundBlur", false);
+        {
+            SettingsDialog dialog;
+            auto* opacity = dialog.findChild<QSpinBox*>("terminalBackgroundOpacity");
+            auto* blur = dialog.findChild<QCheckBox*>("terminalBackgroundBlur");
+            QVERIFY(opacity && blur);
+            QCOMPARE(opacity->value(), 100);
+            QVERIFY(!blur->isEnabled());
+            opacity->setValue(60);
+            dialog.reject();
+            QCOMPARE(settings.value("terminal/backgroundOpacity").toInt(), 100);
+        }
+        {
+            SettingsDialog dialog;
+            dialog.findChild<QSpinBox*>("terminalBackgroundOpacity")->setValue(0);
+            QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept", Qt::DirectConnection));
+            QCOMPARE(settings.value("terminal/backgroundOpacity").toInt(), 0);
+            QCOMPARE(TerminalAppearance::opacityPercent(), 0);
+        }
+        SettingsDialog reopened;
+        QCOMPARE(reopened.findChild<QSpinBox*>("terminalBackgroundOpacity")->value(), 0);
+    }
+
+    void testNativeTerminalBlur() {
+        if (QApplication::platformName() != "windows" || !TerminalAppearance::blurSupported())
+            QSKIP("Requires a visible Windows 11 desktop compositor.");
+        QSettings settings;
+        const QVariant oldOpacity = settings.value("terminal/backgroundOpacity");
+        const QVariant oldBlur = settings.value("terminal/backgroundBlur");
+        const auto restore = qScopeGuard([&]() {
+            for (const auto& pair : {qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
+                                     qMakePair(QString("terminal/backgroundBlur"), oldBlur)}) {
+                if (pair.second.isValid())
+                    settings.setValue(pair.first, pair.second);
+                else
+                    settings.remove(pair.first);
+            }
+        });
+        settings.setValue("terminal/backgroundOpacity", 50);
+        settings.setValue("terminal/backgroundBlur", false);
+        QPixmap pattern(20, 20);
+        pattern.fill(Qt::red);
+        {
+            QPainter painter(&pattern);
+            painter.fillRect(0, 0, 10, 10, Qt::blue);
+            painter.fillRect(10, 10, 10, 10, Qt::blue);
+        }
+        QWidget background;
+        QPalette palette = background.palette();
+        palette.setBrush(QPalette::Window, pattern);
+        background.setPalette(palette);
+        background.setAutoFillBackground(true);
+        background.setGeometry(100, 100, 900, 600);
+        background.show();
+        QMainWindow foreground;
+        foreground.setWindowTitle("BanchoXterm - native title bar");
+        TerminalAppearance::initializeWindow(&foreground);
+        auto* terminal = new QTermWidget(0, &foreground);
+        foreground.setCentralWidget(terminal);
+        terminal->startExternal();
+        foreground.setGeometry(180, 180, 640, 320);
+        foreground.show();
+        foreground.raise();
+        foreground.activateWindow();
+        TerminalAppearance::refreshWindow(&foreground);
+        QVERIFY(!foreground.windowFlags().testFlag(Qt::FramelessWindowHint));
+#ifdef Q_OS_WIN
+        const HWND hwnd = reinterpret_cast<HWND>(foreground.winId());
+        const auto style = GetWindowLongPtr(hwnd, GWL_STYLE);
+        const LONG_PTR nativeFrame = WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+        QCOMPARE(style & nativeFrame, nativeFrame);
+        RECT outer{}, client{};
+        QVERIFY(GetWindowRect(hwnd, &outer));
+        QVERIFY(GetClientRect(hwnd, &client));
+        QVERIFY(outer.bottom - outer.top > client.bottom - client.top);
+#endif
+        foreground.resize(700, 500);
+        auto capture = [&]() {
+            QTest::qWait(600);
+            const QPoint position = terminal->mapToGlobal(QPoint(100, 100));
+            return foreground.screen()->grabWindow(0, position.x(), position.y(), 120, 120).toImage();
+        };
+        const QImage clear = capture();
+        settings.setValue("terminal/backgroundBlur", true);
+        TerminalAppearance::refreshWindow(&foreground);
+        QVERIFY(foreground.property("terminalBlurActive").toBool());
+        const QImage blurred = capture();
+        clear.save("build/terminal-clear.png");
+        blurred.save("build/terminal-blur.png");
+        QVERIFY(!clear.isNull() && !blurred.isNull());
+        QVERIFY(clear != blurred);
+        auto caption = [&]() {
+            QTest::qWait(300);
+            const QPoint position = foreground.mapToGlobal(QPoint(150, -16));
+            return foreground.screen()->grabWindow(0, position.x(), position.y(), 120, 6).toImage();
+        };
+        const QImage titleBefore = caption();
+        auto luminance = [](const QColor& color) {
+            auto linear = [](double value) {
+                return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+            };
+            return 0.2126 * linear(color.redF()) + 0.7152 * linear(color.greenF()) + 0.0722 * linear(color.blueF());
+        };
+        double darkest = 1.0, lightest = 0.0;
+        for (int y = 0; y < titleBefore.height(); ++y)
+            for (int x = 0; x < titleBefore.width(); ++x) {
+                const double value = luminance(titleBefore.pixelColor(x, y));
+                darkest = qMin(darkest, value);
+                lightest = qMax(lightest, value);
+            }
+        QVERIFY2((lightest + 0.05) / (darkest + 0.05) >= 4.5,
+                 "Native title text must contrast with its opaque caption background.");
+
+        palette.setColor(QPalette::Window, Qt::green);
+        background.setPalette(palette);
+        background.update();
+        const QImage titleAfter = caption();
+        titleBefore.save("build/title-before.png");
+        titleAfter.save("build/title-after.png");
+        QCOMPARE(titleBefore, titleAfter);
+        settings.setValue("terminal/backgroundBlur", false);
+        TerminalAppearance::refreshWindow(&foreground);
+        QCOMPARE(caption(), titleBefore);
+        foreground.showMaximized();
+        QTRY_VERIFY(foreground.isMaximized());
+        foreground.showNormal();
+        QTRY_VERIFY(!foreground.isMaximized());
+    }
+
+    void testTerminalTransparency() {
+        QSettings settings;
+        const QVariant previous = settings.value("terminal/backgroundOpacity");
+        const auto restore = qScopeGuard([&]() {
+            if (previous.isValid())
+                settings.setValue("terminal/backgroundOpacity", previous);
+            else
+                settings.remove("terminal/backgroundOpacity");
+        });
+        settings.setValue("terminal/backgroundOpacity", 50);
+        QMainWindow window;
+        TerminalAppearance::initializeWindow(&window);
+        QVERIFY(window.testAttribute(Qt::WA_TranslucentBackground));
+        auto* terminal = new QTermWidget(0, &window);
+        window.setCentralWidget(terminal);
+        terminal->startExternal();
+        terminal->setBlinkingCursor(false);
+        window.resize(640, 320);
+        window.show();
+        TerminalAppearance::refreshWindow(&window);
+        terminal->feedData(QByteArrayLiteral("\x1b[?25l\x1b[48;2;0;0;0;38;2;255;255;255mMMMMMMMM"));
+        QTest::qWait(50);
+        const QImage image = window.grab().toImage();
+        const QPoint origin = terminal->mapTo(&window, QPoint());
+        int translucentBackground = 0, opaqueText = 0;
+        for (int y = origin.y(); y < origin.y() + 40; ++y)
+            for (int x = origin.x(); x < origin.x() + 180; ++x) {
+                const QColor pixel = image.pixelColor(x, y);
+                if (pixel.alpha() > 0 && pixel.alpha() < 255)
+                    ++translucentBackground;
+                if (pixel.alpha() == 255 && pixel.red() > 200)
+                    ++opaqueText;
+            }
+        QVERIFY(translucentBackground > 100);
+        QVERIFY(opaqueText > 0);
+        settings.setValue("terminal/backgroundOpacity", 100);
+        TerminalAppearance::refreshWindow(&window);
+        QTest::qWait(50);
+        const QImage opaque = window.grab().toImage();
+        QCOMPARE(opaque.pixelColor(origin + QPoint(150, 30)).alpha(), 255);
+    }
+
+    void testTerminalDimRendering() {
+        auto checkDim = [](QWidget& widget, const std::function<void(const QByteArray&)>& feed) {
+            widget.resize(640, 320);
+            widget.show();
+            auto render = [&](const QByteArray& rendition) {
+                feed(QByteArray("\x1b[?25l\x1b[0;48;2;0;0;0;38;2;255;255;255m\x1b[2J\x1b[H") + rendition + "MMMMMMMM");
+                QTest::qWait(50);
+                return widget.grab().toImage();
+            };
+            const QImage normal = render(QByteArray());
+            const QImage dim = render(QByteArrayLiteral("\x1b[2m"));
+            const QImage reset = render(QByteArrayLiteral("\x1b[2;22m"));
+            auto brightness = [](const QImage& image) {
+                qint64 sum = 0;
+                for (int y = 0; y < image.height(); ++y)
+                    for (int x = 0; x < image.width(); ++x) {
+                        const QColor pixel = image.pixelColor(x, y);
+                        sum += pixel.red() + pixel.green() + pixel.blue();
+                    }
+                return sum;
+            };
+            QVERIFY(brightness(dim) < brightness(normal));
+            QCOMPARE(reset, normal);
+        };
+        QTermWidget terminal(0);
+        terminal.setBlinkingCursor(false);
+        terminal.startExternal();
+        checkDim(terminal, [&](const QByteArray& data) { terminal.feedData(data); });
+        VtTerminalWidget fallback;
+        checkDim(fallback, [&](const QByteArray& data) { fallback.writeData(data); });
+    }
+
+    void testTerminalRgbColors() {
+        for (const QByteArray& parameters :
+             {QByteArray("48;2;12;34;56"), QByteArray("48:2:12:34:56"), QByteArray("48:2::12:34:56")}) {
+            QTermWidget terminal(0);
+            terminal.resize(640, 320);
+            terminal.setBlinkingCursor(false);
+            terminal.startExternal();
+            terminal.show();
+            terminal.feedData(QByteArray("\x1b[") + parameters + "m          \x1b[0m");
+            QTest::qWait(50);
+            const QImage image = terminal.grab().toImage();
+            int matchingPixels = 0;
+            for (int y = 0; y < image.height(); ++y)
+                for (int x = 0; x < image.width(); ++x)
+                    if (image.pixelColor(x, y) == QColor(12, 34, 56))
+                        ++matchingPixels;
+            QVERIFY2(matchingPixels > 100, parameters.constData());
+        }
+    }
+
+    void testTerminalColorQueries() {
+        QTermWidget terminal(0);
+        terminal.startExternal();
+        QByteArray response;
+        connect(&terminal, &QTermWidget::sendData, &terminal,
+                [&response](const char* data, int size) { response.append(data, size); });
+        terminal.feedData(QByteArrayLiteral("\x1b]10;?\x07\x1b]11;?\x1b\\"));
+        QTRY_VERIFY(response.contains("\x1b]10;rgb:") && response.contains("\x1b]11;rgb:"));
+        QVERIFY(QRegularExpression(QStringLiteral("rgb:[0-9a-f]{4}/[0-9a-f]{4}/[0-9a-f]{4}"))
+                    .match(QString::fromLatin1(response))
+                    .hasMatch());
+    }
+
     void testShiftEnterEncoding() {
         const QByteArray shiftedEnter("\x1b[13;2u");
         VtTerminalWidget fallback;
@@ -1622,6 +2004,15 @@ private slots:
             QList<QByteArray> data;
             connect(&terminal, &QTermWidget::sendData, &terminal,
                     [&data](const char* bytes, int size) { data.append(QByteArray(bytes, size)); });
+            for (int key : {Qt::Key_Left, Qt::Key_Right, Qt::Key_Up, Qt::Key_Down}) {
+                QKeyEvent shifted(QEvent::KeyPress, key, Qt::ShiftModifier);
+                terminal.sendKeyEvent(&shifted);
+                const char suffix = key == Qt::Key_Left    ? 'D'
+                                    : key == Qt::Key_Right ? 'C'
+                                    : key == Qt::Key_Up    ? 'A'
+                                                           : 'B';
+                QCOMPARE(data.takeFirst(), QByteArray("\x1b[1;2") + suffix);
+            }
             for (int key : {Qt::Key_Return, Qt::Key_Enter}) {
                 for (auto modifiers : {Qt::KeyboardModifiers(Qt::ShiftModifier),
                                        Qt::KeyboardModifiers(Qt::ShiftModifier | Qt::KeypadModifier)}) {

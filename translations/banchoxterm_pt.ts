@@ -2533,6 +2533,22 @@ Deseja continuar?</translation>
         <source>Close</source>
         <translation>Fechar</translation>
     </message>
+    <message>
+        <source>Terminal background opacity:</source>
+        <translation>Opacidade do fundo do terminal:</translation>
+    </message>
+    <message>
+        <source>Blur behind terminal backgrounds</source>
+        <translation>Desfocar atrás do fundo dos terminais</translation>
+    </message>
+    <message>
+        <source>Blur requires Windows 11 and a background opacity below 100%.</source>
+        <translation>O desfoque requer Windows 11 e opacidade do fundo inferior a 100%.</translation>
+    </message>
+    <message>
+        <source>Text stays opaque. Restart to enable transparency; further opacity changes apply immediately.</source>
+        <translation>O texto permanece opaco. Reinicie para ativar a transparência; os ajustes posteriores de opacidade são aplicados imediatamente.</translation>
+    </message>
 </context>
 <context>
     <name>SftpSidebar</name>

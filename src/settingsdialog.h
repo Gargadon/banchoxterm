@@ -69,4 +69,6 @@ private:
     QLineEdit* m_logDirEdit = nullptr;
     QSpinBox* m_parallelTransfersSpin = nullptr;
     QCheckBox* m_masterPasswordCheck = nullptr;
+    QSpinBox* m_backgroundOpacitySpin = nullptr;
+    QCheckBox* m_backgroundBlurCheck = nullptr;
 };

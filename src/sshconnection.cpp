@@ -946,6 +946,11 @@ void SshConnection::openShell() {
         return;
     }
 
+    // Environment requests are optional: servers may restrict AcceptEnv.
+    // Rejection must not prevent opening the interactive shell.
+    retry([this]() { return libssh2_channel_setenv(m_channel, "COLORTERM", "truecolor"); });
+    retry([this]() { return libssh2_channel_setenv(m_channel, "TERM_PROGRAM", "banchoxterm"); });
+
     if (!m_language.isEmpty()) {
         const QByteArray language = m_language.toUtf8();
         rc = retry([this, &language]() {

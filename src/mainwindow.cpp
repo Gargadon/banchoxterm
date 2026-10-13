@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "terminalappearance.h"
 #include "sessionssidebar.h"
 #include "sftpsidebar.h"
 #include "terminaltab.h"
@@ -227,6 +228,7 @@ public:
     explicit DetachedTabWindow(const QString& title, QWidget* parent = nullptr) : QMainWindow(parent) {
         setWindowTitle(title);
         setWindowFlag(Qt::Window, true);
+        TerminalAppearance::initializeWindow(this);
     }
 
     CloseHandler closeHandler;
@@ -266,6 +268,7 @@ private:
 #include <QJsonObject>
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+    TerminalAppearance::initializeWindow(this);
     setWindowIcon(QIcon(":/icons/logo.svg"));
     m_systemPalette = qApp->palette();
     if (QStyle* fusion = QStyleFactory::create("Fusion"))
@@ -1554,6 +1557,8 @@ void MainWindow::applyThemeMode(const QString& mode) {
 void MainWindow::onOpenSettings() {
     SettingsDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
+        for (QWidget* window : QApplication::topLevelWidgets())
+            TerminalAppearance::refreshWindow(window);
         if (dialog.themeMode() != m_themeMode)
             applyThemeMode(dialog.themeMode());
         if (m_lockAction)
@@ -2444,8 +2449,15 @@ void MainWindow::setRibbonExpanded(bool expanded) {
     if (!m_ribbonTabs || !m_ribbonToolBar || !m_ribbonToggle)
         return;
 
-    m_ribbonTabs->setFixedHeight(expanded ? 94 : 30);
-    m_ribbonToolBar->setFixedHeight(expanded ? 98 : 30);
+    // The styled tabs and corner controls can be taller than 30 px, especially
+    // with larger fonts or DPI scaling. Keep the entire header and a small
+    // bottom inset visible when the command pages are collapsed.
+    int headerHeight = m_ribbonTabs->tabBar()->sizeHint().height();
+    if (auto* corner = m_ribbonTabs->cornerWidget(Qt::TopRightCorner))
+        headerHeight = qMax(headerHeight, corner->sizeHint().height());
+    const int tabsHeight = expanded ? 94 : headerHeight + 4;
+    m_ribbonTabs->setFixedHeight(tabsHeight);
+    m_ribbonToolBar->setFixedHeight(tabsHeight + 4);
     m_ribbonToggle->setIcon(QIcon(expanded ? ":/icons/chevron-up.svg" : ":/icons/chevron-down.svg"));
     m_ribbonToggle->setToolTip(m_ribbonPinned ? tr("Collapse Ribbon") : tr("Keep Ribbon expanded"));
 }

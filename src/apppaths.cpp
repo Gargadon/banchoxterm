@@ -47,6 +47,14 @@ QString configDir() {
 }
 
 void applyPortableSettings() {
+    // An explicit profile directory must isolate UI settings as well as
+    // sessions/known hosts (used by tests and internal benchmarks).
+    const QString override = qEnvironmentVariable("BANCHO_CONFIG_DIR").trimmed();
+    if (!override.isEmpty()) {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, override);
+        return;
+    }
     if (!detectPortable())
         return;
 

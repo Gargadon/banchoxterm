@@ -3,6 +3,38 @@
 #ifdef Q_OS_WIN
 
 #include <QDebug>
+#include <QCoreApplication>
+#include <QProcessEnvironment>
+
+namespace {
+struct ConsoleApi {
+    decltype(&CreatePseudoConsole) create = &CreatePseudoConsole;
+    decltype(&ResizePseudoConsole) resize = &ResizePseudoConsole;
+    decltype(&ClosePseudoConsole) close = &ClosePseudoConsole;
+    ConsoleApi() {
+        const QString path = QCoreApplication::applicationDirPath() + QStringLiteral("/conpty.dll");
+        HMODULE module = LoadLibraryExW(reinterpret_cast<LPCWSTR>(path.utf16()), nullptr,
+                                        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!module)
+            return;
+        const auto createFn = reinterpret_cast<decltype(create)>(GetProcAddress(module, "ConptyCreatePseudoConsole"));
+        const auto resizeFn = reinterpret_cast<decltype(resize)>(GetProcAddress(module, "ConptyResizePseudoConsole"));
+        const auto closeFn = reinterpret_cast<decltype(close)>(GetProcAddress(module, "ConptyClosePseudoConsole"));
+        if (!createFn || !resizeFn || !closeFn) {
+            FreeLibrary(module);
+            return;
+        }
+        create = createFn;
+        resize = resizeFn;
+        close = closeFn;
+        // Keep the DLL loaded while any pseudoconsole can still exist.
+    }
+};
+const ConsoleApi& consoleApi() {
+    static const ConsoleApi api;
+    return api;
+}
+} // namespace
 
 DWORD ConPty::exitCode() const {
     if (!m_process)
@@ -42,7 +74,7 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     size.X = static_cast<SHORT>(cols);
     size.Y = static_cast<SHORT>(rows);
 
-    HRESULT hr = CreatePseudoConsole(size, inRead, outWrite, 0, &m_hpc);
+    HRESULT hr = consoleApi().create(size, inRead, outWrite, 0, &m_hpc);
     if (FAILED(hr)) {
         m_startError = static_cast<DWORD>(hr);
         CloseHandle(inRead);
@@ -80,7 +112,7 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     InitializeProcThreadAttributeList(nullptr, 1, 0, &attrSize);
     si.lpAttributeList = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(HeapAlloc(GetProcessHeap(), 0, attrSize));
     if (!si.lpAttributeList) {
-        ClosePseudoConsole(m_hpc);
+        consoleApi().close(m_hpc);
         m_hpc = nullptr;
         CloseHandle(inRead);
         CloseHandle(inWrite);
@@ -90,7 +122,7 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     }
     if (!InitializeProcThreadAttributeList(si.lpAttributeList, 1, 0, &attrSize)) {
         HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
-        ClosePseudoConsole(m_hpc);
+        consoleApi().close(m_hpc);
         m_hpc = nullptr;
         CloseHandle(inRead);
         CloseHandle(inWrite);
@@ -103,7 +135,7 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
         m_startError = GetLastError();
         DeleteProcThreadAttributeList(si.lpAttributeList);
         HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
-        ClosePseudoConsole(m_hpc);
+        consoleApi().close(m_hpc);
         m_hpc = nullptr;
         CloseHandle(inRead);
         CloseHandle(inWrite);
@@ -115,8 +147,19 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     PROCESS_INFORMATION pi;
     memset(&pi, 0, sizeof(pi));
 
-    BOOL ok = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE, EXTENDED_STARTUPINFO_PRESENT, nullptr,
-                             nullptr, &si.StartupInfo, &pi);
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("COLORTERM"), QStringLiteral("truecolor"));
+    environment.insert(QStringLiteral("TERM_PROGRAM"), QStringLiteral("banchoxterm"));
+    if (!environment.contains(QStringLiteral("TERM")))
+        environment.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
+    QStringList entries = environment.toStringList();
+    entries.sort(Qt::CaseInsensitive);
+    QString block = entries.join(QChar('\0'));
+    block.append(QChar('\0'));
+    block.append(QChar('\0'));
+    BOOL ok = CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE,
+                             EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT, block.data(), nullptr,
+                             &si.StartupInfo, &pi);
 
     DeleteProcThreadAttributeList(si.lpAttributeList);
     HeapFree(GetProcessHeap(), 0, si.lpAttributeList);
@@ -125,7 +168,7 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
 
     if (!ok) {
         m_startError = GetLastError();
-        ClosePseudoConsole(m_hpc);
+        consoleApi().close(m_hpc);
         m_hpc = nullptr;
         CloseHandle(inWrite);
         CloseHandle(outRead);
@@ -149,14 +192,47 @@ void ConPty::resize(int cols, int rows) {
     COORD size;
     size.X = static_cast<SHORT>(cols);
     size.Y = static_cast<SHORT>(rows);
-    ResizePseudoConsole(m_hpc, size);
+    consoleApi().resize(m_hpc, size);
 }
 
 bool ConPty::write(const QByteArray& data) {
     if (!m_inputWrite || data.isEmpty())
         return false;
+    QByteArray input = data;
+    // ConPTY reconstructs Windows KEY_EVENT_RECORDs using win32-input-mode,
+    // not CSI-u. Native console applications need the actual modifier state.
+    int virtualKey = 0;
+    int scanCode = 0;
+    int character = 0;
+    if (input == QByteArrayLiteral("\x1b[13;2u")) {
+        virtualKey = VK_RETURN;
+        scanCode = 28;
+        character = 13;
+    } else if (input == QByteArrayLiteral("\x1b[1;2D")) {
+        virtualKey = VK_LEFT;
+        scanCode = 75;
+    } else if (input == QByteArrayLiteral("\x1b[1;2C")) {
+        virtualKey = VK_RIGHT;
+        scanCode = 77;
+    } else if (input == QByteArrayLiteral("\x1b[1;2A")) {
+        virtualKey = VK_UP;
+        scanCode = 72;
+    } else if (input == QByteArrayLiteral("\x1b[1;2B")) {
+        virtualKey = VK_DOWN;
+        scanCode = 80;
+    }
+    if (virtualKey) {
+        const int state = SHIFT_PRESSED | (virtualKey == VK_RETURN ? 0 : ENHANCED_KEY);
+        input = QStringLiteral("\x1b[%1;%2;%3;1;%4;1_\x1b[%1;%2;%3;0;%4;1_")
+                    .arg(virtualKey)
+                    .arg(scanCode)
+                    .arg(character)
+                    .arg(state)
+                    .toLatin1();
+    }
     DWORD written = 0;
-    return WriteFile(m_inputWrite, data.constData(), static_cast<DWORD>(data.size()), &written, nullptr) && written > 0;
+    return WriteFile(m_inputWrite, input.constData(), static_cast<DWORD>(input.size()), &written, nullptr) &&
+           written > 0;
 }
 
 QByteArray ConPty::read() {
@@ -207,7 +283,7 @@ void ConPty::close() {
         m_outputRead = nullptr;
     }
     if (m_hpc) {
-        ClosePseudoConsole(m_hpc);
+        consoleApi().close(m_hpc);
         m_hpc = nullptr;
     }
 }

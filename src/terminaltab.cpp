@@ -1,4 +1,5 @@
 #include "terminaltab.h"
+#include "terminalappearance.h"
 #include "xservermanager.h"
 #include "sshconnection.h"
 #include "keyring.h"
@@ -118,6 +119,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         m_terminal->setHistorySize(m_session.scrollback > 0 ? m_session.scrollback : 5000);
         m_terminal->setScrollBarPosition(QTermWidget::ScrollBarRight);
         QStringList environment;
+        environment << QStringLiteral("COLORTERM=truecolor") << QStringLiteral("TERM_PROGRAM=banchoxterm");
         if (!m_session.terminalType.isEmpty())
             environment << QStringLiteral("TERM=") + m_session.terminalType;
         if (!m_session.language.isEmpty())
@@ -351,11 +353,12 @@ void TerminalTab::resizeEvent(QResizeEvent* event) {
     });
 #endif
 
-    syncTerminalSize();
+    // Child layouts and the terminal grid update after the parent's resize.
+    QTimer::singleShot(0, this, &TerminalTab::syncTerminalSize);
 }
 
 void TerminalTab::syncTerminalSize() {
-    if (!m_terminal)
+    if (!m_terminal || !m_terminal->isVisible())
         return;
 
     const int rows = m_terminal->screenLinesCount();
@@ -574,6 +577,10 @@ void TerminalTab::onSendData(const char* data, int size) {
     }
 
     QByteArray input(data, size);
+    // Remote prompts commonly accept Ctrl+J (LF) for a newline without
+    // submitting. CSI-u requires keyboard-protocol support on the receiver.
+    if (m_session.type == SessionType::SSH && input == QByteArrayLiteral("\x1b[13;2u"))
+        input = QByteArrayLiteral("\n");
     recordTypedInput(input);
     if (m_session.type == SessionType::SSH || m_session.type == SessionType::Telnet ||
         m_session.type == SessionType::Serial) {
@@ -734,6 +741,8 @@ void TerminalTab::updateFontFromSettings() {
 
     if (m_terminal) {
         m_terminal->setTerminalFont(font);
+        const bool translucent = window()->testAttribute(Qt::WA_TranslucentBackground);
+        m_terminal->setTerminalOpacity(translucent ? TerminalAppearance::opacityPercent() / 100.0 : 1.0);
 
         QStringList schemes = QTermWidget::availableColorSchemes();
         if (schemes.contains(colorScheme)) {
@@ -1182,6 +1191,11 @@ void TerminalTab::onSearchPrev() {
 }
 
 bool TerminalTab::eventFilter(QObject* watched, QEvent* event) {
+    if (m_terminal && watched == m_terminal && (event->type() == QEvent::Show || event->type() == QEvent::Resize)) {
+        // Restored background tabs may not resize their parent when activated.
+        // Wait until the terminal itself has processed its final geometry.
+        QTimer::singleShot(0, this, &TerminalTab::syncTerminalSize);
+    }
     if (m_terminal && event->type() == QEvent::KeyPress) {
         auto* widget = qobject_cast<QWidget*>(watched);
         if (widget && (widget == m_terminal || m_terminal->isAncestorOf(widget))) {

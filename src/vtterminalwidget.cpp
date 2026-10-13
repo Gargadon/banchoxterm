@@ -847,6 +847,25 @@ void VtTerminalWidget::keyPressEvent(QKeyEvent* e) {
     }
     }
 
+    if ((modifiers & ~Qt::KeypadModifier) == Qt::ShiftModifier) {
+        switch (e->key()) {
+        case Qt::Key_Left:
+            out = "\x1b[1;2D";
+            break;
+        case Qt::Key_Right:
+            out = "\x1b[1;2C";
+            break;
+        case Qt::Key_Up:
+            out = "\x1b[1;2A";
+            break;
+        case Qt::Key_Down:
+            out = "\x1b[1;2B";
+            break;
+        default:
+            break;
+        }
+    }
+
     if (!out.isEmpty()) {
         emit dataReady(out);
         e->accept();
@@ -1004,6 +1023,8 @@ void VtTerminalWidget::drawCell(QPainter& painter, int x, int y, const Cell& c) 
         std::swap(fg, bg);
     if (c.bold && c.fgSet)
         fg = fg.lighter(130);
+    if (c.dim)
+        fg = QColor((fg.red() + bg.red()) / 2, (fg.green() + bg.green()) / 2, (fg.blue() + bg.blue()) / 2);
 
     if (bg != currentPalette().bg) {
         painter.fillRect(x * m_charWidth, y * m_charHeight, m_charWidth, m_charHeight, bg);

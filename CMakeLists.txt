@@ -164,6 +164,8 @@ set(SOURCES
     src/remoteeditordialog.h
     src/settingsdialog.cpp
     src/settingsdialog.h
+    src/terminalappearance.cpp
+    src/terminalappearance.h
     src/sshconnection.cpp
     src/sshconnection.h
     src/xservermanager.cpp
@@ -197,6 +199,8 @@ else()
 endif()
 
 target_include_directories(banchoxterm PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+file(GENERATE OUTPUT "$<TARGET_FILE_DIR:banchoxterm>/benchmark-build-info.json"
+    CONTENT "{\"configuration\":\"$<CONFIG>\",\"version\":\"${PROJECT_VERSION}\",\"compiler\":\"${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}\",\"qt\":\"${Qt6Core_VERSION}\"}\n")
 target_include_directories(banchoxterm PRIVATE
     ${libsodium_SOURCE_DIR}/src/libsodium/include
     ${BANCHO_SODIUM_GENERATED_INCLUDE}
@@ -483,6 +487,8 @@ add_executable(banchoxterm_tests
     src/remoteeditordialog.h
     src/settingsdialog.cpp
     src/settingsdialog.h
+    src/terminalappearance.cpp
+    src/terminalappearance.h
     src/updater.cpp
     src/updater.h
     src/xservermanager.cpp
@@ -513,6 +519,8 @@ target_link_libraries(banchoxterm_tests PRIVATE qtermwidget6)
 
 if(WIN32)
     target_sources(banchoxterm_tests PRIVATE src/conpty.cpp src/conpty.h)
+    add_executable(conpty_input_probe tests/conpty_input_probe.cpp)
+    add_dependencies(banchoxterm_tests conpty_input_probe)
     target_compile_definitions(banchoxterm_tests PRIVATE
         _WIN32_WINNT=0x0A00
         NTDDI_VERSION=0x0A000006
@@ -529,6 +537,12 @@ if(WIN32)
                 VERBATIM)
         endforeach()
     endif()
+endif()
+
+if(WIN32)
+    include(cmake/ConPtyRuntime.cmake)
+    target_link_libraries(banchoxterm PRIVATE dwmapi)
+    target_link_libraries(banchoxterm_tests PRIVATE dwmapi)
 endif()
 
 if(BANCHO_ENABLE_VNC)

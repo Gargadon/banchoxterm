@@ -23,6 +23,18 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Dark & Light themes** — the default interface adapts to the system or can be forced to light/dark mode
 - **Internationalization** — English, Spanish, and Portuguese
 
+## Terminal appearance
+
+In **Configuration > Appearance**, set **Terminal background opacity** (0-100%)
+and optionally enable background blur on Windows 11 (22H2 or later). Text and
+the cursor remain opaque. Restart once to enable transparency; subsequent
+opacity and blur changes apply to open terminal windows immediately. The native
+window title bar is preserved. Linux transparency requires a compositing desktop; blur is
+currently only available on Windows 11. Settings are global and persist between
+launches. A value of 100% keeps the default opaque appearance.
+
+Internal startup/RAM/CPU measurement instructions are in [benchmarks/README.md](benchmarks/README.md).
+
 ## Install
 
 Pre-built binaries are published on the [Releases](https://github.com/Gargadon/banchoxterm/releases) page:
@@ -116,6 +128,12 @@ cmake --build build
 ```
 
 ### Windows (MSVC)
+
+Windows builds bundle the official Microsoft ConPTY runtime and OpenConsole
+host (downloaded and verified by CMake) so terminal color queries work even
+when the Windows system console host lacks support. Keep `conpty.dll`,
+`OpenConsole.exe`, and `conpty-LICENSE.txt` beside `banchoxterm.exe` when
+distributing a Windows build.
 
 Build with the MSVC toolchain (Visual Studio 2017+ or Build Tools) and a Qt 6
 build configured for MSVC (e.g. `msvc2022_64` from the online installer). From

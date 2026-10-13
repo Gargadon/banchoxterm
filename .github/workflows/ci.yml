@@ -222,10 +222,11 @@ jobs:
             build/Testing/Temporary/LastTest.log
           if-no-files-found: warn
 
-      - name: Stage package (windeployqt + libssh2)
+      - name: Stage Windows package
         run: |
           New-Item -ItemType Directory -Path pkg\banchoxterm -Force
           Copy-Item build\Release\banchoxterm.exe pkg\banchoxterm\
+          Copy-Item -LiteralPath @('build\Release\conpty.dll', 'build\Release\OpenConsole.exe', 'build\Release\conpty-LICENSE.txt') -Destination pkg\banchoxterm\
           Copy-Item build\_deps\libssh2-build\src\Release\libssh2.dll pkg\banchoxterm\ -ErrorAction SilentlyContinue
           Copy-Item build\_deps\libssh2-build\src\libssh2.dll pkg\banchoxterm\ -ErrorAction SilentlyContinue
           Copy-Item -Path "third_party\qtermwidget\lib\color-schemes" -Destination "pkg\banchoxterm\" -Recurse -Force
