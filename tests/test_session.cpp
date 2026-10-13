@@ -1604,6 +1604,38 @@ private slots:
         QCOMPARE(dataSpy.at(4).at(0).toByteArray(), QByteArray("\x1b[A", 3));
     }
 
+    void testShiftEnterEncoding() {
+        const QByteArray shiftedEnter("\x1b[13;2u");
+        VtTerminalWidget fallback;
+        QSignalSpy fallbackSpy(&fallback, &VtTerminalWidget::dataReady);
+        for (int key : {Qt::Key_Return, Qt::Key_Enter}) {
+            QTest::keyClick(&fallback, static_cast<Qt::Key>(key), Qt::ShiftModifier);
+            QCOMPARE(fallbackSpy.takeFirst().at(0).toByteArray(), shiftedEnter);
+            QTest::keyClick(&fallback, static_cast<Qt::Key>(key));
+            QCOMPARE(fallbackSpy.takeFirst().at(0).toByteArray(), QByteArray("\r"));
+        }
+
+        for (const QString& binding : {QStringLiteral("default"), QStringLiteral("linux")}) {
+            QTermWidget terminal(0);
+            terminal.setKeyBindings(binding);
+            terminal.startExternal();
+            QList<QByteArray> data;
+            connect(&terminal, &QTermWidget::sendData, &terminal,
+                    [&data](const char* bytes, int size) { data.append(QByteArray(bytes, size)); });
+            for (int key : {Qt::Key_Return, Qt::Key_Enter}) {
+                for (auto modifiers : {Qt::KeyboardModifiers(Qt::ShiftModifier),
+                                       Qt::KeyboardModifiers(Qt::ShiftModifier | Qt::KeypadModifier)}) {
+                    QKeyEvent shifted(QEvent::KeyPress, key, modifiers, QStringLiteral("\r"));
+                    terminal.sendKeyEvent(&shifted);
+                    QCOMPARE(data.takeFirst(), shiftedEnter);
+                }
+                QKeyEvent plain(QEvent::KeyPress, key, Qt::NoModifier, QStringLiteral("\r"));
+                terminal.sendKeyEvent(&plain);
+                QCOMPARE(data.takeFirst(), QByteArray("\r"));
+            }
+        }
+    }
+
     void testLinuxTerminalDeleteAndBackspaceSequences() {
         QVERIFY(QTermWidget::availableKeyBindings().contains(QStringLiteral("linux")));
 

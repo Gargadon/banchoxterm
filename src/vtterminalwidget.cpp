@@ -788,7 +788,8 @@ void VtTerminalWidget::keyPressEvent(QKeyEvent* e) {
     switch (e->key()) {
     case Qt::Key_Return:
     case Qt::Key_Enter:
-        out = "\r";
+        out = modifiers == Qt::ShiftModifier || modifiers == (Qt::ShiftModifier | Qt::KeypadModifier) ? "\x1b[13;2u"
+                                                                                                      : "\r";
         break;
     case Qt::Key_Backspace:
         out = "\x7f";
