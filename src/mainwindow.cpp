@@ -506,15 +506,21 @@ void MainWindow::setupUi() {
 
     auto addRibbonAction = [this](QHBoxLayout* layout, QAction* action) {
         auto* button = new QToolButton(layout->parentWidget());
-        button->setDefaultAction(action);
+        if (action->menu()) {
+            // Open the menu directly instead of adding its own menu action
+            // as the button's default entry.
+            button->setText(action->text());
+            button->setIcon(action->icon());
+            button->setToolTip(action->toolTip());
+            button->setMenu(action->menu());
+            button->setPopupMode(QToolButton::InstantPopup);
+        } else {
+            button->setDefaultAction(action);
+        }
         button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         button->setIconSize(QSize(20, 20));
         button->setMinimumSize(76, 61);
         button->setAutoRaise(true);
-        if (action->menu()) {
-            button->setMenu(action->menu());
-            button->setPopupMode(QToolButton::InstantPopup);
-        }
         layout->addWidget(button);
         connect(action, &QAction::triggered, this, [this]() {
             if (!m_ribbonPinned)

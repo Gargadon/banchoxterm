@@ -25,12 +25,16 @@
 #include <QStandardPaths>
 #include <QFile>
 #include <QRegularExpression>
+#include <QScrollArea>
+#include <QScreen>
+#include <QTimer>
 #include "masterpasswordmanager.h"
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle(tr("Configuration"));
-    setMinimumSize(640, 600);
-    resize(640, 600);
+    const QSize available = screen()->availableGeometry().size();
+    setMinimumSize(QSize(540, 400).boundedTo(available));
+    resize(QSize(720, 760).boundedTo(available * 0.9));
 
     loadSettings();
 
@@ -41,7 +45,12 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto* tabWidget = new QTabWidget(this);
 
     // 1. Appearance Tab
-    auto* appearanceTab = new QWidget(tabWidget);
+    auto* appearanceScroll = new QScrollArea(tabWidget);
+    appearanceScroll->setObjectName("appearanceScrollArea");
+    appearanceScroll->setWidgetResizable(true);
+    appearanceScroll->setFrameShape(QFrame::NoFrame);
+    auto* appearanceTab = new QWidget(appearanceScroll);
+    appearanceScroll->setWidget(appearanceTab);
     auto* appLayout = new QVBoxLayout(appearanceTab);
     appLayout->setSpacing(15);
     appLayout->setContentsMargins(15, 15, 15, 15);
@@ -126,7 +135,8 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_backgroundBlurCheck = new QCheckBox(tr("Blur behind terminal backgrounds"), appearanceTab);
     m_backgroundBlurCheck->setObjectName("terminalBackgroundBlur");
     m_backgroundBlurCheck->setChecked(QSettings().value("terminal/backgroundBlur", false).toBool());
-    m_backgroundBlurCheck->setToolTip(tr("Blur requires Windows 11 and a background opacity below 100%."));
+    m_backgroundBlurCheck->setToolTip(
+        tr("Blur requires Windows 11 or a supported Linux compositor, and a background opacity below 100%."));
     auto updateBlur = [this]() {
         m_backgroundBlurCheck->setEnabled(TerminalAppearance::blurSupported() &&
                                           m_backgroundOpacitySpin->value() < 100);
@@ -134,6 +144,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     connect(m_backgroundOpacitySpin, QOverload<int>::of(&QSpinBox::valueChanged), this,
             [updateBlur](int) { updateBlur(); });
     updateBlur();
+#ifdef BANCHO_HAVE_KWINDOWSYSTEM
+    // Wayland announces compositor capabilities asynchronously. Recheck while
+    // the dialog is open, including when compositor effects are toggled.
+    auto* blurAvailabilityTimer = new QTimer(this);
+    connect(blurAvailabilityTimer, &QTimer::timeout, this, updateBlur);
+    blurAvailabilityTimer->start(500);
+#endif
     appLayout->addWidget(m_backgroundBlurCheck);
     auto* opacityNote =
         new QLabel(tr("Text stays opaque. Restart to enable transparency; further opacity changes apply immediately."),
@@ -143,6 +160,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 
     // Font selector
     auto* fontGroupBox = new QGroupBox(tr("Terminal Typography"), appearanceTab);
+    fontGroupBox->setObjectName("terminalTypography");
     auto* fontLayout = new QVBoxLayout(fontGroupBox);
     fontLayout->setContentsMargins(12, 12, 12, 10);
     fontLayout->setSpacing(8);
@@ -204,7 +222,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     appLayout->addLayout(transferLayout);
 
     appLayout->addStretch();
-    tabWidget->addTab(appearanceTab, tr("Appearance"));
+    tabWidget->addTab(appearanceScroll, tr("Appearance"));
 
     // 2. Editor Tab
     auto* editorTab = new QWidget(tabWidget);

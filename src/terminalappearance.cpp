@@ -7,6 +7,9 @@
 #include <QApplication>
 #include <qtermwidget.h>
 #include <cmath>
+#ifdef BANCHO_HAVE_KWINDOWSYSTEM
+#include <KWindowEffects>
+#endif
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <dwmapi.h>
@@ -19,7 +22,16 @@ public:
     }
 
 protected:
-    bool eventFilter(QObject*, QEvent* event) override {
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (watched != m_window) {
+            if (event->type() == QEvent::Show || event->type() == QEvent::Hide || event->type() == QEvent::Move ||
+                event->type() == QEvent::Resize) {
+                auto* terminal = qobject_cast<QTermWidget*>(watched);
+                if (terminal && terminal->window() == m_window)
+                    QTimer::singleShot(0, m_window, [this]() { TerminalAppearance::refreshWindow(m_window); });
+            }
+            return false;
+        }
         if (event->type() == QEvent::Show || event->type() == QEvent::Resize ||
             event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate ||
             event->type() == QEvent::ApplicationPaletteChange) {
@@ -56,6 +68,8 @@ bool blurSupported() {
 #ifdef Q_OS_WIN
     const auto version = QOperatingSystemVersion::current();
     return version.majorVersion() >= 10 && version.microVersion() >= 22621;
+#elif defined(BANCHO_HAVE_KWINDOWSYSTEM)
+    return KWindowEffects::isEffectAvailable(KWindowEffects::BlurBehind);
 #else
     return false;
 #endif
@@ -67,6 +81,21 @@ void refreshWindow(QWidget* window) {
         terminal->setTerminalOpacity(translucent ? opacityPercent() / 100.0 : 1.0);
     if (!window->property("terminalGlass").toBool())
         return;
+#ifdef BANCHO_HAVE_KWINDOWSYSTEM
+    if (auto* handle = window->windowHandle()) {
+        QRegion region;
+        for (auto* terminal : window->findChildren<QTermWidget*>()) {
+            if (terminal->isVisible())
+                region += QRect(terminal->mapTo(window, QPoint()), terminal->size());
+        }
+        // KWindowSystem retains the request while Wayland capabilities are
+        // announced asynchronously, and applies it when blur becomes available.
+        const bool blur = translucent && opacityPercent() < 100 && !region.isEmpty() &&
+                          QSettings().value("terminal/backgroundBlur", false).toBool();
+        KWindowEffects::enableBlurBehind(handle, blur, region);
+        window->setProperty("terminalBlurActive", blur);
+    }
+#endif
 #ifdef Q_OS_WIN
     if (QApplication::platformName() == "windows") {
         const HWND hwnd = reinterpret_cast<HWND>(window->winId());
@@ -132,6 +161,12 @@ void initializeWindow(QMainWindow* window) {
     window->setProperty("terminalGlass", true);
     window->setStyleSheet(QStringLiteral("QTabWidget#terminalTabs::pane { background: transparent; }"));
     window->setAttribute(Qt::WA_TranslucentBackground);
-    window->installEventFilter(new GlassWindowFilter(window));
+    auto* filter = new GlassWindowFilter(window);
+#ifdef BANCHO_HAVE_KWINDOWSYSTEM
+    // Terminal geometry also changes when switching tabs or resizing splits.
+    qApp->installEventFilter(filter);
+#else
+    window->installEventFilter(filter);
+#endif
 }
 } // namespace TerminalAppearance

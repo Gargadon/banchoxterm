@@ -17,8 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - name: Install clang-format
         run: sudo apt-get install -y clang-format
       - name: Check formatting
@@ -31,8 +29,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Update QTermWidget to latest remote branch
+        shell: bash
+        run: |
+          git submodule update --init --remote --checkout -- third_party/qtermwidget
+          git -C third_party/qtermwidget log -1 --format='%H %s'
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -78,8 +79,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Update QTermWidget to latest remote branch
+        shell: bash
+        run: |
+          git submodule update --init --remote --checkout -- third_party/qtermwidget
+          git -C third_party/qtermwidget log -1 --format='%H %s'
 
       # Avoid the unreadable WindowsApps Store alias (EACCES) when
       # install-qt-action/aqt inspects Python executables on PATH.

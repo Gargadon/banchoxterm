@@ -26,11 +26,13 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 ## Terminal appearance
 
 In **Configuration > Appearance**, set **Terminal background opacity** (0-100%)
-and optionally enable background blur on Windows 11 (22H2 or later). Text and
+and optionally enable background blur on Windows 11 (22H2 or later) or a
+supported Linux compositor (such as KWin). Text and
 the cursor remain opaque. Restart once to enable transparency; subsequent
 opacity and blur changes apply to open terminal windows immediately. The native
-window title bar is preserved. Linux transparency requires a compositing desktop; blur is
-currently only available on Windows 11. Settings are global and persist between
+window title bar is preserved. Linux transparency requires a compositing desktop.
+Linux blur requires the optional KF6WindowSystem development package at build
+time and compositor support at runtime. Settings are global and persist between
 launches. A value of 100% keeps the default opaque appearance.
 
 Internal startup/RAM/CPU measurement instructions are in [benchmarks/README.md](benchmarks/README.md).

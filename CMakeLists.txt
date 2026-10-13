@@ -6,7 +6,7 @@ if(CMAKE_GENERATOR MATCHES "NMake Makefiles")
     # Use CMake's include scanner instead of parsing the compiler's output.
     set(CMAKE_DEPENDS_USE_COMPILER FALSE)
 endif()
-project(banchoxterm VERSION 1.2.4 LANGUAGES C CXX)
+project(banchoxterm VERSION 1.2.5 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -38,6 +38,10 @@ set(CMAKE_AUTORCC ON)
 
 # Find Qt6 components
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network SerialPort Test LinguistTools)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_package(KF6WindowSystem QUIET)
+endif()
 
 include(FetchContent)
 
@@ -516,6 +520,13 @@ target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_SOURCE_DIR="${CMAKE_
 target_link_libraries(banchoxterm_tests PRIVATE sodium)
 target_link_libraries(banchoxterm_tests PRIVATE libssh2)
 target_link_libraries(banchoxterm_tests PRIVATE qtermwidget6)
+
+if(TARGET KF6::WindowSystem)
+    foreach(bancho_target IN ITEMS banchoxterm banchoxterm_tests)
+        target_link_libraries(${bancho_target} PRIVATE KF6::WindowSystem)
+        target_compile_definitions(${bancho_target} PRIVATE BANCHO_HAVE_KWINDOWSYSTEM)
+    endforeach()
+endif()
 
 if(WIN32)
     target_sources(banchoxterm_tests PRIVATE src/conpty.cpp src/conpty.h)

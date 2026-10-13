@@ -57,6 +57,10 @@
 #include <qt_windows.h>
 #endif
 #include <qtermwidget.h>
+#include <TerminalDisplay.h>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QGroupBox>
 
 class ExplicitTlsTestServer : public QTcpServer {
 protected:
@@ -1759,6 +1763,7 @@ private slots:
             QCOMPARE(opacity->value(), 100);
             QVERIFY(!blur->isEnabled());
             opacity->setValue(60);
+            QCOMPARE(blur->isEnabled(), TerminalAppearance::blurSupported());
             dialog.reject();
             QCOMPARE(settings.value("terminal/backgroundOpacity").toInt(), 100);
         }
@@ -1771,6 +1776,65 @@ private slots:
         }
         SettingsDialog reopened;
         QCOMPARE(reopened.findChild<QSpinBox*>("terminalBackgroundOpacity")->value(), 0);
+    }
+
+    void testSettingsTypographyAccessible() {
+        SettingsDialog dialog;
+        dialog.resize(640, 480);
+        dialog.show();
+        auto* scroll = dialog.findChild<QScrollArea*>("appearanceScrollArea");
+        auto* typography = dialog.findChild<QGroupBox*>("terminalTypography");
+        QVERIFY(scroll && typography);
+        QTRY_VERIFY(scroll->verticalScrollBar()->maximum() > 0);
+        scroll->ensureWidgetVisible(typography);
+        QCoreApplication::processEvents();
+        const QRect typographyRect(typography->mapTo(scroll->viewport(), QPoint()), typography->size());
+        QVERIFY(scroll->viewport()->rect().contains(typographyRect));
+    }
+
+    void testLinuxTerminalBlurToggle() {
+        if (QApplication::platformName() != "wayland" && QApplication::platformName() != "xcb")
+            QSKIP("Requires a Linux compositor with blur support.");
+        QElapsedTimer timer;
+        timer.start();
+        while (!TerminalAppearance::blurSupported() && timer.elapsed() < 1000)
+            QTest::qWait(10);
+        if (!TerminalAppearance::blurSupported())
+            QSKIP("Requires a Linux compositor with blur support.");
+        QSettings settings;
+        const QVariant oldOpacity = settings.value("terminal/backgroundOpacity");
+        const QVariant oldBlur = settings.value("terminal/backgroundBlur");
+        const auto restore = qScopeGuard([&]() {
+            for (const auto& pair : {qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
+                                     qMakePair(QString("terminal/backgroundBlur"), oldBlur)}) {
+                if (pair.second.isValid())
+                    settings.setValue(pair.first, pair.second);
+                else
+                    settings.remove(pair.first);
+            }
+        });
+        settings.setValue("terminal/backgroundOpacity", 50);
+        settings.setValue("terminal/backgroundBlur", true);
+        QMainWindow window;
+        TerminalAppearance::initializeWindow(&window);
+        auto* terminal = new QTermWidget(0, &window);
+        window.setCentralWidget(terminal);
+        window.resize(640, 320);
+        window.show();
+        QTRY_VERIFY(window.property("terminalBlurActive").toBool());
+        settings.setValue("terminal/backgroundBlur", false);
+        TerminalAppearance::refreshWindow(&window);
+        QVERIFY(!window.property("terminalBlurActive").toBool());
+        settings.setValue("terminal/backgroundBlur", true);
+        TerminalAppearance::refreshWindow(&window);
+        QVERIFY(window.property("terminalBlurActive").toBool());
+        terminal->hide();
+        QTRY_VERIFY(!window.property("terminalBlurActive").toBool());
+        terminal->show();
+        QTRY_VERIFY(window.property("terminalBlurActive").toBool());
+        settings.setValue("terminal/backgroundOpacity", 100);
+        TerminalAppearance::refreshWindow(&window);
+        QVERIFY(!window.property("terminalBlurActive").toBool());
     }
 
     void testNativeTerminalBlur() {
@@ -1899,6 +1963,13 @@ private slots:
         window.resize(640, 320);
         window.show();
         TerminalAppearance::refreshWindow(&window);
+        auto* display = terminal->findChild<Konsole::TerminalDisplay*>();
+        QVERIFY(display);
+        QVERIFY(!display->testAttribute(Qt::WA_OpaquePaintEvent));
+        // Changing the color scheme clears the background image. It must
+        // preserve the translucent backing-store configuration.
+        terminal->setColorScheme("DarkPastels");
+        QVERIFY(!display->testAttribute(Qt::WA_OpaquePaintEvent));
         terminal->feedData(QByteArrayLiteral("\x1b[?25l\x1b[48;2;0;0;0;38;2;255;255;255mMMMMMMMM"));
         QTest::qWait(50);
         const QImage image = window.grab().toImage();
@@ -1916,6 +1987,7 @@ private slots:
         QVERIFY(opaqueText > 0);
         settings.setValue("terminal/backgroundOpacity", 100);
         TerminalAppearance::refreshWindow(&window);
+        QVERIFY(display->testAttribute(Qt::WA_OpaquePaintEvent));
         QTest::qWait(50);
         const QImage opaque = window.grab().toImage();
         QCOMPARE(opaque.pixelColor(origin + QPoint(150, 30)).alpha(), 255);

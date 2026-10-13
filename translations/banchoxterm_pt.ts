@@ -2542,8 +2542,8 @@ Deseja continuar?</translation>
         <translation>Desfocar atrás do fundo dos terminais</translation>
     </message>
     <message>
-        <source>Blur requires Windows 11 and a background opacity below 100%.</source>
-        <translation>O desfoque requer Windows 11 e opacidade do fundo inferior a 100%.</translation>
+        <source>Blur requires Windows 11 or a supported Linux compositor, and a background opacity below 100%.</source>
+        <translation>O desfoque requer Windows 11 ou um compositor Linux compatível e opacidade do fundo inferior a 100%.</translation>
     </message>
     <message>
         <source>Text stays opaque. Restart to enable transparency; further opacity changes apply immediately.</source>
