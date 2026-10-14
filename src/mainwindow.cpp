@@ -49,6 +49,7 @@
 #include <QFile>
 #include <QTimer>
 #include <QTextStream>
+#include <QTextBrowser>
 #include "localizedmessagebox.h"
 #include <QMenu>
 #include <QSize>
@@ -115,13 +116,17 @@ void sendMacro(TerminalTab* tab, const QString& macro) {
         QString value;
     };
     QList<MacroStep> steps;
-    const QRegularExpression tokenPattern(QStringLiteral(R"(\{\{(PAUSE:\d{1,6}|EXPECT:[^}]*|RESPOND:[^}]*)\}\})"));
-    QRegularExpressionMatchIterator matches = tokenPattern.globalMatch(macro);
+    // Source line breaks format the macro; only explicit tokens send Enter.
+    QString script = macro;
+    script.remove('\r');
+    script.remove('\n');
+    const QRegularExpression tokenPattern(QStringLiteral(R"(\{\{(PAUSE:[ \t]*\d{1,6}[ \t]*|EXPECT:[^}]*|RESPOND:[^}]*)\}\})"));
+    QRegularExpressionMatchIterator matches = tokenPattern.globalMatch(script);
     int offset = 0;
     while (matches.hasNext()) {
         const QRegularExpressionMatch match = matches.next();
         if (match.capturedStart() > offset)
-            steps.append({MacroStep::Type::Text, macro.mid(offset, match.capturedStart() - offset)});
+            steps.append({MacroStep::Type::Text, script.mid(offset, match.capturedStart() - offset)});
         const QString token = match.captured(1);
         if (token.startsWith(QStringLiteral("PAUSE:")))
             steps.append({MacroStep::Type::Pause, token.mid(6)});
@@ -131,8 +136,8 @@ void sendMacro(TerminalTab* tab, const QString& macro) {
             steps.append({MacroStep::Type::Respond, token.mid(8)});
         offset = match.capturedEnd();
     }
-    if (offset < macro.size())
-        steps.append({MacroStep::Type::Text, macro.mid(offset)});
+    if (offset < script.size())
+        steps.append({MacroStep::Type::Text, script.mid(offset)});
 
     const auto runner = QSharedPointer<std::function<void(int)>>::create();
     const QWeakPointer<std::function<void(int)>> weakRunner = runner;
@@ -152,8 +157,11 @@ void sendMacro(TerminalTab* tab, const QString& macro) {
             if (const auto next = weakRunner.toStrongRef())
                 (*next)(index + 1);
         } else if (step.type == MacroStep::Type::Pause) {
-            QTimer::singleShot(step.value.toInt(), tab, [weakRunner, index]() {
-                if (const auto next = weakRunner.toStrongRef())
+            // Retain the executor until this asynchronous step resumes. Its
+            // own callback keeps only a weak reference, so this creates no cycle.
+            const auto next = weakRunner.toStrongRef();
+            QTimer::singleShot(step.value.toInt(), tab, [next, index]() {
+                if (next)
                     (*next)(index + 1);
             });
         } else {
@@ -171,7 +179,8 @@ void sendMacro(TerminalTab* tab, const QString& macro) {
             timeout->setSingleShot(true);
             timeout->setInterval(30000);
             const auto finish = QSharedPointer<std::function<void(bool)>>::create();
-            *finish = [tab, session, weakRunner, index, completed, connection, timeout](bool matched) {
+            const auto next = weakRunner.toStrongRef();
+            *finish = [tab, session, next, index, completed, connection, timeout](bool matched) {
                 if (*completed)
                     return;
                 *completed = true;
@@ -179,7 +188,7 @@ void sendMacro(TerminalTab* tab, const QString& macro) {
                 timeout->stop();
                 timeout->deleteLater();
                 if (matched) {
-                    if (const auto next = weakRunner.toStrongRef())
+                    if (next)
                         (*next)(index + 1);
                 } else {
                     logMacroEvent(session, QObject::tr("Macro error: EXPECT timed out"));
@@ -2508,6 +2517,63 @@ void MainWindow::onManageMacros() {
     auto* textEdit = new QPlainTextEdit(&dlg);
     textEdit->setPlaceholderText(tr("Text to send (use {{PAUSE:500}} between steps)"));
     lay->addWidget(textEdit);
+    auto* referenceBtn = new QPushButton(tr("Quick reference"), &dlg);
+    connect(referenceBtn, &QPushButton::clicked, &dlg, [&]() {
+        QDialog reference(&dlg);
+        reference.setWindowTitle(tr("Macro quick reference"));
+        reference.resize(720, 620);
+        auto* referenceLayout = new QVBoxLayout(&reference);
+        auto* browser = new QTextBrowser(&reference);
+        QString html = "<html><body>";
+        html += "<p>" +
+                tr("Shell commands are sent as text and depend on the active terminal. The following macro tokens are "
+                   "supported and are case-sensitive.")
+                    .toHtmlEscaped() +
+                "</p>";
+        auto section = [&](const QString& title) {
+            html += "<h3>" + title.toHtmlEscaped() + "</h3><table cellspacing='6' width='100%'><tr><th align='left'>" +
+                    tr("Token").toHtmlEscaped() + "</th><th align='left'>" + tr("Effect").toHtmlEscaped() +
+                    "</th></tr>";
+        };
+        auto row = [&](const QString& token, const QString& description) {
+            html += "<tr><td valign='top'><code>" + token.toHtmlEscaped().replace(", ", "<br>") + "</code></td><td>" +
+                    description.toHtmlEscaped() + "</td></tr>";
+        };
+        section(tr("Keys"));
+        row("{{ENTER}}", tr("Execute the command (Enter)."));
+        row("{{TAB}}, {{ESC}}, {{BACKSPACE}}", tr("Send Tab, Escape or Backspace."));
+        row("{{CTRL+C}}, {{CTRL+D}}, {{CTRL+Z}}", tr("Send the corresponding control character."));
+        row("{{BREAK}}", tr("Send Ctrl+^ (0x1E); this is not a protocol Break signal."));
+        row("{{TELNET-ESC}}", tr("Send Ctrl+] (Telnet escape)."));
+        html += "</table>";
+        section(tr("Sequence"));
+        row("{{PAUSE: 500}}", tr("Wait 500 milliseconds. Accepts 0–999999; spaces around the number are allowed."));
+        row("{{EXPECT:regex}}", tr("Wait up to 30 seconds for a regular expression in new terminal output."));
+        row("{{RESPOND:text}}", tr("Send text immediately; does not add Enter."));
+        html += "</table>";
+        section(tr("Variables"));
+        row("{{HOST}}, {{USER}}, {{PORT}}, {{SESSION}}", tr("Session host, user, port and name."));
+        row("{{REMOTE_DIR}}", tr("Configured remote directory, not the current shell directory."));
+        row("{{SERIAL_PORT}}", tr("Configured serial port."));
+        row("{{ENV:USER}}",
+            tr("Local environment variable (where BanchoXterm runs). Unset variables expand to empty text."));
+        html += "</table><h3>" + tr("Example").toHtmlEscaped() + "</h3><pre>";
+        html += QStringLiteral("echo \"Hello\"{{ENTER}}\n{{PAUSE: 500}}\necho \"Done\"{{ENTER}}").toHtmlEscaped();
+        html += "</pre><p>" +
+                tr("Line breaks only format the macro. Each command needs an explicit {{ENTER}}.").toHtmlEscaped() +
+                "</p>";
+        html += "<p>" +
+                tr("EXPECT and RESPOND cannot contain a closing brace or nested tokens. To send a response with Enter, "
+                   "write plain text followed by {{ENTER}} after EXPECT.")
+                    .toHtmlEscaped() +
+                "</p></body></html>";
+        browser->setHtml(html);
+        referenceLayout->addWidget(browser);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &reference);
+        referenceLayout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, &reference, &QDialog::reject);
+        reference.exec();
+    });
 
     auto* btnRow = new QHBoxLayout();
     auto* addBtn = new QPushButton(tr("Add / Update"), &dlg);
@@ -2520,6 +2586,7 @@ void MainWindow::onManageMacros() {
     btnRow->addWidget(importBtn);
     btnRow->addWidget(exportBtn);
     btnRow->addWidget(logBtn);
+    btnRow->addWidget(referenceBtn);
     lay->addLayout(btnRow);
 
     auto* closeBtn = new QPushButton(tr("Close"), &dlg);

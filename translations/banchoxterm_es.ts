@@ -1189,6 +1189,102 @@ Do you want to continue?</source>
         <source>&lt;h3&gt;BanchoXterm&lt;/h3&gt;&lt;p&gt;A multi-protocol terminal emulator and remote session manager.&lt;/p&gt;&lt;p&gt;Version %1&lt;/p&gt;&lt;p&gt;Supports SSH, SFTP, Telnet, RDP, VNC, Serial and local terminals.&lt;/p&gt;</source>
         <translation type="vanished">&lt;h3&gt;BanchoXterm&lt;/h3&gt;&lt;p&gt;Un emulador de terminal multiprotocolo y gestor de sesiones remotas.&lt;/p&gt;&lt;p&gt;Versión %1&lt;/p&gt;&lt;p&gt;Admite SSH, SFTP, Telnet, RDP, VNC, Serie y terminales locales.&lt;/p&gt;</translation>
     </message>
+    <message>
+        <source>Line breaks only format the macro. Use {{ENTER}} to execute a command.</source>
+        <translation>Los saltos de línea solo dan formato a la macro. Usa {{ENTER}} para ejecutar un comando.</translation>
+    </message>
+    <message>
+        <source>Quick reference</source>
+        <translation>Referencia rápida</translation>
+    </message>
+    <message>
+        <source>Macro quick reference</source>
+        <translation>Referencia rápida de macros</translation>
+    </message>
+    <message>
+        <source>Shell commands are sent as text and depend on the active terminal. The following macro tokens are supported and are case-sensitive.</source>
+        <translation>Los comandos del shell se envían como texto y dependen de la terminal activa. Se admiten los siguientes tokens de macro, que distinguen mayúsculas y minúsculas.</translation>
+    </message>
+    <message>
+        <source>Token</source>
+        <translation>Token</translation>
+    </message>
+    <message>
+        <source>Effect</source>
+        <translation>Efecto</translation>
+    </message>
+    <message>
+        <source>Keys</source>
+        <translation>Teclas</translation>
+    </message>
+    <message>
+        <source>Execute the command (Enter).</source>
+        <translation>Ejecutar el comando (Enter).</translation>
+    </message>
+    <message>
+        <source>Send Tab, Escape or Backspace.</source>
+        <translation>Enviar Tab, Escape o Retroceso.</translation>
+    </message>
+    <message>
+        <source>Send the corresponding control character.</source>
+        <translation>Enviar el carácter de control correspondiente.</translation>
+    </message>
+    <message>
+        <source>Send Ctrl+^ (0x1E); this is not a protocol Break signal.</source>
+        <translation>Enviar Ctrl+^ (0x1E); no es una señal Break del protocolo.</translation>
+    </message>
+    <message>
+        <source>Send Ctrl+] (Telnet escape).</source>
+        <translation>Enviar Ctrl+] (escape de Telnet).</translation>
+    </message>
+    <message>
+        <source>Sequence</source>
+        <translation>Secuencia</translation>
+    </message>
+    <message>
+        <source>Wait 500 milliseconds. Accepts 0–999999; spaces around the number are allowed.</source>
+        <translation>Esperar 500 milisegundos. Acepta 0–999999; se permiten espacios alrededor del número.</translation>
+    </message>
+    <message>
+        <source>Wait up to 30 seconds for a regular expression in new terminal output.</source>
+        <translation>Esperar hasta 30 segundos una expresión regular en la nueva salida de la terminal.</translation>
+    </message>
+    <message>
+        <source>Send text immediately; does not add Enter.</source>
+        <translation>Enviar texto inmediatamente; no añade Enter.</translation>
+    </message>
+    <message>
+        <source>Variables</source>
+        <translation>Variables</translation>
+    </message>
+    <message>
+        <source>Session host, user, port and name.</source>
+        <translation>Host, usuario, puerto y nombre de la sesión.</translation>
+    </message>
+    <message>
+        <source>Configured remote directory, not the current shell directory.</source>
+        <translation>Directorio remoto configurado, no el directorio actual del shell.</translation>
+    </message>
+    <message>
+        <source>Configured serial port.</source>
+        <translation>Puerto serie configurado.</translation>
+    </message>
+    <message>
+        <source>Local environment variable (where BanchoXterm runs). Unset variables expand to empty text.</source>
+        <translation>Variable de entorno local (donde se ejecuta BanchoXterm). Las variables no definidas se sustituyen por texto vacío.</translation>
+    </message>
+    <message>
+        <source>Example</source>
+        <translation>Ejemplo</translation>
+    </message>
+    <message>
+        <source>Line breaks only format the macro. Each command needs an explicit {{ENTER}}.</source>
+        <translation>Los saltos de línea solo dan formato a la macro. Cada comando necesita un {{ENTER}} explícito.</translation>
+    </message>
+    <message>
+        <source>EXPECT and RESPOND cannot contain a closing brace or nested tokens. To send a response with Enter, write plain text followed by {{ENTER}} after EXPECT.</source>
+        <translation>EXPECT y RESPOND no pueden contener una llave de cierre ni tokens anidados. Para enviar una respuesta con Enter, escribe texto normal seguido de {{ENTER}} después de EXPECT.</translation>
+    </message>
 </context>
 <context>
     <name>QMessageBox</name>

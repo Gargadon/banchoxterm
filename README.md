@@ -25,6 +25,38 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Dark & Light themes** — the default interface adapts to the system or can be forced to light/dark mode
 - **Internationalization** — English, Spanish, and Portuguese
 
+## Macros
+
+Create macros in **Macros > Manage Macros**. Line breaks in the editor only
+format the macro; use `{{ENTER}}` explicitly to execute each command.
+`{{PAUSE: 500}}` waits 500 milliseconds before continuing.
+
+```text
+echo "First command"{{ENTER}}
+{{PAUSE: 500}}
+echo "Second command"{{ENTER}}
+```
+
+The **Quick reference** button in the macro manager lists all supported tokens:
+
+| Token | Effect |
+| --- | --- |
+| `{{ENTER}}` | Execute the command. |
+| `{{TAB}}`, `{{ESC}}`, `{{BACKSPACE}}` | Send the corresponding key. |
+| `{{CTRL+C}}`, `{{CTRL+D}}`, `{{CTRL+Z}}` | Send the corresponding control character. |
+| `{{BREAK}}`, `{{TELNET-ESC}}` | Send Ctrl+^ (0x1E) or Ctrl+] (0x1D). BREAK sends a character, not a protocol Break signal. |
+| `{{PAUSE: 500}}` | Wait in milliseconds (0–999999). Spaces around the number are allowed. |
+| `{{EXPECT:regex}}` | Wait up to 30 seconds for a regex in new terminal output. |
+| `{{RESPOND:text}}` | Send text immediately, without adding Enter. |
+| `{{HOST}}`, `{{USER}}`, `{{PORT}}`, `{{SESSION}}` | Insert session details. |
+| `{{REMOTE_DIR}}`, `{{SERIAL_PORT}}` | Insert the configured remote directory or serial port. |
+| `{{ENV:USER}}` | Insert a local environment variable; unset variables produce empty text. |
+
+Tokens are case-sensitive. `EXPECT` and `RESPOND` cannot contain `}` or nested
+tokens. After `EXPECT`, use plain text followed by `{{ENTER}}` to send a response
+and execute it. Shell commands depend on the terminal's shell, rather than a
+macro command whitelist.
+
 ## Terminal appearance
 
 In **Configuration > Appearance**, set **Terminal background opacity** (0-100%)

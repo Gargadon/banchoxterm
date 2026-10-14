@@ -49,6 +49,7 @@
 #include "sftpsidebar.h"
 #include <QTreeWidget>
 #include <QInputDialog>
+#include <QAction>
 #include "terminalappearance.h"
 #include "settingsdialog.h"
 #include <QSpinBox>
@@ -1441,6 +1442,83 @@ private slots:
         terminal.searchText(QString(), true, true, false);
         QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), false);
+    }
+
+    void testMacroAsyncContinuation_data() {
+        QTest::addColumn<QString>("pause");
+        QTest::addColumn<bool>("expect");
+        QTest::addColumn<QString>("lineBreak");
+        QTest::addColumn<bool>("firstEnter");
+        QTest::newRow("compact-pause") << "{{PAUSE:80}}" << false << "" << true;
+        QTest::newRow("spaced-pause") << "{{PAUSE: 80 }}" << false << "" << true;
+        QTest::newRow("pause-and-expect") << "{{PAUSE: 80}}" << true << "" << true;
+        QTest::newRow("formatted-lf") << "{{PAUSE:80}}" << false << "\n" << true;
+        QTest::newRow("formatted-crlf") << "{{PAUSE:80}}" << false << "\r\n" << true;
+        QTest::newRow("no-implicit-enter") << "{{PAUSE:80}}" << false << "\n" << false;
+    }
+
+    void testMacroAsyncContinuation() {
+#ifdef Q_OS_WIN
+        QSKIP("This integration test uses /bin/sh.");
+#else
+        QFETCH(QString, pause);
+        QFETCH(bool, expect);
+        QFETCH(QString, lineBreak);
+        QFETCH(bool, firstEnter);
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString outputPath = dir.filePath("macro-output.txt");
+        const QString name = "macro-async-regression";
+        QSettings settings;
+        const QVariant oldNames = settings.value("macros/names");
+        const QVariant oldTexts = settings.value("macros/texts");
+        const auto restore = qScopeGuard([&]() {
+            settings.setValue("macros/names", oldNames);
+            settings.setValue("macros/texts", oldTexts);
+        });
+        const QString wait = expect ? "{{EXPECT:READY_TO_CONTINUE}}" : QString();
+        const QString macro = QString("printf first > '%1'").arg(outputPath) +
+                              (firstEnter ? "{{ENTER}}" : "") + lineBreak + pause + lineBreak + wait +
+                              (firstEnter ? "" : "{{ENTER}}") + "{{PAUSE:80}}" + lineBreak +
+                              QString("printf second >> '%1'{{ENTER}}").arg(outputPath) + lineBreak + pause + lineBreak +
+                              QString("printf third >> '%1'{{ENTER}}").arg(outputPath);
+        settings.setValue("macros/names", QStringList{name});
+        settings.setValue("macros/texts", QStringList{macro});
+        MainWindow window;
+        Session session;
+        session.id = name;
+        session.name = name;
+        session.type = SessionType::Local;
+        session.shellPath = "/bin/sh";
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
+        auto* tab = window.findChild<TerminalTab*>();
+        QVERIFY(tab);
+        QAction* action = nullptr;
+        for (auto* candidate : window.findChildren<QAction*>())
+            if (candidate->text() == name)
+                action = candidate;
+        QVERIFY(action);
+        auto contents = [&]() {
+            QFile file(outputPath);
+            return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+        };
+        action->trigger();
+        if (!firstEnter) {
+            QTest::qWait(30);
+            QVERIFY(!QFileInfo::exists(outputPath));
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(contents(), QByteArray("first"), 2000);
+        if (expect) {
+            QTest::qWait(150);
+            QCOMPARE(contents(), QByteArray("first"));
+            QVERIFY(QMetaObject::invokeMethod(tab, "terminalDataReceived", Qt::DirectConnection,
+                                              Q_ARG(QByteArray, QByteArray("READY_TO_CONTINUE"))));
+        }
+        QTRY_COMPARE_WITH_TIMEOUT(contents(), QByteArray("firstsecondthird"), 3000);
+        const auto log = QSettings().value("macros/log").toStringList();
+        QVERIFY(!log.isEmpty());
+        QVERIFY(log.first().contains("Macro completed"));
+#endif
     }
 
     void testTerminalTabLifecycle() {
