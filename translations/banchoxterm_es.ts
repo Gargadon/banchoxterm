@@ -152,6 +152,10 @@
         <source>Renamed successfully</source>
         <translation>Renombrado correctamente</translation>
     </message>
+    <message>
+        <source>Directory listing failed: %1</source>
+        <translation>Falló el listado del directorio: %1</translation>
+    </message>
 </context>
 <context>
     <name>MainWindow</name>
@@ -3187,6 +3191,30 @@ Do you want to continue?</source>
         <location filename="../src/sftpsidebar.cpp" line="1378"/>
         <source>Auto-uploading changes to %1...</source>
         <translation>Subiendo cambios automáticamente a %1...</translation>
+    </message>
+    <message>
+        <source>Select local folder</source>
+        <translation>Seleccionar carpeta local</translation>
+    </message>
+    <message>
+        <source>Download selection to local folder</source>
+        <translation>Descargar selección a la carpeta local</translation>
+    </message>
+    <message>
+        <source>Could not create the local folder.</source>
+        <translation>No se pudo crear la carpeta local.</translation>
+    </message>
+    <message>
+        <source>Could not rename the local item.</source>
+        <translation>No se pudo renombrar el elemento local.</translation>
+    </message>
+    <message>
+        <source>Invalid remote file name.</source>
+        <translation>Nombre de archivo remoto no válido.</translation>
+    </message>
+    <message>
+        <source>Cancelling transfer...</source>
+        <translation>Cancelando transferencia...</translation>
     </message>
 </context>
 <context>

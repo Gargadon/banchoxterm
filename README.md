@@ -9,6 +9,8 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Multi-tab terminal** — run multiple sessions side by side
 - **SSH client** — connect with key-based auth, password auth, SSH agent, and X11 forwarding
 - **SFTP sidebar** — browse, upload, download, delete, and edit remote files directly
+  with a flat local file list, folder navigation, creation and renaming, and recursive
+  downloads directly to the open local folder without a destination prompt
 - **FTP/FTPS** — browse, transfer files and folders, drag & drop, pause/cancel,
   automatic reconnect, and configurable TLS validation
 - **Telnet client** — connect to telnet hosts
@@ -166,8 +168,8 @@ without KPty, so local shells are bridged through ConPTY).
   supports TLS 1.2+ or TLS 1.3-only, a custom CA bundle, and an explicitly
   opt-in policy for invalid certificates.
 - **SFTP drag & drop** only works *within* the app: local files dropped on the
-  sidebar are uploaded, and remote files can be dragged out of the sidebar to a
-  chosen local folder. Dragging remote files to another application (e.g.
+  sidebar are uploaded, and remote files can be dragged to the open local
+  folder or onto a local subfolder. Dragging remote files to another application (e.g.
   Explorer) is not supported.
 - **X11 forwarding** on Windows can use an external X server. BanchoXterm
   auto-starts VcXsrv when `vcxsrv.exe` is installed or placed in

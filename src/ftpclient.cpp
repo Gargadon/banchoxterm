@@ -304,6 +304,17 @@ bool FtpClient::configureTlsSocket(QSslSocket* socket, QString* error) const {
     return true;
 }
 
+// An empty data stream may close before the preliminary 150 reply arrives.
+// Keep waiting for the final reply before starting the next queued operation.
+void FtpClient::expectTransferReply(std::function<void(const Reply&)> handler) {
+    expectReply([this, handler](const Reply& reply) {
+        if (reply.code >= 100 && reply.code < 200)
+            expectTransferReply(handler);
+        else
+            handler(reply);
+    });
+}
+
 void FtpClient::listDirectory(const QString& path) {
     if (!m_connected)
         return;
@@ -312,11 +323,14 @@ void FtpClient::listDirectory(const QString& path) {
         auto* buffer = new QByteArray();
         connect(data, &QTcpSocket::readyRead, this, [data, buffer]() { buffer->append(data->readAll()); });
         connect(data, &QTcpSocket::disconnected, this, [this, data, buffer, target]() {
-            expectReply([this, data, buffer, target](const Reply&) {
+            expectTransferReply([this, data, buffer, target](const Reply& reply) {
                 const QByteArray listing = *buffer;
                 delete buffer;
                 data->deleteLater();
-                emit directoryListed(target, parseListing(listing));
+                if (reply.code == 226 || reply.code == 250)
+                    emit directoryListed(target, parseListing(listing));
+                else
+                    emit operationFinished(false, tr("Directory listing failed: %1").arg(reply.lines.join(" ")));
             });
         });
         sendCommand("LIST " + target, [](const Reply&) { /* 150 */ });
@@ -344,7 +358,7 @@ void FtpClient::downloadFile(const QString& remotePath, const QString& localPath
         connect(data, &QTcpSocket::readyRead, this, &FtpClient::pumpDownload);
         emit transferProgress(QFileInfo(remotePath).fileName(), 0, -1);
         connect(data, &QTcpSocket::disconnected, this, [this, data, file, remotePath]() {
-            expectReply([this, data, file, remotePath](const Reply&) {
+            expectTransferReply([this, data, file, remotePath](const Reply&) {
                 file->close();
                 delete file;
                 data->deleteLater();
@@ -393,7 +407,7 @@ void FtpClient::uploadFile(const QString& localPath, const QString& remotePath) 
                 return;
             }
             connect(data, &QTcpSocket::disconnected, this, [this, data, file, localPath, remotePath]() {
-                expectReply([this, data, localPath, remotePath, file](const Reply&) {
+                expectTransferReply([this, data, localPath, remotePath, file](const Reply&) {
                     file->close();
                     file->deleteLater();
                     data->deleteLater();

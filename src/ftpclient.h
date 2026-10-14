@@ -53,6 +53,7 @@ private:
 
     void sendCommand(const QString& cmd, std::function<void(const Reply&)> handler);
     void expectReply(std::function<void(const Reply&)> handler);
+    void expectTransferReply(std::function<void(const Reply&)> handler);
     void openDataConnection(std::function<void(QTcpSocket*)> onConnected);
     void processDirectoryUpload();
     void reportUploadResult(bool success, const QString& message);

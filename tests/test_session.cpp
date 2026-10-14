@@ -46,6 +46,9 @@
 #include <QComboBox>
 #include <QAbstractItemView>
 #include "sftptransferworker.h"
+#include "sftpsidebar.h"
+#include <QTreeWidget>
+#include <QInputDialog>
 #include "terminalappearance.h"
 #include "settingsdialog.h"
 #include <QSpinBox>
@@ -86,6 +89,121 @@ private:
     }
 
 private slots:
+    void testSftpLocalActions() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        SftpSidebar sidebar;
+        auto* path = sidebar.findChild<QLineEdit*>("localPathEdit");
+        auto* tree = sidebar.findChild<QTreeWidget*>("localFileTree");
+        path->setText(dir.path());
+        QVERIFY(QMetaObject::invokeMethod(path, "returnPressed"));
+        QCOMPARE(path->text(), QDir::toNativeSeparators(dir.path()));
+        QFile localFile(dir.filePath("sample.txt"));
+        QVERIFY(localFile.open(QIODevice::WriteOnly));
+        QCOMPARE(localFile.write(QByteArray(2048, 'x')), qint64(2048));
+        localFile.close();
+        QTRY_COMPARE(tree->findItems("sample.txt", Qt::MatchExactly).size(), 1);
+        const QList<SftpFile> remoteFiles = {{"sample.txt", false, 2048, QFileInfo(localFile).lastModified()}};
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDirectoryListed", Qt::DirectConnection,
+                                         Q_ARG(QString, QString("/remote")), Q_ARG(QList<SftpFile>, remoteFiles)));
+        auto* remoteTree = sidebar.findChild<QTreeWidget*>("sftpTree");
+        auto* localItem = tree->findItems("sample.txt", Qt::MatchExactly).first();
+        auto* remoteItem = remoteTree->findItems("sample.txt", Qt::MatchExactly).first();
+        QCOMPARE(tree->columnCount(), remoteTree->columnCount());
+        for (int column = 0; column < tree->columnCount(); ++column) {
+            QCOMPARE(tree->headerItem()->text(column), remoteTree->headerItem()->text(column));
+            QCOMPARE(localItem->text(column), remoteItem->text(column));
+        }
+        QCOMPARE(localItem->icon(0).cacheKey(), remoteItem->icon(0).cacheKey());
+        path->setText(dir.filePath("missing"));
+        QVERIFY(QMetaObject::invokeMethod(path, "returnPressed"));
+        QCOMPARE(path->text(), QDir::toNativeSeparators(dir.path()));
+
+        QTimer::singleShot(0, []() {
+            auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->setTextValue("created");
+            dialog->accept();
+        });
+        sidebar.findChild<QPushButton*>("localNewFolderButton")->click();
+        QVERIFY(QFileInfo(dir.filePath("created")).isDir());
+        QCOMPARE(tree->findItems("created", Qt::MatchExactly).size(), 1);
+        tree->setCurrentItem(tree->findItems("created", Qt::MatchExactly).first());
+        QTimer::singleShot(0, []() {
+            auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->setTextValue("renamed");
+            dialog->accept();
+        });
+        sidebar.findChild<QPushButton*>("localRenameButton")->click();
+        QVERIFY(QFileInfo(dir.filePath("renamed")).isDir());
+        QVERIFY(!QFileInfo::exists(dir.filePath("created")));
+        QCOMPARE(tree->findItems("renamed", Qt::MatchExactly).size(), 1);
+        auto* folderItem = tree->findItems("renamed", Qt::MatchExactly).first();
+        QVERIFY(!tree->rootIsDecorated());
+        QCOMPARE(tree->columnCount(), 3);
+        QCOMPARE(folderItem->text(1), QString("<DIR>"));
+        QVERIFY(QMetaObject::invokeMethod(tree, "itemDoubleClicked", Q_ARG(QTreeWidgetItem*, folderItem), Q_ARG(int, 0)));
+        QCOMPARE(path->text(), QDir::toNativeSeparators(dir.filePath("renamed")));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("."));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QString(".."));
+        sidebar.findChild<QPushButton*>("localUpButton")->click();
+        QCOMPARE(path->text(), QDir::toNativeSeparators(dir.path()));
+        sidebar.findChild<QPushButton*>("localUpButton")->click();
+        QCOMPARE(path->text(), QDir::toNativeSeparators(QFileInfo(dir.path()).absolutePath()));
+    }
+
+    void testSftpDownloadDirectories_data() {
+        QTest::addColumn<bool>("cancel");
+        QTest::addColumn<bool>("remoteAction");
+        QTest::newRow("local-download") << false << false;
+        QTest::newRow("remote-download") << false << true;
+        QTest::newRow("cancel") << true << false;
+    }
+
+    void testSftpDownloadDirectories() {
+        QFETCH(bool, cancel);
+        QFETCH(bool, remoteAction);
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QVERIFY(QDir(dir.path()).mkdir("folder"));
+        SftpSidebar sidebar;
+        auto* path = sidebar.findChild<QLineEdit*>("localPathEdit");
+        path->setText(dir.path());
+        QVERIFY(QMetaObject::invokeMethod(path, "returnPressed"));
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onConnectionSuccess"));
+        auto list = [&sidebar](const QString& remotePath, const QList<SftpFile>& files) {
+            return QMetaObject::invokeMethod(&sidebar, "onDirectoryListed", Qt::DirectConnection,
+                                              Q_ARG(QString, remotePath), Q_ARG(QList<SftpFile>, files));
+        };
+        QVERIFY(list("/remote", {{"folder", true}}));
+        auto* remoteTree = sidebar.findChild<QTreeWidget*>("sftpTree");
+        remoteTree->topLevelItem(2)->setSelected(true);
+        auto* download = sidebar.findChild<QPushButton*>("localDownloadButton");
+        QVERIFY(download->isEnabled());
+        QSignalSpy listings(&sidebar, &SftpSidebar::requestList);
+        if (remoteAction)
+            QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDownloadClicked"));
+        else
+            download->click();
+        QCOMPARE(listings.last().first().toString(), QString("/remote/folder"));
+        QVERIFY(QFileInfo(dir.filePath("folder (1)")).isDir());
+        QVERIFY(!remoteTree->isEnabled());
+        if (cancel)
+            QVERIFY(QMetaObject::invokeMethod(&sidebar, "onCancelQueuedTransfers"));
+        QVERIFY(list("/remote/folder", {{"nested", true}, {".", true}, {"..", true}}));
+        if (cancel) {
+            QVERIFY(!QFileInfo::exists(dir.filePath("folder (1)/nested")));
+        } else {
+            QCOMPARE(listings.last().first().toString(), QString("/remote/folder/nested"));
+            QVERIFY(QFileInfo(dir.filePath("folder (1)/nested")).isDir());
+            QVERIFY(list("/remote/folder/nested", {}));
+        }
+        QVERIFY(remoteTree->isEnabled());
+        QCOMPARE(sidebar.findChild<QLineEdit*>("remotePathEdit")->text(), QString("/remote"));
+        QCOMPARE(listings.last().first().toString(), QString("/remote"));
+    }
+
     void testSessionDialogEscape() {
         for (int type = 0; type < 7; ++type) {
             for (int action = 0; action < 3; ++action) {
@@ -526,7 +644,13 @@ private slots:
                         dataIsUpload = false;
                         controlSocket->write("150 Opening data connection\r\n");
                         if (dataSocket) {
-                            dataSocket->write("-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
+                            if (command == "LIST /tree")
+                                dataSocket->write("drwxr-xr-x 1 user group 0 Jan 01 00:00 folder\r\n");
+                            else if (command == "LIST /tree/folder")
+                                dataSocket->write("drwxr-xr-x 1 user group 0 Jan 01 00:00 empty\r\n"
+                                                  "-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
+                            else if (command != "LIST /tree/folder/empty")
+                                dataSocket->write("-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
                             dataSocket->disconnectFromHost();
                         }
                     } else if (upper.startsWith("RETR")) {
@@ -597,6 +721,31 @@ private slots:
         QCOMPARE(uploadedData, QByteArrayLiteral("upload payload"));
 
         client.disconnectFromHost();
+        QTest::qWait(50);
+        SftpSidebar sidebar;
+        Session session;
+        session.type = SessionType::FTP;
+        session.host = "127.0.0.1";
+        session.port = controlServer.serverPort();
+        session.user = "user";
+        session.remoteDirectory = "/tree";
+        session.ftpTls = false;
+        auto* localPath = sidebar.findChild<QLineEdit*>("localPathEdit");
+        localPath->setText(transferDir.path());
+        QVERIFY(QMetaObject::invokeMethod(localPath, "returnPressed"));
+        sidebar.startSession(session);
+        auto* tree = sidebar.findChild<QTreeWidget*>("sftpTree");
+        QTRY_COMPARE_WITH_TIMEOUT(tree->findItems("folder", Qt::MatchExactly).size(), 1, 3000);
+        tree->findItems("folder", Qt::MatchExactly).first()->setSelected(true);
+        sidebar.findChild<QPushButton*>("localDownloadButton")->click();
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(transferDir.filePath("folder/empty")).isDir(), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(tree->isEnabled() && tree->selectedItems().isEmpty(), 3000);
+        QFile recursiveDownload(transferDir.filePath("folder/test.txt"));
+        QVERIFY(recursiveDownload.open(QIODevice::ReadOnly));
+        QCOMPARE(recursiveDownload.readAll(), QByteArrayLiteral("hello"));
+        QCOMPARE(sidebar.findChild<QLineEdit*>("remotePathEdit")->text(), QString("/tree"));
+        sidebar.stopSession();
+        QTest::qWait(50);
     }
 
     void testFtpReconnectsAfterControlLoss() {
@@ -947,6 +1096,49 @@ private slots:
         }
         QCOMPARE(failureSpy.count(), 0);
 
+        // Exercise the sidebar queue with actual nested files and an empty directory.
+        const QString sourceFolder = serverDir.filePath("sidebar-source");
+        QVERIFY(QDir().mkpath(sourceFolder + "/nested/empty"));
+        QFile sourceFile(sourceFolder + "/nested/payload.txt");
+        QVERIFY(sourceFile.open(QIODevice::WriteOnly));
+        const QByteArray sidebarPayload("recursive sidebar download\n");
+        QCOMPARE(sourceFile.write(sidebarPayload), sidebarPayload.size());
+        sourceFile.close();
+        QTemporaryDir destination;
+        QVERIFY(destination.isValid());
+        {
+            SftpSidebar sidebar;
+            sidebar.setConnection(&connection);
+            Session sidebarSession;
+            sidebarSession.type = SessionType::SSH;
+            sidebarSession.id = "sidebar-download-test";
+            sidebarSession.host = "127.0.0.1";
+            sidebarSession.port = port;
+            sidebarSession.user = user;
+            sidebarSession.keyPath = clientKey;
+            sidebarSession.remoteDirectory = serverDir.path();
+            sidebar.startSession(sidebarSession);
+            auto* localPath = sidebar.findChild<QLineEdit*>("localPathEdit");
+            localPath->setText(destination.path());
+            QVERIFY(QMetaObject::invokeMethod(localPath, "returnPressed"));
+            auto* remoteTree = sidebar.findChild<QTreeWidget*>("sftpTree");
+            const auto matches = remoteTree->findItems("sidebar-source", Qt::MatchExactly);
+            QCOMPARE(matches.size(), 1);
+            matches.first()->setSelected(true);
+            sidebar.findChild<QPushButton*>("localDownloadButton")->click();
+            const QString downloadedPath = destination.filePath("sidebar-source/nested/payload.txt");
+            QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(downloadedPath), 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(destination.filePath("sidebar-source/nested/empty")).isDir(), 10000);
+            QTRY_VERIFY_WITH_TIMEOUT(sidebar.findChild<QPushButton*>("localDownloadButton")->isEnabled() == false &&
+                                        remoteTree->isEnabled(), 10000);
+            QFile downloaded(downloadedPath);
+            QVERIFY(downloaded.open(QIODevice::ReadOnly));
+            QTRY_COMPARE_WITH_TIMEOUT(downloaded.size(), sidebarPayload.size(), 10000);
+            QCOMPARE(downloaded.readAll(), sidebarPayload);
+            QCOMPARE(sidebar.findChild<QLineEdit*>("remotePathEdit")->text(), serverDir.path());
+        }
+
+        directorySpy.clear();
         QSignalSpy colorEnvironmentSpy(&connection, &SshConnection::shellDataReceived);
         connection.sendToShell(QByteArrayLiteral("printf '\\nBANCHO_COLOR=%s\\n' \"$COLORTERM\"\r"));
         auto trueColorAnnounced = [&]() {

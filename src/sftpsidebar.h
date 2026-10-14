@@ -13,8 +13,6 @@ class QLineEdit;
 class QPushButton;
 class QLabel;
 class QProgressBar;
-class QTreeView;
-class QFileSystemModel;
 class QSplitter;
 class FtpClient;
 class QThread;
@@ -50,6 +48,10 @@ private slots:
     void onRefreshClicked();
     void onUploadClicked();
     void onDownloadClicked();
+    void onDownloadToLocalClicked();
+    void onLocalNewFolderClicked();
+    void onLocalRenameClicked();
+    void showLocalContextMenu(const QPoint& pos);
     void onDeleteClicked();
     void onEditClicked();
     void onNewFolderClicked();
@@ -86,6 +88,11 @@ signals:
 
 private:
     void updatePath(const QString& path);
+    void navigateLocalTo(const QString& path);
+    void refreshLocalFiles();
+    void populateFileTree(QTreeWidget* tree, const QString& path, const QList<SftpFile>& files, bool hasParent);
+    QStringList selectedRemotePaths() const;
+    void startDirectoryDownload();
     void setFtpClient(FtpClient* client);
     void detachFtp();
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -97,6 +104,7 @@ private:
         bool isUpload = false;
         bool isDirUpload = false;
         int attempts = 0;
+        bool isDirDownload = false;
     };
     void enqueueUpload(const QStringList& localPaths);
     void enqueueDownload(const QStringList& remotePaths);
@@ -119,9 +127,13 @@ private:
     QPushButton* m_renameBtn;
     QPushButton* m_chmodBtn;
     QTreeWidget* m_treeWidget;
-    QTreeView* m_localTree = nullptr;
-    QFileSystemModel* m_localModel = nullptr;
+    QTreeWidget* m_localTree = nullptr;
+    QFileSystemWatcher* m_localWatcher = nullptr;
+    QString m_localPath;
     QLineEdit* m_localPathEdit = nullptr;
+    QPushButton* m_downloadToLocalBtn = nullptr;
+    bool m_directoryDownloadActive = false;
+    bool m_directoryDownloadCancelled = false;
     QSplitter* m_fileSplitter = nullptr;
     QLabel* m_statusLabel;
     QProgressBar* m_progressBar;
