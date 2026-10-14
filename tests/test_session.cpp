@@ -47,6 +47,7 @@
 #include <QAbstractItemView>
 #include "sftptransferworker.h"
 #include "sftpsidebar.h"
+#include "sessionssidebar.h"
 #include <QTreeWidget>
 #include <QInputDialog>
 #include <QListWidget>
@@ -1761,6 +1762,76 @@ private slots:
         const QString screenshotPath = qEnvironmentVariable("BANCHO_WELCOME_SCREENSHOT");
         if (!screenshotPath.isEmpty())
             QVERIFY(window.grab().save(screenshotPath));
+    }
+
+    void testWelcomeViewAllSessions() {
+#ifdef Q_OS_WIN
+        QSKIP("The saved local session in this test uses /bin/sh.");
+#else
+        const auto originalSessions = SessionManager::loadSessions();
+        QSettings settings;
+        const QVariant oldRecent = settings.value("sessions/recent");
+        const auto restore = qScopeGuard([&]() {
+            SessionManager::saveSessions(originalSessions);
+            settings.setValue("sessions/recent", oldRecent);
+        });
+        Session recent;
+        recent.id = "view-all-recent";
+        recent.name = "Recent local session";
+        recent.type = SessionType::Local;
+        recent.shellPath = "/bin/sh";
+        recent.group = "Test group";
+        Session other = recent;
+        other.id = "view-all-other";
+        other.name = "Other saved session";
+        other.group.clear();
+        Session added = other;
+        added.id = "view-all-added";
+        added.name = "Newly added session";
+        SessionManager::saveSessions({recent, other});
+        settings.setValue("sessions/recent", QStringList{recent.name});
+        MainWindow window;
+        window.show();
+        auto* sidebar = window.findChild<SessionsSidebar*>();
+        QVERIFY(sidebar);
+        auto* welcome = window.findChild<QWidget*>("welcomeScreen");
+        QVERIFY(welcome);
+        auto* viewAll = welcome->findChild<QPushButton*>("welcomeLinkButton");
+        QVERIFY(viewAll);
+        QTimer::singleShot(0, &window, [&]() {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto close = qScopeGuard([&]() { dialog->reject(); });
+            QCOMPARE(dialog->objectName(), QString("allSessionsDialog"));
+            auto* manager = dialog->findChild<SessionsSidebar*>();
+            QVERIFY(manager);
+            auto* tree = manager->findChild<QTreeWidget*>("sessionTree");
+            QVERIFY(tree);
+            QCOMPARE(tree->findItems(recent.name, Qt::MatchExactly | Qt::MatchRecursive).size(), 1);
+            QCOMPARE(tree->findItems(other.name, Qt::MatchExactly | Qt::MatchRecursive).size(), 1);
+            // Exercise the sidebar refresh after changes to the saved session list.
+            SessionManager::saveSessions({recent, other, added});
+        });
+        viewAll->click();
+        auto* sidebarTree = sidebar->findChild<QTreeWidget*>("sessionTree");
+        QCOMPARE(sidebarTree->findItems(added.name, Qt::MatchExactly | Qt::MatchRecursive).size(), 1);
+        QTimer::singleShot(0, &window, [&]() {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            auto close = qScopeGuard([&]() { dialog->reject(); });
+            auto* manager = dialog->findChild<SessionsSidebar*>();
+            auto* tree = manager->findChild<QTreeWidget*>("sessionTree");
+            const auto matches = tree->findItems(other.name, Qt::MatchExactly);
+            QCOMPARE(matches.size(), 1);
+            QVERIFY(QMetaObject::invokeMethod(manager, "onItemDoubleClicked", Qt::DirectConnection,
+                                              Q_ARG(QTreeWidgetItem*, matches.first()), Q_ARG(int, 0)));
+            close.dismiss();
+        });
+        viewAll->click();
+        auto* terminal = window.findChild<TerminalTab*>();
+        QVERIFY(terminal);
+        QCOMPARE(terminal->session().id, other.id);
+#endif
     }
 
     void testMainWindowTabLifecycle() {

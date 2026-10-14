@@ -923,9 +923,36 @@ void MainWindow::setupUi() {
     });
     connect(welcomeLocalButton, &QPushButton::clicked, this, &MainWindow::onNewLocalTerminal);
     connect(allSessionsButton, &QPushButton::clicked, this, [this]() {
-        switchSidebarTab(0);
-        if (m_sidebarContainer)
-            m_sidebarContainer->show();
+        QDialog dialog(this);
+        dialog.setObjectName("allSessionsDialog");
+        dialog.setWindowTitle(tr("All sessions"));
+        dialog.resize(640, 520);
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* sessions = new SessionsSidebar(&dialog);
+        layout->addWidget(sessions);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        Session selectedSession;
+        bool connectSelected = false;
+        bool openLocal = false;
+        connect(sessions, &SessionsSidebar::connectSession, &dialog, [&](const Session& session) {
+            selectedSession = session;
+            connectSelected = true;
+            dialog.accept();
+        });
+        connect(sessions, &SessionsSidebar::newLocalSessionRequested, &dialog, [&]() {
+            openLocal = true;
+            dialog.accept();
+        });
+        connect(sessions, &SessionsSidebar::macrosImported, this, &MainWindow::rebuildMacrosMenu);
+        dialog.exec();
+        // Edits/imports in the full manager must also refresh the sidebar.
+        m_sessionsSidebar->refreshSessions();
+        if (connectSelected)
+            onConnectSession(selectedSession);
+        else if (openLocal)
+            onNewLocalTerminal();
     });
 
     m_tabWidget2->hide();

@@ -1321,6 +1321,10 @@ Do you want to continue?</source>
         <source>&amp;Tools</source>
         <translation>Herramien&amp;tas</translation>
     </message>
+    <message>
+        <source>All sessions</source>
+        <translation>Todas las sesiones</translation>
+    </message>
 </context>
 <context>
     <name>QMessageBox</name>

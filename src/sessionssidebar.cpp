@@ -167,6 +167,10 @@ void SessionsSidebar::onQuickConnect() {
     m_quickConnectEdit->clear();
 }
 
+void SessionsSidebar::refreshSessions() {
+    loadSessions();
+}
+
 void SessionsSidebar::loadSessions() {
     m_treeWidget->clear();
     m_sessions = SessionManager::loadSessions();

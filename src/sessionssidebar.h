@@ -22,6 +22,7 @@ signals:
 
 public slots:
     void onNewSession();
+    void refreshSessions();
 
 private slots:
     void onQuickConnect();
