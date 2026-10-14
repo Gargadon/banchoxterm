@@ -163,6 +163,9 @@ use an installed X server such as Xming or X410.
 
 ### Requirements
 
+CI builds use Qt 6.8.3 on Linux and Windows (x64 and ARM64), pinned by
+`BANCHO_QT_VERSION` in `.github/workflows/ci.yml`.
+
 - CMake 3.16+
 - C++17 compiler (GCC, Clang, or MSVC)
 - Qt 6.6+ (Core, Widgets, Gui, Network, Test, LinguistTools)

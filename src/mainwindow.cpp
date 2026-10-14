@@ -121,7 +121,8 @@ void sendMacro(TerminalTab* tab, const QString& macro) {
     QString script = macro;
     script.remove('\r');
     script.remove('\n');
-    const QRegularExpression tokenPattern(QStringLiteral(R"(\{\{(PAUSE:[ \t]*\d{1,6}[ \t]*|EXPECT:[^}]*|RESPOND:[^}]*)\}\})"));
+    const QRegularExpression tokenPattern(
+        QStringLiteral(R"(\{\{(PAUSE:[ \t]*\d{1,6}[ \t]*|EXPECT:[^}]*|RESPOND:[^}]*)\}\})"));
     QRegularExpressionMatchIterator matches = tokenPattern.globalMatch(script);
     int offset = 0;
     while (matches.hasNext()) {

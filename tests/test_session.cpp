@@ -117,7 +117,7 @@ private slots:
         QTRY_COMPARE(tree->findItems("sample.txt", Qt::MatchExactly).size(), 1);
         const QList<SftpFile> remoteFiles = {{"sample.txt", false, 2048, QFileInfo(localFile).lastModified()}};
         QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDirectoryListed", Qt::DirectConnection,
-                                         Q_ARG(QString, QString("/remote")), Q_ARG(QList<SftpFile>, remoteFiles)));
+                                          Q_ARG(QString, QString("/remote")), Q_ARG(QList<SftpFile>, remoteFiles)));
         auto* remoteTree = sidebar.findChild<QTreeWidget*>("sftpTree");
         auto* localItem = tree->findItems("sample.txt", Qt::MatchExactly).first();
         auto* remoteItem = remoteTree->findItems("sample.txt", Qt::MatchExactly).first();
@@ -155,7 +155,8 @@ private slots:
         QVERIFY(!tree->rootIsDecorated());
         QCOMPARE(tree->columnCount(), 3);
         QCOMPARE(folderItem->text(1), QString("<DIR>"));
-        QVERIFY(QMetaObject::invokeMethod(tree, "itemDoubleClicked", Q_ARG(QTreeWidgetItem*, folderItem), Q_ARG(int, 0)));
+        QVERIFY(
+            QMetaObject::invokeMethod(tree, "itemDoubleClicked", Q_ARG(QTreeWidgetItem*, folderItem), Q_ARG(int, 0)));
         QCOMPARE(path->text(), QDir::toNativeSeparators(dir.filePath("renamed")));
         QCOMPARE(tree->topLevelItem(0)->text(0), QString("."));
         QCOMPARE(tree->topLevelItem(1)->text(0), QString(".."));
@@ -186,7 +187,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(&sidebar, "onConnectionSuccess"));
         auto list = [&sidebar](const QString& remotePath, const QList<SftpFile>& files) {
             return QMetaObject::invokeMethod(&sidebar, "onDirectoryListed", Qt::DirectConnection,
-                                              Q_ARG(QString, remotePath), Q_ARG(QList<SftpFile>, files));
+                                             Q_ARG(QString, remotePath), Q_ARG(QList<SftpFile>, files));
         };
         QVERIFY(list("/remote", {{"folder", true}}));
         auto* remoteTree = sidebar.findChild<QTreeWidget*>("sftpTree");
@@ -1142,7 +1143,8 @@ private slots:
             QTRY_VERIFY_WITH_TIMEOUT(QFileInfo::exists(downloadedPath), 10000);
             QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(destination.filePath("sidebar-source/nested/empty")).isDir(), 10000);
             QTRY_VERIFY_WITH_TIMEOUT(sidebar.findChild<QPushButton*>("localDownloadButton")->isEnabled() == false &&
-                                        remoteTree->isEnabled(), 10000);
+                                         remoteTree->isEnabled(),
+                                     10000);
             QFile downloaded(downloadedPath);
             QVERIFY(downloaded.open(QIODevice::ReadOnly));
             QTRY_COMPARE_WITH_TIMEOUT(downloaded.size(), sidebarPayload.size(), 10000);
@@ -1489,17 +1491,20 @@ private slots:
         QByteArray sent;
         connect(terminal, &QTermWidget::sendData, &window,
                 [&sent](const char* bytes, int size) { sent.append(bytes, size); });
-        for (const auto& pair : {qMakePair(Qt::Key_W, char(0x17)), qMakePair(Qt::Key_F, char(0x06)),
-                                 qMakePair(Qt::Key_Q, char(0x11)), qMakePair(Qt::Key_K, char(0x0b)),
-                                 qMakePair(Qt::Key_C, char(0x03)), qMakePair(Qt::Key_D, char(0x04)),
-                                 qMakePair(Qt::Key_Z, char(0x1a))}) {
+        for (const auto& pair :
+             {qMakePair(Qt::Key_W, char(0x17)), qMakePair(Qt::Key_F, char(0x06)), qMakePair(Qt::Key_Q, char(0x11)),
+              qMakePair(Qt::Key_K, char(0x0b)), qMakePair(Qt::Key_C, char(0x03)), qMakePair(Qt::Key_D, char(0x04)),
+              qMakePair(Qt::Key_Z, char(0x1a))}) {
             sent.clear();
             QTest::keyClick(display, pair.first, Qt::ControlModifier);
             QCOMPARE(sent, QByteArray(1, pair.second));
             QVERIFY(window.isVisible());
             QVERIFY(tab);
         }
-        for (const auto& pair : {qMakePair(Qt::Key_B, QByteArray("\x1b" "b")), qMakePair(Qt::Key_F, QByteArray("\x1b" "f"))}) {
+        for (const auto& pair : {qMakePair(Qt::Key_B, QByteArray("\x1b"
+                                                                 "b")),
+                                 qMakePair(Qt::Key_F, QByteArray("\x1b"
+                                                                 "f"))}) {
             sent.clear();
             QTest::keyClick(display, pair.first, Qt::AltModifier);
             QCOMPARE(sent, pair.second);
@@ -1540,7 +1545,12 @@ private slots:
         QCOMPARE(closeAction->shortcut(), QKeySequence("Ctrl+Shift+W"));
         {
             SettingsDialog dialog(&window);
-            dialog.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->setKeySequence(QKeySequence("F8"));
+            auto* editor = dialog.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab");
+            editor->setKeySequence(QKeySequence("F8, F9"));
+            QCOMPARE(editor->keySequence(), QKeySequence("F8"));
+            editor->clear();
+            QVERIFY(editor->keySequence().isEmpty());
+            editor->setKeySequence(QKeySequence("F8"));
             dialog.reject();
             QCOMPARE(closeAction->shortcut(), QKeySequence("Ctrl+Shift+W"));
         }
@@ -1607,7 +1617,8 @@ private slots:
         }
         // Reopened editors read the saved mappings, not stale widget state.
         SettingsDialog reopened(&window);
-        QCOMPARE(reopened.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->keySequence(), QKeySequence("Ctrl+Shift+W"));
+        QCOMPARE(reopened.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->keySequence(),
+                 QKeySequence("Ctrl+Shift+W"));
     }
 
     void testTerminalShortcutCapture() {
@@ -1768,7 +1779,8 @@ private slots:
             QVERIFY(tab.connection());
             tab.sendSensitiveInputText(QString::fromUtf8(secret));
             // Inject output through the real SSH-to-terminal/log signal path.
-            for (const QByteArray& chunk : {QByteArray("before temporary-"), QByteArray("sensitive-"), QByteArray("value after\n")})
+            for (const QByteArray& chunk :
+                 {QByteArray("before temporary-"), QByteArray("sensitive-"), QByteArray("value after\n")})
                 QVERIFY(QMetaObject::invokeMethod(tab.connection(), "shellDataReceived", Qt::DirectConnection,
                                                   Q_ARG(QByteArray, chunk)));
         }
@@ -1782,7 +1794,9 @@ private slots:
         QVERIFY(!data.contains("temporary-"));
         QVERIFY(!data.contains("sensitive-"));
         QVERIFY(!settings.value("commandHistory/global").toStringList().contains(QString::fromUtf8(secret)));
-        QVERIFY(!settings.value("commandHistory/session/sensitive-log-test").toStringList().contains(QString::fromUtf8(secret)));
+        QVERIFY(!settings.value("commandHistory/session/sensitive-log-test")
+                     .toStringList()
+                     .contains(QString::fromUtf8(secret)));
     }
 
     void testSensitiveMultiInput() {
@@ -1795,7 +1809,8 @@ private slots:
         const QString secret = QString("  printf x >> '%1'  ").arg(outputPath);
         QSettings settings;
         const QStringList historyKeys = {"multiinput/history", "commandHistory/global",
-                                          "commandHistory/session/sensitive-first", "commandHistory/session/sensitive-second"};
+                                         "commandHistory/session/sensitive-first",
+                                         "commandHistory/session/sensitive-second"};
         QMap<QString, QVariant> oldValues;
         for (const QString& key : historyKeys) {
             oldValues.insert(key, settings.value(key));
@@ -1814,7 +1829,8 @@ private slots:
                 session.name = session.id;
                 session.shellPath = "/bin/sh";
                 session.readOnly = i == 2;
-                QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
+                QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection,
+                                                  Q_ARG(Session, session)));
             }
             auto* action = window.findChild<QAction*>("sensitiveMultiInputAction");
             QVERIFY(action);
@@ -1839,8 +1855,8 @@ private slots:
                     auto* targetList = targets->findChild<QListWidget*>();
                     QCOMPARE(targetList->count(), 2); // Read-only session is excluded.
                     for (int row = 0; row < targetList->count(); ++row)
-                        targetList->item(row)->setCheckState(targetList->item(row)->text().contains("first")
-                                                                 ? Qt::Checked : Qt::Unchecked);
+                        targetList->item(row)->setCheckState(
+                            targetList->item(row)->text().contains("first") ? Qt::Checked : Qt::Unchecked);
                     for (auto* label : targets->findChildren<QLabel*>())
                         QVERIFY(!label->text().contains(secret.trimmed()));
                     targets->accept();
@@ -1881,7 +1897,8 @@ private slots:
             for (auto* tab : window.findChildren<TerminalTab*>())
                 if (tab->session().id == "sensitive-first")
                     tab->sendInputText("printf normal > /dev/null");
-            QCOMPARE(settings.value("commandHistory/global").toStringList().first(), QString("printf normal > /dev/null"));
+            QCOMPARE(settings.value("commandHistory/global").toStringList().first(),
+                     QString("printf normal > /dev/null"));
         }
         // A new application window does not recover any sensitive entries from settings.
         MainWindow freshWindow;
@@ -1929,11 +1946,10 @@ private slots:
             settings.setValue("macros/texts", oldTexts);
         });
         const QString wait = expect ? "{{EXPECT:READY_TO_CONTINUE}}" : QString();
-        const QString macro = QString("printf first > '%1'").arg(outputPath) +
-                              (firstEnter ? "{{ENTER}}" : "") + lineBreak + pause + lineBreak + wait +
-                              (firstEnter ? "" : "{{ENTER}}") + "{{PAUSE:80}}" + lineBreak +
-                              QString("printf second >> '%1'{{ENTER}}").arg(outputPath) + lineBreak + pause + lineBreak +
-                              QString("printf third >> '%1'{{ENTER}}").arg(outputPath);
+        const QString macro = QString("printf first > '%1'").arg(outputPath) + (firstEnter ? "{{ENTER}}" : "") +
+                              lineBreak + pause + lineBreak + wait + (firstEnter ? "" : "{{ENTER}}") + "{{PAUSE:80}}" +
+                              lineBreak + QString("printf second >> '%1'{{ENTER}}").arg(outputPath) + lineBreak +
+                              pause + lineBreak + QString("printf third >> '%1'{{ENTER}}").arg(outputPath);
         settings.setValue("macros/names", QStringList{name});
         settings.setValue("macros/texts", QStringList{macro});
         MainWindow window;

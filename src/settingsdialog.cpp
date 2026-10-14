@@ -314,7 +314,12 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     for (const auto& definition : KeyboardShortcuts::definitions()) {
         auto* editor = new QKeySequenceEdit(KeyboardShortcuts::sequence(definition.id), shortcutsTab);
         editor->setObjectName("shortcutEdit_" + definition.id);
-        editor->setMaximumSequenceLength(1);
+        // Qt 6.4 has no maximumSequenceLength property. Keep one combination
+        // using the signal available in all supported Qt versions.
+        connect(editor, &QKeySequenceEdit::keySequenceChanged, editor, [editor](const QKeySequence& sequence) {
+            if (sequence.count() > 1)
+                editor->setKeySequence(QKeySequence(sequence[0]));
+        });
         editor->setClearButtonEnabled(true);
         editor->setAccessibleName(definition.label);
         m_shortcutEditors.insert(definition.id, editor);
