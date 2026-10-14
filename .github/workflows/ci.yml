@@ -51,7 +51,8 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.BANCHO_QT_VERSION }}
-          arch: 'gcc_64'
+          arch: 'linux_gcc_64'
+          setup-python: false
           modules: 'qtserialport'
           cache: true
       - name: Check Qt version
@@ -129,6 +130,7 @@ jobs:
           # Use the same pinned Qt release on Linux and both Windows targets.
           version: ${{ env.BANCHO_QT_VERSION }}
           arch: ${{ matrix.arch.qt_arch }}
+          setup-python: false
           # ActiveQt supplies AxContainer for the embedded Windows RDP client.
           modules: 'qtserialport qtactiveqt'
           cache: true
