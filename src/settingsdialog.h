@@ -1,6 +1,7 @@
 #pragma once
 #include <QDialog>
 #include <QFont>
+#include <QMap>
 
 class QComboBox;
 class QLineEdit;
@@ -8,6 +9,7 @@ class QLabel;
 class QRadioButton;
 class QCheckBox;
 class QSpinBox;
+class QKeySequenceEdit;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -45,6 +47,7 @@ private slots:
 private:
     void loadSettings();
     void saveSettings();
+    bool validateShortcuts();
     void updateFontLabel();
 
     QFont m_font;
@@ -57,6 +60,7 @@ private:
     bool m_loggingEnabled = false;
     QString m_logDir;
 
+    QMap<QString, QKeySequenceEdit*> m_shortcutEditors;
     QLabel* m_fontPreviewLabel = nullptr;
     QComboBox* m_themeCombo = nullptr;
     QComboBox* m_colorSchemeCombo = nullptr;

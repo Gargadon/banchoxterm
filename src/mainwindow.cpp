@@ -6,6 +6,7 @@
 #include "sshconnection.h"
 #include "sessiondialog.h"
 #include "settingsdialog.h"
+#include "keyboardshortcuts.h"
 #include "updater.h"
 #include "masterpasswordmanager.h"
 #include <QVBoxLayout>
@@ -27,7 +28,6 @@
 #include <QStyle>
 #include <QStyleFactory>
 #include <QGuiApplication>
-#include <QShortcut>
 #include <QToolBar>
 #include <QMenuBar>
 #include <QAction>
@@ -444,17 +444,20 @@ void MainWindow::setupUi() {
     toolBar->addSeparator();
 
     addToolbarSection(tr("VIEW"));
-    auto* splitAction = toolBar->addAction(QIcon(":/icons/split.svg"), tr("Split"));
-    splitAction->setToolTip(tr("Toggle split view"));
-    connect(splitAction, &QAction::triggered, this, &MainWindow::toggleSplitView);
+    auto* splitAction = findChild<QAction*>("shortcut_toggleSplit");
+    splitAction->setIcon(QIcon(":/icons/split.svg"));
+    splitAction->setIconText(tr("Split"));
+    toolBar->addAction(splitAction);
 
-    auto* gridAction = toolBar->addAction(QIcon(":/icons/grid.svg"), tr("Grid"));
-    gridAction->setToolTip(tr("Toggle 2x2 grid view"));
-    connect(gridAction, &QAction::triggered, this, &MainWindow::toggleGridView);
+    auto* gridAction = findChild<QAction*>("shortcut_toggleGrid");
+    gridAction->setIcon(QIcon(":/icons/grid.svg"));
+    gridAction->setIconText(tr("Grid"));
+    toolBar->addAction(gridAction);
 
-    auto* moveAction = toolBar->addAction(QIcon(":/icons/move.svg"), tr("Move"));
-    moveAction->setToolTip(tr("Move the current tab to another pane"));
-    connect(moveAction, &QAction::triggered, this, &MainWindow::moveTabToOtherPane);
+    auto* moveAction = findChild<QAction*>("shortcut_moveTab");
+    moveAction->setIcon(QIcon(":/icons/move.svg"));
+    moveAction->setIconText(tr("Move"));
+    toolBar->addAction(moveAction);
 
     toolBar->addSeparator();
 
@@ -550,14 +553,15 @@ void MainWindow::setupUi() {
     addRibbonAction(viewPage.second, splitAction);
     addRibbonAction(viewPage.second, gridAction);
     addRibbonAction(viewPage.second, moveAction);
-    auto* detachRibbonAction = new QAction(QIcon(":/icons/detach.svg"), tr("Detach"), this);
-    detachRibbonAction->setToolTip(tr("Detach current tab"));
-    connect(detachRibbonAction, &QAction::triggered, this, &MainWindow::detachCurrentTab);
+    auto* detachRibbonAction = findChild<QAction*>("shortcut_detachTab");
+    detachRibbonAction->setIcon(QIcon(":/icons/detach.svg"));
+    detachRibbonAction->setIconText(tr("Detach"));
     addRibbonAction(viewPage.second, detachRibbonAction);
 
     auto toolsPage = makeRibbonPage(tr("Tools"));
     addRibbonAction(toolsPage.second, multiAction);
     addRibbonAction(toolsPage.second, m_sensitiveMultiInputAction);
+    addRibbonAction(toolsPage.second, m_captureShortcutsAction);
     addRibbonAction(toolsPage.second, settingsAction);
     addRibbonAction(toolsPage.second, m_copyAction);
     addRibbonAction(toolsPage.second, m_pasteAction);
@@ -570,11 +574,9 @@ void MainWindow::setupUi() {
     });
     addRibbonAction(toolsPage.second, clearRibbonAction);
 
-    auto* searchRibbonAction = new QAction(QIcon(":/icons/server.svg"), tr("Search"), this);
-    searchRibbonAction->setToolTip(tr("Find in all sessions"));
-    searchRibbonAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
-    connect(searchRibbonAction, &QAction::triggered, this, &MainWindow::onGlobalSearch);
-    addRibbonAction(toolsPage.second, searchRibbonAction);
+    m_globalSearchAction->setIcon(QIcon(":/icons/server.svg"));
+    m_globalSearchAction->setIconText(tr("Search all"));
+    addRibbonAction(toolsPage.second, m_globalSearchAction);
 
     auto* themeRibbonAction = new QAction(QIcon(":/icons/palette.svg"), tr("Theme"), this);
     themeRibbonAction->setToolTip(tr("Toggle light and dark theme"));
@@ -673,12 +675,6 @@ void MainWindow::setupUi() {
     ribbonToolBar->addWidget(ribbonTabs);
     m_ribbonTabs = ribbonTabs;
     qApp->installEventFilter(this);
-
-    // Keep Ctrl+K available to terminal applications (for example, nano uses
-    // it to cut the current line). Use the conventional command-palette
-    // shortcut instead.
-    auto* paletteShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P), this);
-    connect(paletteShortcut, &QShortcut::activated, this, &MainWindow::showCommandPalette);
 
     // Main splitter
     m_mainSplitter = new QSplitter(Qt::Horizontal, centralWidget);
@@ -1039,16 +1035,6 @@ void MainWindow::setupUi() {
         }
     });
 
-    // Atajo Ctrl+W para cerrar la pestaña activa
-    auto* closeTabShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_W), this);
-    connect(closeTabShortcut, &QShortcut::activated, this, [this]() {
-        QTabWidget* pane = activePane();
-        int idx = pane ? pane->currentIndex() : -1;
-        if (idx != -1) {
-            onTabCloseRequested(pane, idx);
-        }
-    });
-
     // Status bar remote stats: compact metric cards instead of a single text line.
     m_remoteMonitorWidget = new QFrame(this);
     m_remoteMonitorWidget->setObjectName("remoteMonitorWidget");
@@ -1154,6 +1140,7 @@ void MainWindow::onConnectSession(const Session& session) {
 
     // Auto-reconnect: when a session drops and asks to reconnect, swap this tab
     // for a fresh one with the same session.
+    connect(tab, &TerminalTab::shortcutCaptureChanged, this, [this](bool) { updateSessionContext(); });
     connect(tab, &TerminalTab::reconnectRequested, this, &MainWindow::onReconnectRequested);
     connect(tab, &TerminalTab::promptDetected, this, [this, tab](const QString& prompt) {
         m_diagnosticLogs[tab].append(QStringLiteral("[prompt] ") + prompt);
@@ -1206,6 +1193,8 @@ void MainWindow::onConnectSession(const Session& session) {
 
 void MainWindow::updateSessionContext() {
     TerminalTab* tab = currentTerminalTab();
+    m_captureShortcutsAction->setEnabled(tab && tab->getTerminalWidget() && !tab->session().readOnly);
+    m_captureShortcutsAction->setChecked(tab && tab->capturesApplicationShortcuts());
     if (!tab) {
         m_contextProtocolLabel->setText(tr("NO SESSION"));
         m_contextProtocolLabel->setToolTip(QString());
@@ -1950,30 +1939,33 @@ void MainWindow::setupMenuBar() {
         }
     });
 
+    auto* closeTabAction = fileMenu->addAction(tr("Close session"));
+    KeyboardShortcuts::bindAction(closeTabAction, "closeTab");
+    connect(closeTabAction, &QAction::triggered, this, [this]() {
+        QTabWidget* pane = activePane();
+        const int index = pane ? pane->currentIndex() : -1;
+        if (index >= 0)
+            onTabCloseRequested(pane, index);
+    });
     fileMenu->addSeparator();
 
     auto* exitAction = fileMenu->addAction(tr("E&xit"));
-    exitAction->setShortcut(QKeySequence::Quit);
+    KeyboardShortcuts::bindAction(exitAction, "quit");
     connect(exitAction, &QAction::triggered, this, &QWidget::close);
 
     auto* editMenu = menuBar()->addMenu(tr("&Edit"));
 
     m_copyAction = editMenu->addAction(tr("&Copy"));
     m_copyAction->setIcon(QIcon(":/icons/copy.svg"));
-    // TerminalTab handles Ctrl+Shift+C through its application event filter.
-    // Keeping a global shortcut here would execute the copy path twice when
-    // the focused widget is a QTermWidget terminal.
-    m_copyAction->setToolTip(tr("Copy selection (Ctrl+Shift+C)"));
-    m_copyAction->setStatusTip(tr("Copy selection (Ctrl+Shift+C)"));
+    // The terminal owns keyboard activation. Widget context keeps menu/ribbon
+    // labels in sync without registering a second window-wide clipboard path.
+    m_copyAction->setToolTip(tr("Copy selection"));
+    KeyboardShortcuts::bindAction(m_copyAction, "copy", Qt::WidgetShortcut);
     connect(m_copyAction, &QAction::triggered, this, &MainWindow::onCopy);
 
     m_pasteAction = editMenu->addAction(tr("&Paste"));
     m_pasteAction->setIcon(QIcon(":/icons/paste.svg"));
-    // Same reasoning as Copy: the terminal event filter is the sole keyboard
-    // path, preventing one paste through the filter and another through this
-    // global QAction (which is especially visible with bracketed paste).
-    m_pasteAction->setToolTip(tr("Paste (Ctrl+Shift+V)"));
-    m_pasteAction->setStatusTip(tr("Paste (Ctrl+Shift+V)"));
+    KeyboardShortcuts::bindAction(m_pasteAction, "paste", Qt::WidgetShortcut);
     connect(m_pasteAction, &QAction::triggered, this, &MainWindow::onPaste);
 
     editMenu->addSeparator();
@@ -2104,8 +2096,16 @@ void MainWindow::setupMenuBar() {
 
     editMenu->addSeparator();
 
+    auto* findTerminalAction = editMenu->addAction(tr("Find in current terminal..."));
+    KeyboardShortcuts::bindAction(findTerminalAction, "findTerminal", Qt::WidgetShortcut);
+    connect(findTerminalAction, &QAction::triggered, this, [this]() {
+        if (auto* tab = currentTerminalTab())
+            tab->showTerminalSearch();
+    });
+
     auto* globalSearchAction = editMenu->addAction(tr("Find in &All Sessions..."));
-    globalSearchAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_F));
+    m_globalSearchAction = globalSearchAction;
+    KeyboardShortcuts::bindAction(globalSearchAction, "findAll");
     connect(globalSearchAction, &QAction::triggered, this, &MainWindow::onGlobalSearch);
 
     editMenu->addSeparator();
@@ -2114,27 +2114,27 @@ void MainWindow::setupMenuBar() {
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onOpenSettings);
 
     m_lockAction = new QAction(QIcon(":/icons/gear.svg"), tr("Lock Application"), this);
-    m_lockAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_L));
     m_lockAction->setToolTip(tr("Lock the application using the Master Password"));
+    KeyboardShortcuts::bindAction(m_lockAction, "lockApplication");
     m_lockAction->setEnabled(MasterPasswordManager::instance().isEnabled());
     connect(m_lockAction, &QAction::triggered, this, &MainWindow::lockApplication);
 
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
 
     auto* splitAction = viewMenu->addAction(tr("Toggle &Split View"));
-    splitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_S));
+    KeyboardShortcuts::bindAction(splitAction, "toggleSplit");
     connect(splitAction, &QAction::triggered, this, &MainWindow::toggleSplitView);
 
     auto* gridAction = viewMenu->addAction(tr("Toggle 2x2 &Grid View"));
-    gridAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_G));
+    KeyboardShortcuts::bindAction(gridAction, "toggleGrid");
     connect(gridAction, &QAction::triggered, this, &MainWindow::toggleGridView);
 
     auto* moveTabAction = viewMenu->addAction(tr("Move Tab to &Other Pane"));
-    moveTabAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_M));
+    KeyboardShortcuts::bindAction(moveTabAction, "moveTab");
     connect(moveTabAction, &QAction::triggered, this, &MainWindow::moveTabToOtherPane);
 
     auto* detachTabAction = viewMenu->addAction(tr("&Detach Current Tab"));
-    detachTabAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D));
+    KeyboardShortcuts::bindAction(detachTabAction, "detachTab");
     connect(detachTabAction, &QAction::triggered, this, &MainWindow::detachCurrentTab);
 
     m_multiInputAction = new QAction(QIcon(":/icons/multiinput.svg"), tr("Multi-Input"), this);
@@ -2145,6 +2145,19 @@ void MainWindow::setupMenuBar() {
     auto* toolsMenu = menuBar()->addMenu(tr("&Tools"));
     toolsMenu->addAction(m_multiInputAction);
     toolsMenu->addAction(m_sensitiveMultiInputAction);
+    auto* paletteAction = toolsMenu->addAction(tr("Command palette..."));
+    KeyboardShortcuts::bindAction(paletteAction, "commandPalette");
+    connect(paletteAction, &QAction::triggered, this, &MainWindow::showCommandPalette);
+    m_captureShortcutsAction = new QAction(QIcon(":/icons/terminal.svg"), tr("Send shortcuts to terminal"), this);
+    m_captureShortcutsAction->setObjectName("captureShortcutsAction");
+    m_captureShortcutsAction->setToolTip(tr("Give this terminal priority over application keyboard shortcuts."));
+    m_captureShortcutsAction->setCheckable(true);
+    m_captureShortcutsAction->setEnabled(false);
+    connect(m_captureShortcutsAction, &QAction::triggered, this, [this](bool enabled) {
+        if (auto* tab = currentTerminalTab())
+            tab->setCaptureApplicationShortcuts(enabled);
+    });
+    toolsMenu->addAction(m_captureShortcutsAction);
 
     m_macrosMenu = menuBar()->addMenu(tr("&Macros"));
     rebuildMacrosMenu();

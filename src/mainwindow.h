@@ -94,6 +94,7 @@ private:
     QToolButton* m_sftpTabBtn;
     QAction* m_multiInputAction = nullptr;
     QAction* m_sensitiveMultiInputAction = nullptr;
+    QAction* m_captureShortcutsAction = nullptr;
     QStringList m_sensitiveInputNames;
     QStringList m_sensitiveInputValues;
 
@@ -121,6 +122,7 @@ private:
     QLabel* m_remoteDiskValue = nullptr;
     QLabel* m_remoteUptimeValue = nullptr;
 
+    QAction* m_globalSearchAction = nullptr;
     QAction* m_copyAction;
     QAction* m_pasteAction;
     QAction* m_specialCharactersAction = nullptr;

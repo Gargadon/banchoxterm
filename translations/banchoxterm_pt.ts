@@ -1325,6 +1325,34 @@ Deseja continuar?</translation>
         <source>All sessions</source>
         <translation>Todas as sessões</translation>
     </message>
+    <message>
+        <source>Send shortcuts to terminal</source>
+        <translation>Enviar atalhos ao terminal</translation>
+    </message>
+    <message>
+        <source>Give this terminal priority over application keyboard shortcuts.</source>
+        <translation>Dar prioridade a este terminal sobre os atalhos de teclado do aplicativo.</translation>
+    </message>
+    <message>
+        <source>Close session</source>
+        <translation>Fechar sessão</translation>
+    </message>
+    <message>
+        <source>Copy selection</source>
+        <translation>Copiar seleção</translation>
+    </message>
+    <message>
+        <source>Find in current terminal...</source>
+        <translation>Buscar no terminal atual...</translation>
+    </message>
+    <message>
+        <source>Command palette...</source>
+        <translation>Paleta de comandos...</translation>
+    </message>
+    <message>
+        <source>Search all</source>
+        <translation>Buscar em todas</translation>
+    </message>
 </context>
 <context>
     <name>QMessageBox</name>
@@ -2689,6 +2717,30 @@ Deseja continuar?</translation>
         <source>Text stays opaque. Restart to enable transparency; further opacity changes apply immediately.</source>
         <translation>O texto permanece opaco. Reinicie para ativar a transparência; os ajustes posteriores de opacidade são aplicados imediatamente.</translation>
     </message>
+    <message>
+        <source>Choose a key combination for each action. Clear a field to disable its shortcut. Changes apply to open sessions after you press OK.</source>
+        <translation>Escolha uma combinação para cada ação. Limpe um campo para desativar seu atalho. As alterações são aplicadas às sessões abertas ao pressionar OK.</translation>
+    </message>
+    <message>
+        <source>Ctrl+letter combinations are commonly used by terminal programs. Prefer Ctrl+Shift combinations for application actions.</source>
+        <translation>Programas de terminal costumam usar combinações Ctrl+letra. Prefira combinações Ctrl+Shift para as ações do aplicativo.</translation>
+    </message>
+    <message>
+        <source>Restore default shortcuts</source>
+        <translation>Restaurar atalhos padrão</translation>
+    </message>
+    <message>
+        <source>Shortcuts</source>
+        <translation>Atalhos</translation>
+    </message>
+    <message>
+        <source>Shortcut conflict</source>
+        <translation>Conflito de atalhos</translation>
+    </message>
+    <message>
+        <source>The shortcut %1 is assigned to both '%2' and '%3'. Choose different shortcuts.</source>
+        <translation>O atalho %1 está atribuído a '%2' e a '%3'. Escolha atalhos diferentes.</translation>
+    </message>
 </context>
 <context>
     <name>SftpSidebar</name>
@@ -3877,6 +3929,42 @@ Feche esta aba quando terminar.</translation>
         <source>VNC: vncviewer</source>
         <translation>VNC: vncviewer</translation>
     </message>
+    <message>
+        <source>Send shortcuts to terminal</source>
+        <translation>Enviar atalhos ao terminal</translation>
+    </message>
+    <message>
+        <source>Application shortcuts are paused for this terminal.</source>
+        <translation>Os atalhos do aplicativo estão suspensos neste terminal.</translation>
+    </message>
+    <message>
+        <source>Restore shortcuts</source>
+        <translation>Restaurar atalhos</translation>
+    </message>
+    <message>
+        <source>Find in current terminal</source>
+        <translation>Buscar no terminal atual</translation>
+    </message>
+    <message>
+        <source>Copy selection</source>
+        <translation>Copiar seleção</translation>
+    </message>
+    <message>
+        <source>Paste</source>
+        <translation>Colar</translation>
+    </message>
+    <message>
+        <source>Zoom in</source>
+        <translation>Aumentar zoom</translation>
+    </message>
+    <message>
+        <source>Zoom out</source>
+        <translation>Diminuir zoom</translation>
+    </message>
+    <message>
+        <source>Find...</source>
+        <translation>Buscar...</translation>
+    </message>
 </context>
 <context>
     <name>TunnelEditDialog</name>
@@ -4123,6 +4211,65 @@ Versão atual: %2</translation>
         <location filename="../src/xservermanager.cpp" line="96"/>
         <source>VcXsrv inició, pero no abrió el display 127.0.0.1:6000.</source>
         <translation>O VcXsrv foi iniciado, mas não abriu o display 127.0.0.1:6000.</translation>
+    </message>
+</context>
+<context>
+    <name>KeyboardShortcuts</name>
+    <message>
+        <source>Close session</source>
+        <translation>Fechar sessão</translation>
+    </message>
+    <message>
+        <source>Quit application</source>
+        <translation>Sair do aplicativo</translation>
+    </message>
+    <message>
+        <source>Find in current terminal</source>
+        <translation>Buscar no terminal atual</translation>
+    </message>
+    <message>
+        <source>Find in all sessions</source>
+        <translation>Buscar em todas as sessões</translation>
+    </message>
+    <message>
+        <source>Copy selection</source>
+        <translation>Copiar seleção</translation>
+    </message>
+    <message>
+        <source>Paste</source>
+        <translation>Colar</translation>
+    </message>
+    <message>
+        <source>Zoom in</source>
+        <translation>Aumentar zoom</translation>
+    </message>
+    <message>
+        <source>Zoom out</source>
+        <translation>Diminuir zoom</translation>
+    </message>
+    <message>
+        <source>Command palette</source>
+        <translation>Paleta de comandos</translation>
+    </message>
+    <message>
+        <source>Lock application</source>
+        <translation>Bloquear aplicativo</translation>
+    </message>
+    <message>
+        <source>Toggle split view</source>
+        <translation>Alternar visualização dividida</translation>
+    </message>
+    <message>
+        <source>Toggle grid view</source>
+        <translation>Alternar visualização em grade</translation>
+    </message>
+    <message>
+        <source>Move tab to other pane</source>
+        <translation>Mover aba para o outro painel</translation>
+    </message>
+    <message>
+        <source>Detach tab</source>
+        <translation>Desanexar aba</translation>
     </message>
 </context>
 </TS>

@@ -169,6 +169,8 @@ set(SOURCES
     src/remoteeditordialog.h
     src/settingsdialog.cpp
     src/settingsdialog.h
+    src/keyboardshortcuts.cpp
+    src/keyboardshortcuts.h
     src/terminalappearance.cpp
     src/terminalappearance.h
     src/sshconnection.cpp
@@ -493,6 +495,8 @@ add_executable(banchoxterm_tests
     src/remoteeditordialog.h
     src/settingsdialog.cpp
     src/settingsdialog.h
+    src/keyboardshortcuts.cpp
+    src/keyboardshortcuts.h
     src/terminalappearance.cpp
     src/terminalappearance.h
     src/updater.cpp

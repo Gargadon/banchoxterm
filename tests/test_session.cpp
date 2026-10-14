@@ -55,8 +55,14 @@
 #include <QDialogButtonBox>
 #include "sensitivedatafilter.h"
 #include <QAction>
+#include <QShortcut>
+#include <QMenu>
+#include <QClipboard>
 #include "terminalappearance.h"
 #include "settingsdialog.h"
+#include "keyboardshortcuts.h"
+#include <QKeySequenceEdit>
+#include <QMessageBox>
 #include <QSpinBox>
 #include <QCheckBox>
 #include <QScreen>
@@ -1447,6 +1453,272 @@ private slots:
         terminal.searchText(QString(), true, true, false);
         QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), false);
+    }
+
+    void testNaturalTerminalShortcuts() {
+        QMap<QString, QKeySequence> original;
+        QMap<QString, QKeySequence> defaults;
+        QSet<QString> assigned;
+        for (const auto& definition : KeyboardShortcuts::definitions()) {
+            original.insert(definition.id, KeyboardShortcuts::sequence(definition.id));
+            defaults.insert(definition.id, definition.defaultSequence);
+            const QString sequence = definition.defaultSequence.toString(QKeySequence::PortableText);
+            QVERIFY(!sequence.isEmpty());
+            QVERIFY(!assigned.contains(sequence));
+            assigned.insert(sequence);
+        }
+        const auto restore = qScopeGuard([&]() { KeyboardShortcuts::save(original); });
+        KeyboardShortcuts::save(defaults);
+        MainWindow window;
+        window.resize(1000, 650);
+        window.show();
+        window.activateWindow();
+        Session session;
+        session.type = SessionType::Serial;
+        session.id = "natural-shortcuts";
+        session.name = session.id;
+        session.serialPort = "banchoxterm-test-missing-port";
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
+        QPointer<TerminalTab> tab = window.findChild<TerminalTab*>();
+        QVERIFY(tab);
+        QVERIFY(!tab->capturesApplicationShortcuts());
+        auto* terminal = tab->getTerminalWidget();
+        auto* display = terminal->focusProxy();
+        display->setFocus();
+        QTRY_VERIFY(display->hasFocus());
+        QByteArray sent;
+        connect(terminal, &QTermWidget::sendData, &window,
+                [&sent](const char* bytes, int size) { sent.append(bytes, size); });
+        for (const auto& pair : {qMakePair(Qt::Key_W, char(0x17)), qMakePair(Qt::Key_F, char(0x06)),
+                                 qMakePair(Qt::Key_Q, char(0x11)), qMakePair(Qt::Key_K, char(0x0b)),
+                                 qMakePair(Qt::Key_C, char(0x03)), qMakePair(Qt::Key_D, char(0x04)),
+                                 qMakePair(Qt::Key_Z, char(0x1a))}) {
+            sent.clear();
+            QTest::keyClick(display, pair.first, Qt::ControlModifier);
+            QCOMPARE(sent, QByteArray(1, pair.second));
+            QVERIFY(window.isVisible());
+            QVERIFY(tab);
+        }
+        for (const auto& pair : {qMakePair(Qt::Key_B, QByteArray("\x1b" "b")), qMakePair(Qt::Key_F, QByteArray("\x1b" "f"))}) {
+            sent.clear();
+            QTest::keyClick(display, pair.first, Qt::AltModifier);
+            QCOMPARE(sent, pair.second);
+        }
+        QCOMPARE(window.findChildren<QAction*>("shortcut_findAll").size(), 1);
+        QTest::keyClick(display, Qt::Key_F, Qt::ControlModifier | Qt::ShiftModifier);
+        auto* search = terminal->findChild<QLineEdit*>("searchTextEdit");
+        QVERIFY(search);
+        QVERIFY(search->isVisible());
+        QTest::keyClick(search, Qt::Key_Escape);
+        QTRY_VERIFY(!search->isVisible());
+        display->setFocus();
+        const QString oldClipboard = QApplication::clipboard()->text();
+        const auto restoreClipboard = qScopeGuard([&]() { QApplication::clipboard()->setText(oldClipboard); });
+        QApplication::clipboard()->setText("abcXYZ");
+        terminal->feedData("\x1b[?2004h");
+        sent.clear();
+        QTest::keyClick(display, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(sent, QByteArray("\x1b[200~abcXYZ\x1b[201~")); // Exactly one bracketed paste.
+        QTest::keyClick(display, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(tab.isNull());
+    }
+
+    void testShortcutCustomization() {
+        QMap<QString, QKeySequence> original;
+        QMap<QString, QKeySequence> defaults;
+        for (const auto& definition : KeyboardShortcuts::definitions()) {
+            original.insert(definition.id, KeyboardShortcuts::sequence(definition.id));
+            defaults.insert(definition.id, definition.defaultSequence);
+        }
+        const auto restore = qScopeGuard([&]() { KeyboardShortcuts::save(original); });
+        KeyboardShortcuts::save(defaults);
+        MainWindow window;
+        window.show();
+        window.activateWindow();
+        auto* closeAction = window.findChild<QAction*>("shortcut_closeTab");
+        QVERIFY(closeAction);
+        QCOMPARE(closeAction->shortcut(), QKeySequence("Ctrl+Shift+W"));
+        {
+            SettingsDialog dialog(&window);
+            dialog.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->setKeySequence(QKeySequence("F8"));
+            dialog.reject();
+            QCOMPARE(closeAction->shortcut(), QKeySequence("Ctrl+Shift+W"));
+        }
+        {
+            SettingsDialog dialog(&window);
+            dialog.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->setKeySequence(QKeySequence("F8"));
+            dialog.findChild<QKeySequenceEdit*>("shortcutEdit_findTerminal")->setKeySequence(QKeySequence("F7"));
+            QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept", Qt::DirectConnection));
+            QCOMPARE(dialog.result(), int(QDialog::Accepted));
+        }
+        QCOMPARE(closeAction->shortcut(), QKeySequence("F8"));
+        QCOMPARE(QSettings().value("shortcuts/closeTab").toString(), QString("F8"));
+        Session session;
+        session.type = SessionType::Serial;
+        session.id = "custom-shortcuts";
+        session.name = session.id;
+        session.serialPort = "banchoxterm-test-missing-port";
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
+        QPointer<TerminalTab> tab = window.findChild<TerminalTab*>();
+        auto* terminal = tab->getTerminalWidget();
+        auto* display = terminal->focusProxy();
+        QCOMPARE(terminal->findChild<QAction*>("shortcut_findTerminal")->shortcut(), QKeySequence("F7"));
+        display->setFocus();
+        QTRY_VERIFY(display->hasFocus());
+        QTest::keyClick(display, Qt::Key_F7);
+        auto* search = terminal->findChild<QLineEdit*>("searchTextEdit");
+        QVERIFY(search->isVisible());
+        QTest::keyClick(search, Qt::Key_Escape);
+        // Clearing a field disables the binding and updates an already-open terminal.
+        {
+            SettingsDialog dialog(&window);
+            dialog.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->clear();
+            dialog.findChild<QKeySequenceEdit*>("shortcutEdit_findTerminal")->setKeySequence(QKeySequence("F6"));
+            QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept", Qt::DirectConnection));
+            QCOMPARE(dialog.result(), int(QDialog::Accepted));
+        }
+        QVERIFY(closeAction->shortcut().isEmpty());
+        QVERIFY(QSettings().contains("shortcuts/closeTab"));
+        QCOMPARE(terminal->findChild<QAction*>("shortcut_findTerminal")->shortcut(), QKeySequence("F6"));
+        display->setFocus();
+        QTest::keyClick(display, Qt::Key_F8);
+        QVERIFY(tab);
+        {
+            SettingsDialog dialog(&window);
+            dialog.findChild<QPushButton*>("restoreDefaultShortcutsButton")->click();
+            QVERIFY(closeAction->shortcut().isEmpty()); // Reset is not applied until OK.
+            QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept", Qt::DirectConnection));
+        }
+        QCOMPARE(closeAction->shortcut(), QKeySequence("Ctrl+Shift+W"));
+        QCOMPARE(terminal->findChild<QAction*>("shortcut_findTerminal")->shortcut(), QKeySequence("Ctrl+Shift+F"));
+        QVERIFY(!QSettings().contains("shortcuts/closeTab"));
+        {
+            SettingsDialog dialog(&window);
+            dialog.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->setKeySequence(QKeySequence("F8"));
+            dialog.findChild<QKeySequenceEdit*>("shortcutEdit_findAll")->setKeySequence(QKeySequence("F8"));
+            QTimer::singleShot(0, &dialog, []() {
+                auto* warning = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+                QVERIFY(warning);
+                warning->accept();
+            });
+            QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept", Qt::DirectConnection));
+            QVERIFY(dialog.result() != QDialog::Accepted);
+            QCOMPARE(closeAction->shortcut(), QKeySequence("Ctrl+Shift+W"));
+        }
+        // Reopened editors read the saved mappings, not stale widget state.
+        SettingsDialog reopened(&window);
+        QCOMPARE(reopened.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->keySequence(), QKeySequence("Ctrl+Shift+W"));
+    }
+
+    void testTerminalShortcutCapture() {
+        MainWindow window;
+        window.resize(1000, 650);
+        window.show();
+        window.activateWindow();
+        Session session;
+        session.type = SessionType::Serial;
+        session.id = "shortcut-capture-first";
+        session.name = session.id;
+        session.serialPort = "banchoxterm-test-missing-port";
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
+        QPointer<TerminalTab> first = window.findChild<TerminalTab*>();
+        QVERIFY(first);
+        auto* terminal = first->getTerminalWidget();
+        QVERIFY(terminal);
+        auto* display = terminal->focusProxy();
+        QVERIFY(display);
+        QByteArray sent;
+        connect(terminal, &QTermWidget::sendData, &window,
+                [&sent](const char* bytes, int size) { sent.append(bytes, size); });
+        auto* capture = window.findChild<QAction*>("captureShortcutsAction");
+        QVERIFY(capture);
+        QVERIFY(capture->isEnabled());
+        capture->trigger();
+        QVERIFY(first->capturesApplicationShortcuts());
+        QVERIFY(capture->isChecked());
+        QVERIFY(first->findChild<QWidget*>("shortcutCaptureBar")->isVisible());
+        display->setFocus();
+        QTRY_VERIFY(display->hasFocus());
+        QTRY_VERIFY(first->findChild<QWidget*>("shortcutCaptureBar")->height() < terminal->height() / 3);
+        sent.clear();
+        QTest::keyClick(display, Qt::Key_W, Qt::ControlModifier);
+        QCOMPARE(sent, QByteArray("\x17"));
+        QTest::qWait(10);
+        QVERIFY(first); // Ctrl+W must reach the terminal.
+        sent.clear();
+        QTest::keyClick(display, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(sent, QByteArray("\x17"));
+        QVERIFY(first); // The new application close shortcut is also captured in this mode.
+        sent.clear();
+        QTest::keyClick(display, Qt::Key_F, Qt::ControlModifier);
+        QCOMPARE(sent, QByteArray("\x06"));
+        const QString oldClipboard = QApplication::clipboard()->text();
+        const auto restoreClipboard = qScopeGuard([&]() { QApplication::clipboard()->setText(oldClipboard); });
+        QApplication::clipboard()->setText("must-not-be-pasted");
+        sent.clear();
+        QTest::keyClick(display, Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(sent, QByteArray("\x03"));
+        sent.clear();
+        QTest::keyClick(display, Qt::Key_V, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(sent, QByteArray("\x16"));
+
+        // The mouse menu can restore shortcuts while keyboard capture is active.
+        QTimer::singleShot(0, &window, [&]() {
+            auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+            QVERIFY(menu);
+            const auto close = qScopeGuard([&]() { menu->close(); });
+            auto* toggle = menu->actions().first();
+            QVERIFY(toggle->isChecked());
+            QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, menu->actionGeometry(toggle).center());
+        });
+        QVERIFY(QMetaObject::invokeMethod(first, "showTerminalContextMenu", Qt::DirectConnection,
+                                          Q_ARG(QPoint, QPoint(20, 20))));
+        QVERIFY(!first->capturesApplicationShortcuts());
+        QVERIFY(!capture->isChecked());
+        capture->trigger();
+        QVERIFY(first->capturesApplicationShortcuts());
+
+        // A field outside the terminal viewport retains its own shortcuts.
+        window.activateWindow();
+        auto* quickConnect = window.findChild<QLineEdit*>("quickConnectEdit");
+        QVERIFY(quickConnect);
+        {
+            QLineEdit embeddedField(terminal); // Same hierarchy as QTermWidget's search field.
+            embeddedField.show();
+            for (auto* field : {&embeddedField, quickConnect}) {
+                QShortcut fieldShortcut(QKeySequence(Qt::Key_F12), field);
+                fieldShortcut.setContext(Qt::WidgetShortcut);
+                QSignalSpy fieldShortcutSpy(&fieldShortcut, &QShortcut::activated);
+                field->setFocus();
+                QTRY_VERIFY(field->hasFocus());
+                QTest::keyClick(field, Qt::Key_F12);
+                QCOMPARE(fieldShortcutSpy.count(), 1);
+            }
+        }
+
+        // The mode belongs to its tab, and Ctrl+Shift+W still closes other tabs.
+        session.id = "shortcut-capture-second";
+        session.name = session.id;
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
+        QPointer<TerminalTab> second;
+        for (auto* tab : window.findChildren<TerminalTab*>())
+            if (tab != first)
+                second = tab;
+        QVERIFY(second);
+        QVERIFY(!capture->isChecked());
+        QVERIFY(!second->capturesApplicationShortcuts());
+        QVERIFY(!second->isSessionActive());
+        second->getTerminalWidget()->setFocus();
+        QTest::keyClick(second->getTerminalWidget()->focusProxy(), Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(second.isNull());
+        QVERIFY(first);
+        QVERIFY(capture->isChecked());
+        first->findChild<QPushButton*>("restoreShortcutsButton")->click();
+        QVERIFY(!first->capturesApplicationShortcuts());
+        QVERIFY(!capture->isChecked());
+        QVERIFY(!first->findChild<QWidget*>("shortcutCaptureBar")->isVisible());
+        QTest::keyClick(display, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(first.isNull());
     }
 
     void testSensitiveDataFilter() {

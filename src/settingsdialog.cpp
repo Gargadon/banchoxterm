@@ -1,5 +1,6 @@
 #include "settingsdialog.h"
 #include "terminalappearance.h"
+#include "keyboardshortcuts.h"
 #include "apppaths.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -28,6 +29,8 @@
 #include <QScrollArea>
 #include <QScreen>
 #include <QTimer>
+#include <QKeySequenceEdit>
+#include <QFormLayout>
 #include "masterpasswordmanager.h"
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
@@ -287,6 +290,47 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     securityLayout->addStretch();
     tabWidget->addTab(securityTab, tr("Security"));
 
+    auto* shortcutsScroll = new QScrollArea(tabWidget);
+    shortcutsScroll->setObjectName("shortcutsScrollArea");
+    shortcutsScroll->setWidgetResizable(true);
+    shortcutsScroll->setFrameShape(QFrame::NoFrame);
+    auto* shortcutsTab = new QWidget(shortcutsScroll);
+    shortcutsTab->setObjectName("shortcutsTab");
+    shortcutsScroll->setWidget(shortcutsTab);
+    auto* shortcutsLayout = new QVBoxLayout(shortcutsTab);
+    auto* shortcutHelp =
+        new QLabel(tr("Choose a key combination for each action. Clear a field to disable its shortcut. "
+                      "Changes apply to open sessions after you press OK."),
+                   shortcutsTab);
+    shortcutHelp->setWordWrap(true);
+    shortcutsLayout->addWidget(shortcutHelp);
+    auto* terminalHelp = new QLabel(tr("Ctrl+letter combinations are commonly used by terminal programs. "
+                                       "Prefer Ctrl+Shift combinations for application actions."),
+                                    shortcutsTab);
+    terminalHelp->setWordWrap(true);
+    shortcutsLayout->addWidget(terminalHelp);
+    auto* shortcutsForm = new QFormLayout();
+    shortcutsForm->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+    for (const auto& definition : KeyboardShortcuts::definitions()) {
+        auto* editor = new QKeySequenceEdit(KeyboardShortcuts::sequence(definition.id), shortcutsTab);
+        editor->setObjectName("shortcutEdit_" + definition.id);
+        editor->setMaximumSequenceLength(1);
+        editor->setClearButtonEnabled(true);
+        editor->setAccessibleName(definition.label);
+        m_shortcutEditors.insert(definition.id, editor);
+        shortcutsForm->addRow(definition.label + ":", editor);
+    }
+    shortcutsLayout->addLayout(shortcutsForm);
+    auto* resetShortcuts = new QPushButton(tr("Restore default shortcuts"), shortcutsTab);
+    resetShortcuts->setObjectName("restoreDefaultShortcutsButton");
+    shortcutsLayout->addWidget(resetShortcuts, 0, Qt::AlignLeft);
+    connect(resetShortcuts, &QPushButton::clicked, this, [this]() {
+        for (const auto& definition : KeyboardShortcuts::definitions())
+            m_shortcutEditors.value(definition.id)->setKeySequence(definition.defaultSequence);
+    });
+    shortcutsLayout->addStretch();
+    tabWidget->addTab(shortcutsScroll, tr("Shortcuts"));
+
     mainLayout->addWidget(tabWidget);
 
     // Dialog buttons
@@ -448,8 +492,34 @@ void SettingsDialog::onBrowseEditorClicked() {
     }
 }
 
+bool SettingsDialog::validateShortcuts() {
+    QMap<QString, QString> assigned;
+    for (const auto& definition : KeyboardShortcuts::definitions()) {
+        auto* editor = m_shortcutEditors.value(definition.id);
+        const QString sequence = editor->keySequence().toString(QKeySequence::PortableText);
+        if (sequence.isEmpty())
+            continue;
+        if (assigned.contains(sequence)) {
+            QMessageBox::warning(this, tr("Shortcut conflict"),
+                                 tr("The shortcut %1 is assigned to both '%2' and '%3'. Choose different shortcuts.")
+                                     .arg(editor->keySequence().toString(QKeySequence::NativeText),
+                                          assigned.value(sequence), definition.label));
+            editor->setFocus();
+            return false;
+        }
+        assigned.insert(sequence, definition.label);
+    }
+    return true;
+}
+
 void SettingsDialog::onAccept() {
+    if (!validateShortcuts())
+        return;
     saveSettings();
+    QMap<QString, QKeySequence> shortcuts;
+    for (auto it = m_shortcutEditors.cbegin(); it != m_shortcutEditors.cend(); ++it)
+        shortcuts.insert(it.key(), it.value()->keySequence());
+    KeyboardShortcuts::save(shortcuts);
     accept();
 }
 

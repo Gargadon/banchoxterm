@@ -55,6 +55,10 @@ public:
     }
     void updateFontFromSettings();
     void syncTerminalSize();
+    bool capturesApplicationShortcuts() const {
+        return m_captureApplicationShortcuts;
+    }
+    void setCaptureApplicationShortcuts(bool enabled);
     void sendInputText(const QString& text);
     void sendSensitiveInputText(const QString& text);
     void sendRaw(const QString& text);
@@ -63,6 +67,7 @@ public:
     void sendSerialFile();
     void cancelSerialFile();
     bool searchText(const QString& str, bool next, bool caseSensitive);
+    void showTerminalSearch();
     void copySelection();
     void pasteSelection();
     void clearTerminal();
@@ -75,6 +80,7 @@ protected:
 
 signals:
     void terminalDataReceived(const QByteArray& data);
+    void shortcutCaptureChanged(bool enabled);
     void promptDetected(const QString& prompt);
     void tabFinished();
     void titleChanged(const QString& title);
@@ -153,6 +159,8 @@ private:
     bool m_conptyStarted = false;
     QString m_pendingShell;
 #endif
+    bool m_captureApplicationShortcuts = false;
+    QWidget* m_shortcutCaptureBar = nullptr;
     bool m_isActive = true;
     bool m_closing = false;
     bool m_stopPromptShown = false;

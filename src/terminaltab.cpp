@@ -3,8 +3,10 @@
 #include "xservermanager.h"
 #include "sshconnection.h"
 #include "keyring.h"
+#include "keyboardshortcuts.h"
 #include <qtermwidget.h>
 #include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QFont>
 #include <QDebug>
@@ -22,7 +24,6 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QKeyEvent>
-#include <QShortcut>
 #include <QFile>
 #include <QFileDialog>
 #include <QInputDialog>
@@ -145,6 +146,21 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                 feedTerminalData(tr("\r\n[Unable to open link: %1]\r\n").arg(url.toString()).toUtf8());
         });
 
+        m_shortcutCaptureBar = new QWidget(this);
+        m_shortcutCaptureBar->setObjectName("shortcutCaptureBar");
+        m_shortcutCaptureBar->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+        auto* captureLayout = new QHBoxLayout(m_shortcutCaptureBar);
+        captureLayout->setContentsMargins(8, 4, 8, 4);
+        auto* captureLabel =
+            new QLabel(tr("Application shortcuts are paused for this terminal."), m_shortcutCaptureBar);
+        captureLabel->setWordWrap(true);
+        captureLayout->addWidget(captureLabel, 1);
+        auto* restoreShortcuts = new QPushButton(tr("Restore shortcuts"), m_shortcutCaptureBar);
+        restoreShortcuts->setObjectName("restoreShortcutsButton");
+        captureLayout->addWidget(restoreShortcuts);
+        connect(restoreShortcuts, &QPushButton::clicked, this, [this]() { setCaptureApplicationShortcuts(false); });
+        m_shortcutCaptureBar->hide();
+        layout->addWidget(m_shortcutCaptureBar);
         layout->addWidget(m_terminal);
 
         connect(m_terminal, &QTermWidget::finished, this, &TerminalTab::onTerminalFinished);
@@ -210,7 +226,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         }
     }
 
-    // Construir la barra de búsqueda (Ctrl+F)
+    // Search UI; application key bindings are registered below.
     m_searchFrame = new QFrame(this);
     m_searchFrame->setFrameShape(QFrame::StyledPanel);
     m_searchFrame->hide();
@@ -247,16 +263,21 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
     connect(m_btnPrev, &QPushButton::clicked, this, &TerminalTab::onSearchPrev);
     connect(closeBtn, &QPushButton::clicked, this, &TerminalTab::hideSearchFrame);
 
-    // Atajos de teclado utilizando QShortcut para interceptar eventos de forma limpia
-    auto* searchShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_F), this);
-    connect(searchShortcut, &QShortcut::activated, this, [this]() { doToggleSearchBar(); });
-
-    auto* closeSearchShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
-    connect(closeSearchShortcut, &QShortcut::activated, this, [this]() {
-        if (m_searchFrame && m_searchFrame->isVisible()) {
-            hideSearchFrame();
-        }
-    });
+    if (m_terminal) {
+        auto addTerminalShortcut = [this](const QString& id, const QString& label, auto handler) {
+            auto* action = new QAction(label, m_terminal);
+            m_terminal->addAction(action);
+            KeyboardShortcuts::bindAction(action, id, Qt::WidgetWithChildrenShortcut);
+            connect(action, &QAction::triggered, this, handler);
+            return action;
+        };
+        addTerminalShortcut("findTerminal", tr("Find in current terminal"), [this]() { doToggleSearchBar(); });
+        addTerminalShortcut("copy", tr("Copy selection"), [this]() { doCopy(); });
+        auto* paste = addTerminalShortcut("paste", tr("Paste"), [this]() { doPaste(); });
+        paste->setEnabled(!m_session.readOnly);
+        addTerminalShortcut("zoomIn", tr("Zoom in"), [this]() { doZoomIn(); });
+        addTerminalShortcut("zoomOut", tr("Zoom out"), [this]() { doZoomOut(); });
+    }
 
     startLogging();
 }
@@ -631,14 +652,22 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
         return;
 
     QMenu menu(this);
+    auto* captureAct = menu.addAction(tr("Send shortcuts to terminal"));
+    captureAct->setCheckable(true);
+    captureAct->setChecked(m_captureApplicationShortcuts);
+    captureAct->setEnabled(!m_session.readOnly);
+    menu.addSeparator();
 
     auto* copyAct = menu.addAction(tr("&Copy"));
-    copyAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C));
+    copyAct->setShortcut(KeyboardShortcuts::sequence("copy"));
     copyAct->setEnabled(hasSelection());
 
     auto* pasteAct = menu.addAction(tr("&Paste"));
-    pasteAct->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_V));
+    pasteAct->setShortcut(KeyboardShortcuts::sequence("paste"));
 
+    menu.addSeparator();
+    auto* findAct = menu.addAction(tr("Find..."));
+    findAct->setShortcut(KeyboardShortcuts::sequence("findTerminal"));
     menu.addSeparator();
 
     auto* specialMenu = menu.addMenu(tr("Special Characters"));
@@ -671,9 +700,9 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
     menu.addSeparator();
     auto* historyAct = menu.addAction(tr("Command History..."));
     auto* zoomInAct = menu.addAction(tr("Zoom &In"));
-    zoomInAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Plus));
+    zoomInAct->setShortcut(KeyboardShortcuts::sequence("zoomIn"));
     auto* zoomOutAct = menu.addAction(tr("Zoom &Out"));
-    zoomOutAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Minus));
+    zoomOutAct->setShortcut(KeyboardShortcuts::sequence("zoomOut"));
 
     QAction* reconnectAct = nullptr;
     if (!m_isActive) {
@@ -682,10 +711,16 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
     }
 
     auto* selected = menu.exec(view->mapToGlobal(pos));
-    if (selected == copyAct) {
+    if (!selected)
+        return;
+    if (selected == captureAct) {
+        setCaptureApplicationShortcuts(captureAct->isChecked());
+    } else if (selected == copyAct) {
         doCopy();
     } else if (selected == pasteAct) {
         doPaste();
+    } else if (selected == findAct) {
+        doToggleSearchBar();
     } else if (selected && selected->parent() == specialMenu) {
         if (selected->property("physicalBreak").toBool())
             sendBreak();
@@ -1184,11 +1219,20 @@ void TerminalTab::hideSearchFrame() {
 }
 
 void TerminalTab::onSearchNext() {
-    // QTermWidget provides its own search bar (Ctrl+F); no programmatic search.
+    // QTermWidget provides its own search bar; no programmatic search.
 }
 
 void TerminalTab::onSearchPrev() {
-    // QTermWidget provides its own search bar (Ctrl+F); no programmatic search.
+    // QTermWidget provides its own search bar; no programmatic search.
+}
+
+void TerminalTab::setCaptureApplicationShortcuts(bool enabled) {
+    if (!m_terminal || (enabled && m_session.readOnly) || enabled == m_captureApplicationShortcuts)
+        return;
+    m_captureApplicationShortcuts = enabled;
+    m_shortcutCaptureBar->setVisible(enabled);
+    m_terminal->setFocus();
+    emit shortcutCaptureChanged(enabled);
 }
 
 bool TerminalTab::eventFilter(QObject* watched, QEvent* event) {
@@ -1197,29 +1241,32 @@ bool TerminalTab::eventFilter(QObject* watched, QEvent* event) {
         // Wait until the terminal itself has processed its final geometry.
         QTimer::singleShot(0, this, &TerminalTab::syncTerminalSize);
     }
-    if (m_terminal && event->type() == QEvent::KeyPress) {
+    if (m_terminal && m_captureApplicationShortcuts &&
+        (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)) {
         auto* widget = qobject_cast<QWidget*>(watched);
-        if (widget && (widget == m_terminal || m_terminal->isAncestorOf(widget))) {
-            auto* keyEvent = static_cast<QKeyEvent*>(event);
-            const Qt::KeyboardModifiers modifiers = keyEvent->modifiers();
-            const bool clipboardShortcut = (modifiers & Qt::ControlModifier) && (modifiers & Qt::ShiftModifier) &&
-                                           !(modifiers & Qt::AltModifier) && !(modifiers & Qt::MetaModifier);
-            if (clipboardShortcut && keyEvent->key() == Qt::Key_C) {
-                doCopy();
-                keyEvent->accept();
+        QWidget* display = m_terminal->focusProxy();
+        QWidget* focused = QApplication::focusWidget();
+        const bool terminalHasFocus =
+            focused && (focused == m_terminal || focused == display || (display && display->isAncestorOf(focused)));
+        // Only the terminal viewport owns these keys. Search fields, dialogs,
+        // menus and other tabs keep their normal application shortcuts.
+        if (terminalHasFocus && widget &&
+            (widget == m_terminal || widget == display || (display && display->isAncestorOf(widget)))) {
+            if (event->type() == QEvent::ShortcutOverride) {
+                event->accept();
                 return true;
             }
-            if (clipboardShortcut && keyEvent->key() == Qt::Key_V) {
-                doPaste();
-                keyEvent->accept();
-                return true;
-            }
-            if (m_session.readOnly) {
-                if ((modifiers & Qt::ControlModifier) && keyEvent->key() == Qt::Key_F)
-                    return QWidget::eventFilter(watched, event);
-                keyEvent->accept();
-                return true;
-            }
+            // Let the terminal's keyboard translator encode the original key,
+            // bypassing our clipboard/search handling without losing modifiers.
+            return QWidget::eventFilter(watched, event);
+        }
+    }
+    if (m_terminal && m_session.readOnly && event->type() == QEvent::KeyPress) {
+        auto* widget = qobject_cast<QWidget*>(watched);
+        QWidget* display = m_terminal->focusProxy();
+        if (widget && (widget == display || (display && display->isAncestorOf(widget)))) {
+            event->accept();
+            return true;
         }
     }
     return QWidget::eventFilter(watched, event);
@@ -1616,6 +1663,10 @@ bool TerminalTab::searchText(const QString& str, bool next, bool caseSensitive) 
     m_terminal->searchText(str, next, next, caseSensitive);
     disconnect(connection);
     return found;
+}
+
+void TerminalTab::showTerminalSearch() {
+    doToggleSearchBar();
 }
 
 void TerminalTab::copySelection() {

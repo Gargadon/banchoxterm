@@ -25,6 +25,41 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Dark & Light themes** — the default interface adapts to the system or can be forced to light/dark mode
 - **Internationalization** — English, Spanish, and Portuguese
 
+## Terminal keyboard shortcuts
+
+Application defaults leave plain `Ctrl+letter` combinations available to terminal
+programs, including nano and readline:
+
+| Action | Default shortcut |
+| --- | --- |
+| Close session | `Ctrl+Shift+W` |
+| Quit application | `Ctrl+Shift+Q` |
+| Find in the current terminal | `Ctrl+Shift+F` |
+| Find in all sessions | `Ctrl+Alt+Shift+F` |
+| Copy / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` |
+| Zoom in / out | `Ctrl+Shift++` / `Ctrl+Shift+-` |
+| Command palette | `Ctrl+Shift+P` |
+| Toggle split view | `Ctrl+Shift+O` |
+| Toggle grid view | `Ctrl+Alt+Shift+G` |
+| Move tab to other pane | `Ctrl+Alt+Shift+M` |
+| Detach tab | `Ctrl+Alt+Shift+D` |
+| Lock application | `Ctrl+Alt+Shift+L` |
+
+Customize these in **Configuration > Shortcuts**. Clear a field to disable its
+shortcut, or use **Restore default shortcuts**. Press **OK** to save and apply to
+open windows and terminals; **Cancel** leaves the assignments unchanged. Duplicate
+assignments are rejected. Shortcuts are stored by action, independently of the UI
+language. Plain `Ctrl+W`, `Ctrl+F`, `Ctrl+Q` and `Escape` are not application-wide
+shortcuts. Escape still closes the search bar when its field has focus.
+
+For additional conflicts, enable **Tools > Send shortcuts to terminal** (also in
+the terminal’s right-click menu). While that viewport has focus, application
+shortcuts are forwarded to the terminal. The mode belongs to each tab and starts
+disabled in new sessions. A compact bar provides **Restore shortcuts**, so you can
+turn it off with the mouse; the menu option also toggles it off. Other tabs,
+search fields, dialogs and menus retain their normal behavior. Copy/paste remain
+available through mouse menus. OS-reserved key combinations are outside this mode.
+
 ## Sensitive multi-input
 
 Open **Tools > Sensitive Multi-Input** to add named entries such as a password or
