@@ -4,6 +4,7 @@
 #include <QByteArray>
 #include <QRegularExpression>
 #include "session.h"
+#include "sensitivedatafilter.h"
 
 class QTermWidget;
 class QLabel;
@@ -55,6 +56,7 @@ public:
     void updateFontFromSettings();
     void syncTerminalSize();
     void sendInputText(const QString& text);
+    void sendSensitiveInputText(const QString& text);
     void sendRaw(const QString& text);
     void reportMacroMessage(const QString& message);
     void sendBreak();
@@ -159,6 +161,9 @@ private:
     QRegularExpression m_promptPattern;
     QString m_lastDetectedPrompt;
     QByteArray m_commandInputBuffer;
+    bool m_sendingSensitiveInput = false;
+    SensitiveDataFilter m_sensitiveLogFilter;
+    SensitiveDataFilter m_sensitiveOutputFilter;
     QFile* m_xmodemFile = nullptr;
     QTimer* m_xmodemTimer = nullptr;
     QByteArray m_xmodemPacket;

@@ -37,6 +37,7 @@
 #include <QDialog>
 #include <QFormLayout>
 #include <QDesktopServices>
+#include <QScopedValueRollback>
 
 #ifdef Q_OS_WIN
 #include "conpty.h"
@@ -786,7 +787,7 @@ void TerminalTab::startLogging() {
 
 void TerminalTab::logData(const QByteArray& data) {
     if (m_logFile && m_logFile->isOpen() && !data.isEmpty())
-        m_logFile->write(data);
+        m_logFile->write(m_sensitiveLogFilter.process(data));
 }
 
 void TerminalTab::maybeScheduleReconnect() {
@@ -1233,6 +1234,26 @@ void TerminalTab::sendInputText(const QString& text) {
     doSendText(text + "\n");
 }
 
+void TerminalTab::sendSensitiveInputText(const QString& text) {
+    if (m_session.readOnly) {
+        reportMacroMessage(tr("Session is read-only; input was blocked."));
+        return;
+    }
+    if (text.isEmpty())
+        return;
+    const QByteArray bytes = text.toUtf8();
+    m_sensitiveLogFilter.addValue(bytes);
+    m_sensitiveOutputFilter.addValue(bytes);
+    // Shells can normalize surrounding spaces when echoing or recalling a command.
+    const QByteArray trimmed = text.trimmed().toUtf8();
+    m_sensitiveLogFilter.addValue(trimmed);
+    m_sensitiveOutputFilter.addValue(trimmed);
+    // sendText can synchronously call onSendData for remote sessions.
+    const QScopedValueRollback<bool> sensitiveInput(m_sendingSensitiveInput, true);
+    m_commandInputBuffer.clear();
+    doSendText(text + "\n");
+}
+
 void TerminalTab::sendRaw(const QString& text) {
     if (m_session.readOnly) {
         reportMacroMessage(tr("Session is read-only; input was blocked."));
@@ -1506,6 +1527,10 @@ void TerminalTab::finishZmodem(bool success, const QString& message) {
 }
 
 void TerminalTab::recordTypedInput(const QByteArray& data) {
+    if (m_sendingSensitiveInput) {
+        m_commandInputBuffer.clear();
+        return;
+    }
     for (const char byte : data) {
         if (byte == '\r' || byte == '\n') {
             recordCommand(QString::fromUtf8(m_commandInputBuffer).trimmed());
@@ -1521,7 +1546,9 @@ void TerminalTab::recordTypedInput(const QByteArray& data) {
 
 void TerminalTab::recordCommand(const QString& command) {
     const QString value = command.trimmed();
-    if (value.isEmpty())
+    if (value.isEmpty() || m_sendingSensitiveInput)
+        return;
+    if (m_sensitiveOutputFilter.containsValue(value.toUtf8()))
         return;
 
     QSettings settings;
@@ -1613,7 +1640,7 @@ bool TerminalTab::hasSelection() const {
 
 void TerminalTab::feedTerminalData(const QByteArray& data) {
     if (!data.isEmpty()) {
-        m_outputBuffer.append(data);
+        m_outputBuffer.append(m_sensitiveOutputFilter.process(data));
         emit terminalDataReceived(data);
         if (m_promptPattern.isValid() && !m_promptPattern.pattern().isEmpty()) {
             m_promptBuffer.append(data);

@@ -60,6 +60,7 @@
 #include <QFile>
 #include <functional>
 #include <QSharedPointer>
+#include <QPointer>
 
 namespace {
 void logMacroEvent(const Session& session, const QString& message) {
@@ -458,11 +459,11 @@ void MainWindow::setupUi() {
     toolBar->addSeparator();
 
     addToolbarSection(tr("TOOLS"));
-    auto* multiAction = toolBar->addAction(QIcon(":/icons/multiinput.svg"), tr("Multi-Input"));
+    auto* multiAction = m_multiInputAction;
+    toolBar->addAction(multiAction);
     multiAction->setCheckable(true);
     multiAction->setToolTip(tr("Send input to all terminal sessions"));
     m_multiInputAction = multiAction;
-    connect(multiAction, &QAction::triggered, this, &MainWindow::toggleMultiInputBar);
 
     auto* settingsAction = toolBar->addAction(QIcon(":/icons/gear.svg"), tr("Settings"));
     connect(settingsAction, &QAction::triggered, this, &MainWindow::onOpenSettings);
@@ -556,6 +557,7 @@ void MainWindow::setupUi() {
 
     auto toolsPage = makeRibbonPage(tr("Tools"));
     addRibbonAction(toolsPage.second, multiAction);
+    addRibbonAction(toolsPage.second, m_sensitiveMultiInputAction);
     addRibbonAction(toolsPage.second, settingsAction);
     addRibbonAction(toolsPage.second, m_copyAction);
     addRibbonAction(toolsPage.second, m_pasteAction);
@@ -1671,75 +1673,8 @@ void MainWindow::onSendMultiInput() {
     if (text.isEmpty())
         return;
 
-    QList<TerminalTab*> targets;
-    QStringList targetNames;
-    for (QTabWidget* pane : allPanes()) {
-        for (int i = 0; i < pane->count(); ++i) {
-            auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
-            if (!tab)
-                continue;
-            targets.append(tab);
-            targetNames.append(pane->tabText(i));
-        }
-    }
-    if (targets.isEmpty())
+    if (!broadcastInput(text, false))
         return;
-
-    const QRegularExpression destructivePattern(
-        QStringLiteral(
-            R"((^|[;&|]\s*)(rm\s+-[a-z]*r[a-z]*f|mkfs(?:\.|\s)|shutdown\b|reboot\b|poweroff\b|format\s|drop\s+database\b|truncate\s+))"),
-        QRegularExpression::CaseInsensitiveOption);
-    if (destructivePattern.match(text).hasMatch()) {
-        const auto decision = localizedQuestion(
-            this, tr("Potentially destructive command"),
-            tr("This command may modify or destroy data:\n\n%1\n\nDo you want to continue?").arg(text),
-            QMessageBox::Yes | QMessageBox::No, QMessageBox::No, QMessageBox::Warning);
-        if (decision != QMessageBox::Yes)
-            return;
-    }
-
-    QDialog targetDialog(this);
-    targetDialog.setWindowTitle(tr("Confirm Multi-Input"));
-    auto* targetLayout = new QVBoxLayout(&targetDialog);
-    targetLayout->addWidget(
-        new QLabel(tr("Select the terminal sessions that should receive this command:"), &targetDialog));
-    auto* targetList = new QListWidget(&targetDialog);
-    for (const QString& name : targetNames) {
-        auto* item = new QListWidgetItem(name, targetList);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
-        item->setCheckState(Qt::Checked);
-    }
-    targetLayout->addWidget(targetList);
-    auto* commandLabel = new QLabel(tr("Command: %1").arg(text), &targetDialog);
-    commandLabel->setWordWrap(true);
-    targetLayout->addWidget(commandLabel);
-    auto* targetButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &targetDialog);
-    targetButtons->button(QDialogButtonBox::Ok)->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
-    targetButtons->button(QDialogButtonBox::Cancel)->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
-    targetLayout->addWidget(targetButtons);
-    connect(targetButtons, &QDialogButtonBox::accepted, &targetDialog, &QDialog::accept);
-    connect(targetButtons, &QDialogButtonBox::rejected, &targetDialog, &QDialog::reject);
-
-    if (targetDialog.exec() != QDialog::Accepted)
-        return;
-
-    QList<TerminalTab*> selectedTargets;
-    for (int i = 0; i < targets.size(); ++i) {
-        if (targetList->item(i)->checkState() == Qt::Checked) {
-            selectedTargets.append(targets.at(i));
-        }
-    }
-    if (selectedTargets.isEmpty())
-        return;
-
-    // Stagger writes to avoid flooding slow devices or WAN links when a
-    // broadcast targets many sessions.  The tab is the context object, so a
-    // closed session cancels its pending write automatically.
-    constexpr int broadcastIntervalMs = 75;
-    for (int i = 0; i < selectedTargets.size(); ++i) {
-        TerminalTab* tab = selectedTargets.at(i);
-        QTimer::singleShot(i * broadcastIntervalMs, tab, [tab, text]() { tab->sendInputText(text); });
-    }
 
     // Add to dropdown history and save
     QSettings settings;
@@ -1755,6 +1690,171 @@ void MainWindow::onSendMultiInput() {
     m_multiInputEdit->addItems(history);
     m_multiInputEdit->setCurrentIndex(-1);
     m_multiInputEdit->lineEdit()->clear();
+}
+
+bool MainWindow::broadcastInput(const QString& text, bool sensitive) {
+    QList<QPointer<TerminalTab>> targets;
+    QStringList targetNames;
+    for (QTabWidget* pane : allPanes()) {
+        for (int i = 0; i < pane->count(); ++i) {
+            auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
+            if (!tab || (sensitive && (!tab->isSessionActive() || tab->isRdpOrVnc() || tab->session().readOnly)))
+                continue;
+            targets.append(tab);
+            targetNames.append(pane->tabText(i));
+        }
+    }
+    if (targets.isEmpty()) {
+        if (sensitive)
+            QMessageBox::information(this, tr("Sensitive Multi-Input"),
+                                     tr("No active writable terminal sessions are available."));
+        return false;
+    }
+
+    const QRegularExpression destructivePattern(
+        QStringLiteral(
+            R"((^|[;&|]\s*)(rm\s+-[a-z]*r[a-z]*f|mkfs(?:\.|\s)|shutdown\b|reboot\b|poweroff\b|format\s|drop\s+database\b|truncate\s+))"),
+        QRegularExpression::CaseInsensitiveOption);
+    if (destructivePattern.match(text).hasMatch()) {
+        const auto decision = localizedQuestion(
+            this, tr("Potentially destructive command"),
+            sensitive ? tr("This sensitive entry may modify or destroy data. Do you want to continue?")
+                      : tr("This command may modify or destroy data:\n\n%1\n\nDo you want to continue?").arg(text),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No, QMessageBox::Warning);
+        if (decision != QMessageBox::Yes)
+            return false;
+    }
+
+    QDialog targetDialog(this);
+    targetDialog.setWindowTitle(sensitive ? tr("Confirm Sensitive Multi-Input") : tr("Confirm Multi-Input"));
+    targetDialog.setObjectName("multiInputTargetDialog");
+    auto* targetLayout = new QVBoxLayout(&targetDialog);
+    targetLayout->addWidget(
+        new QLabel(tr("Select the terminal sessions that should receive this command:"), &targetDialog));
+    auto* targetList = new QListWidget(&targetDialog);
+    for (const QString& name : targetNames) {
+        auto* item = new QListWidgetItem(name, targetList);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(Qt::Checked);
+    }
+    targetLayout->addWidget(targetList);
+    auto* commandLabel =
+        new QLabel(sensitive ? tr("Sensitive value hidden. It will be sent with Enter.") : tr("Command: %1").arg(text),
+                   &targetDialog);
+    commandLabel->setWordWrap(true);
+    targetLayout->addWidget(commandLabel);
+    auto* targetButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &targetDialog);
+    targetButtons->button(QDialogButtonBox::Ok)->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
+    targetButtons->button(QDialogButtonBox::Cancel)->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
+    targetLayout->addWidget(targetButtons);
+    connect(targetButtons, &QDialogButtonBox::accepted, &targetDialog, &QDialog::accept);
+    connect(targetButtons, &QDialogButtonBox::rejected, &targetDialog, &QDialog::reject);
+
+    if (targetDialog.exec() != QDialog::Accepted)
+        return false;
+
+    QList<QPointer<TerminalTab>> selectedTargets;
+    for (int i = 0; i < targets.size(); ++i) {
+        if (targets.at(i) && targetList->item(i)->checkState() == Qt::Checked) {
+            selectedTargets.append(targets.at(i));
+        }
+    }
+    if (selectedTargets.isEmpty())
+        return false;
+
+    // Stagger writes to avoid flooding slow devices or WAN links when a
+    // broadcast targets many sessions.  The tab is the context object, so a
+    // closed session cancels its pending write automatically.
+    constexpr int broadcastIntervalMs = 75;
+    for (int i = 0; i < selectedTargets.size(); ++i) {
+        QPointer<TerminalTab> tab = selectedTargets.at(i);
+        QTimer::singleShot(i * broadcastIntervalMs, tab, [tab, text, sensitive]() {
+            if (!tab)
+                return;
+            if (sensitive)
+                tab->sendSensitiveInputText(text);
+            else
+                tab->sendInputText(text);
+        });
+    }
+
+    return true;
+}
+
+void MainWindow::onSensitiveMultiInput() {
+    QDialog dialog(this);
+    dialog.setObjectName("sensitiveMultiInputDialog");
+    dialog.setWindowTitle(tr("Sensitive Multi-Input"));
+    dialog.resize(600, 420);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* help = new QLabel(tr("Entries are kept only until BanchoXterm closes and are excluded from input histories. "
+                               "Remote shell history and server-side logging remain under the server's control."),
+                            &dialog);
+    help->setWordWrap(true);
+    layout->addWidget(help);
+    auto* list = new QListWidget(&dialog);
+    list->setObjectName("sensitiveInputList");
+    list->addItems(m_sensitiveInputNames);
+    layout->addWidget(list);
+    auto* name = new QLineEdit(&dialog);
+    name->setObjectName("sensitiveInputName");
+    name->setPlaceholderText(tr("Entry name"));
+    layout->addWidget(name);
+    auto* value = new QLineEdit(&dialog);
+    value->setObjectName("sensitiveInputValue");
+    value->setEchoMode(QLineEdit::Password);
+    value->setInputMethodHints(Qt::ImhHiddenText | Qt::ImhSensitiveData | Qt::ImhNoPredictiveText);
+    value->setPlaceholderText(tr("Sensitive value"));
+    layout->addWidget(value);
+    auto* row = new QHBoxLayout();
+    auto* add = new QPushButton(tr("Add / Update"), &dialog);
+    add->setObjectName("sensitiveInputAddButton");
+    auto* remove = new QPushButton(tr("Delete"), &dialog);
+    remove->setObjectName("sensitiveInputDeleteButton");
+    auto* send = new QPushButton(tr("Send"), &dialog);
+    send->setObjectName("sensitiveInputSendButton");
+    row->addWidget(add);
+    row->addWidget(remove);
+    row->addWidget(send);
+    layout->addLayout(row);
+    auto* close = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    layout->addWidget(close);
+    connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(list, &QListWidget::currentRowChanged, &dialog, [this, name, value](int index) {
+        name->setText(index >= 0 ? m_sensitiveInputNames.value(index) : QString());
+        value->setText(index >= 0 ? m_sensitiveInputValues.value(index) : QString());
+    });
+    connect(add, &QPushButton::clicked, &dialog, [this, list, name, value]() {
+        const QString label = name->text().trimmed();
+        if (label.isEmpty() || value->text().isEmpty())
+            return;
+        int index = m_sensitiveInputNames.indexOf(label);
+        if (index < 0) {
+            index = m_sensitiveInputNames.size();
+            m_sensitiveInputNames.append(label);
+            m_sensitiveInputValues.append(value->text());
+        } else {
+            m_sensitiveInputValues[index] = value->text();
+        }
+        list->clear();
+        list->addItems(m_sensitiveInputNames);
+        list->setCurrentRow(index);
+    });
+    connect(remove, &QPushButton::clicked, &dialog, [this, list]() {
+        const int index = list->currentRow();
+        if (index < 0)
+            return;
+        m_sensitiveInputNames.removeAt(index);
+        m_sensitiveInputValues.removeAt(index);
+        list->clear();
+        list->addItems(m_sensitiveInputNames);
+    });
+    connect(send, &QPushButton::clicked, &dialog, [this, list]() {
+        const int index = list->currentRow();
+        if (index >= 0)
+            broadcastInput(m_sensitiveInputValues.at(index), true);
+    });
+    dialog.exec();
 }
 
 void MainWindow::onReconnectRequested(const Session& session) {
@@ -2009,6 +2109,15 @@ void MainWindow::setupMenuBar() {
     auto* detachTabAction = viewMenu->addAction(tr("&Detach Current Tab"));
     detachTabAction->setShortcut(QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_D));
     connect(detachTabAction, &QAction::triggered, this, &MainWindow::detachCurrentTab);
+
+    m_multiInputAction = new QAction(QIcon(":/icons/multiinput.svg"), tr("Multi-Input"), this);
+    connect(m_multiInputAction, &QAction::triggered, this, &MainWindow::toggleMultiInputBar);
+    m_sensitiveMultiInputAction = new QAction(QIcon(":/icons/multiinput.svg"), tr("Sensitive Multi-Input"), this);
+    m_sensitiveMultiInputAction->setObjectName("sensitiveMultiInputAction");
+    connect(m_sensitiveMultiInputAction, &QAction::triggered, this, &MainWindow::onSensitiveMultiInput);
+    auto* toolsMenu = menuBar()->addMenu(tr("&Tools"));
+    toolsMenu->addAction(m_multiInputAction);
+    toolsMenu->addAction(m_sensitiveMultiInputAction);
 
     m_macrosMenu = menuBar()->addMenu(tr("&Macros"));
     rebuildMacrosMenu();

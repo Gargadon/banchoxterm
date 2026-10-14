@@ -1285,6 +1285,42 @@ Deseja continuar?</translation>
         <source>EXPECT and RESPOND cannot contain a closing brace or nested tokens. To send a response with Enter, write plain text followed by {{ENTER}} after EXPECT.</source>
         <translation>EXPECT e RESPOND não podem conter uma chave de fechamento ou tokens aninhados. Para enviar uma resposta com Enter, escreva texto normal seguido de {{ENTER}} após EXPECT.</translation>
     </message>
+    <message>
+        <source>Sensitive Multi-Input</source>
+        <translation>Entrada múltipla sensível</translation>
+    </message>
+    <message>
+        <source>No active writable terminal sessions are available.</source>
+        <translation>Não há sessões de terminal ativas que permitam escrita.</translation>
+    </message>
+    <message>
+        <source>This sensitive entry may modify or destroy data. Do you want to continue?</source>
+        <translation>Esta entrada sensível pode modificar ou destruir dados. Deseja continuar?</translation>
+    </message>
+    <message>
+        <source>Confirm Sensitive Multi-Input</source>
+        <translation>Confirmar entrada múltipla sensível</translation>
+    </message>
+    <message>
+        <source>Sensitive value hidden. It will be sent with Enter.</source>
+        <translation>Valor sensível oculto. Será enviado seguido de Enter.</translation>
+    </message>
+    <message>
+        <source>Entries are kept only until BanchoXterm closes and are excluded from input histories. Remote shell history and server-side logging remain under the server's control.</source>
+        <translation>As entradas são mantidas apenas até fechar o BanchoXterm e são excluídas dos históricos de entrada. O histórico do shell remoto e os registros do servidor dependem do servidor.</translation>
+    </message>
+    <message>
+        <source>Entry name</source>
+        <translation>Nome da entrada</translation>
+    </message>
+    <message>
+        <source>Sensitive value</source>
+        <translation>Valor sensível</translation>
+    </message>
+    <message>
+        <source>&amp;Tools</source>
+        <translation>Ferramen&amp;tas</translation>
+    </message>
 </context>
 <context>
     <name>QMessageBox</name>

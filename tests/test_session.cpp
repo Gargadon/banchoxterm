@@ -49,6 +49,10 @@
 #include "sftpsidebar.h"
 #include <QTreeWidget>
 #include <QInputDialog>
+#include <QListWidget>
+#include <QLabel>
+#include <QDialogButtonBox>
+#include "sensitivedatafilter.h"
 #include <QAction>
 #include "terminalappearance.h"
 #include "settingsdialog.h"
@@ -1442,6 +1446,181 @@ private slots:
         terminal.searchText(QString(), true, true, false);
         QCOMPARE(results.count(), 1);
         QCOMPARE(results.takeFirst().at(0).toBool(), false);
+    }
+
+    void testSensitiveDataFilter() {
+        const QByteArray secret = QString::fromUtf8("secreto-pingüino").toUtf8();
+        const QByteArray stream = "before " + secret + " after\n";
+        for (qsizetype split = 0; split <= stream.size(); ++split) {
+            SensitiveDataFilter filter;
+            filter.addValue(secret);
+            QByteArray result = filter.process(stream.left(split));
+            result += filter.process(stream.mid(split));
+            QCOMPARE(result, QByteArray("before [redacted] after\n"));
+        }
+        SensitiveDataFilter filter;
+        filter.addValue("pass");
+        filter.addValue("password");
+        QCOMPARE(filter.process("prefix pa"), QByteArray("prefix "));
+        QCOMPARE(filter.process("ss"), QByteArray());
+        QCOMPARE(filter.process("word! pass!\n"), QByteArray("[redacted]! [redacted]!\n"));
+        QVERIFY(filter.containsValue("a password here"));
+        QVERIFY(!filter.containsValue("ordinary command"));
+        SensitiveDataFilter ordinary;
+        ordinary.addValue(QByteArray());
+        QCOMPARE(ordinary.process("normal output"), QByteArray("normal output"));
+    }
+
+    void testSensitiveSessionLog() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        QSettings settings;
+        const QVariant oldEnabled = settings.value("terminal/loggingEnabled");
+        const QVariant oldDirectory = settings.value("terminal/logDirectory");
+        const auto restore = qScopeGuard([&]() {
+            settings.setValue("terminal/loggingEnabled", oldEnabled);
+            settings.setValue("terminal/logDirectory", oldDirectory);
+        });
+        settings.setValue("terminal/loggingEnabled", true);
+        settings.setValue("terminal/logDirectory", dir.path());
+        const QByteArray secret("temporary-sensitive-value");
+        {
+            Session session;
+            session.type = SessionType::SSH;
+            session.id = "sensitive-log-test";
+            session.name = session.id;
+            session.host = "127.0.0.1";
+            session.port = 1;
+            TerminalTab tab(session);
+            QVERIFY(tab.connection());
+            tab.sendSensitiveInputText(QString::fromUtf8(secret));
+            // Inject output through the real SSH-to-terminal/log signal path.
+            for (const QByteArray& chunk : {QByteArray("before temporary-"), QByteArray("sensitive-"), QByteArray("value after\n")})
+                QVERIFY(QMetaObject::invokeMethod(tab.connection(), "shellDataReceived", Qt::DirectConnection,
+                                                  Q_ARG(QByteArray, chunk)));
+        }
+        const QStringList logs = QDir(dir.path()).entryList({"*.log"}, QDir::Files);
+        QCOMPARE(logs.size(), 1);
+        QFile log(dir.filePath(logs.first()));
+        QVERIFY(log.open(QIODevice::ReadOnly));
+        const QByteArray data = log.readAll();
+        QVERIFY(data.contains("before [redacted] after\n"));
+        QVERIFY(!data.contains(secret));
+        QVERIFY(!data.contains("temporary-"));
+        QVERIFY(!data.contains("sensitive-"));
+        QVERIFY(!settings.value("commandHistory/global").toStringList().contains(QString::fromUtf8(secret)));
+        QVERIFY(!settings.value("commandHistory/session/sensitive-log-test").toStringList().contains(QString::fromUtf8(secret)));
+    }
+
+    void testSensitiveMultiInput() {
+#ifdef Q_OS_WIN
+        QSKIP("This integration test uses /bin/sh.");
+#else
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString outputPath = dir.filePath("sensitive-output.txt");
+        const QString secret = QString("  printf x >> '%1'  ").arg(outputPath);
+        QSettings settings;
+        const QStringList historyKeys = {"multiinput/history", "commandHistory/global",
+                                          "commandHistory/session/sensitive-first", "commandHistory/session/sensitive-second"};
+        QMap<QString, QVariant> oldValues;
+        for (const QString& key : historyKeys) {
+            oldValues.insert(key, settings.value(key));
+            settings.setValue(key, QStringList{"existing"});
+        }
+        const auto restore = qScopeGuard([&]() {
+            for (auto it = oldValues.cbegin(); it != oldValues.cend(); ++it)
+                settings.setValue(it.key(), it.value());
+        });
+        {
+            MainWindow window;
+            for (int i = 0; i < 3; ++i) {
+                Session session;
+                session.type = SessionType::Local;
+                session.id = i == 0 ? "sensitive-first" : i == 1 ? "sensitive-second" : "sensitive-readonly";
+                session.name = session.id;
+                session.shellPath = "/bin/sh";
+                session.readOnly = i == 2;
+                QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
+            }
+            auto* action = window.findChild<QAction*>("sensitiveMultiInputAction");
+            QVERIFY(action);
+            QTimer::singleShot(0, &window, [&]() {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                const auto close = qScopeGuard([&]() { dialog->reject(); });
+                auto* value = dialog->findChild<QLineEdit*>("sensitiveInputValue");
+                auto* list = dialog->findChild<QListWidget*>("sensitiveInputList");
+                QVERIFY(value);
+                QCOMPARE(value->echoMode(), QLineEdit::Password);
+                dialog->findChild<QLineEdit*>("sensitiveInputName")->setText("Proxy credentials");
+                value->setText(secret);
+                dialog->findChild<QPushButton*>("sensitiveInputAddButton")->click();
+                QCOMPARE(list->count(), 1);
+                QCOMPARE(list->item(0)->text(), QString("Proxy credentials"));
+                QTimer::singleShot(0, &window, [&]() {
+                    auto* targets = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                    QVERIFY(targets);
+                    auto cancel = qScopeGuard([&]() { targets->reject(); });
+                    QCOMPARE(targets->objectName(), QString("multiInputTargetDialog"));
+                    auto* targetList = targets->findChild<QListWidget*>();
+                    QCOMPARE(targetList->count(), 2); // Read-only session is excluded.
+                    for (int row = 0; row < targetList->count(); ++row)
+                        targetList->item(row)->setCheckState(targetList->item(row)->text().contains("first")
+                                                                 ? Qt::Checked : Qt::Unchecked);
+                    for (auto* label : targets->findChildren<QLabel*>())
+                        QVERIFY(!label->text().contains(secret.trimmed()));
+                    targets->accept();
+                    cancel.dismiss();
+                });
+                dialog->findChild<QPushButton*>("sensitiveInputSendButton")->click();
+            });
+            action->trigger();
+            auto contents = [&]() {
+                QFile file(outputPath);
+                return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+            };
+            QTRY_COMPARE_WITH_TIMEOUT(contents(), QByteArray("x"), 3000);
+            for (const QString& key : historyKeys)
+                QCOMPARE(settings.value(key).toStringList(), QStringList{"existing"});
+            for (const QString& key : settings.allKeys())
+                QVERIFY(!settings.value(key).toStringList().join('\n').contains(secret.trimmed()));
+
+            // Entries survive reopening the dialog, but cancelling a send writes nothing.
+            QTimer::singleShot(0, &window, [&]() {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                const auto close = qScopeGuard([&]() { dialog->reject(); });
+                auto* list = dialog->findChild<QListWidget*>("sensitiveInputList");
+                QCOMPARE(list->count(), 1);
+                list->setCurrentRow(0);
+                QCOMPARE(dialog->findChild<QLineEdit*>("sensitiveInputValue")->text(), secret);
+                QTimer::singleShot(0, &window, []() {
+                    auto* targets = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                    QVERIFY(targets);
+                    targets->reject();
+                });
+                dialog->findChild<QPushButton*>("sensitiveInputSendButton")->click();
+            });
+            action->trigger();
+            QTest::qWait(150);
+            QCOMPARE(contents(), QByteArray("x"));
+            for (auto* tab : window.findChildren<TerminalTab*>())
+                if (tab->session().id == "sensitive-first")
+                    tab->sendInputText("printf normal > /dev/null");
+            QCOMPARE(settings.value("commandHistory/global").toStringList().first(), QString("printf normal > /dev/null"));
+        }
+        // A new application window does not recover any sensitive entries from settings.
+        MainWindow freshWindow;
+        QTimer::singleShot(0, &freshWindow, []() {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto close = qScopeGuard([&]() { dialog->reject(); });
+            QCOMPARE(dialog->findChild<QListWidget*>("sensitiveInputList")->count(), 0);
+            QVERIFY(dialog->findChild<QLineEdit*>("sensitiveInputValue")->text().isEmpty());
+        });
+        QVERIFY(QMetaObject::invokeMethod(&freshWindow, "onSensitiveMultiInput", Qt::DirectConnection));
+#endif
     }
 
     void testMacroAsyncContinuation_data() {

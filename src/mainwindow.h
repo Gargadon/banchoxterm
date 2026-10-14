@@ -45,6 +45,7 @@ private slots:
     void onOpenSettings();
     void toggleMultiInputBar();
     void onSendMultiInput();
+    void onSensitiveMultiInput();
     void onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
     void onReconnectRequested(const Session& session);
     void toggleSplitView();
@@ -62,6 +63,7 @@ private slots:
     void lockApplication();
 
 private:
+    bool broadcastInput(const QString& text, bool sensitive);
     void setupUi();
     void setupMenuBar();
     void applyThemeMode(const QString& mode);
@@ -91,6 +93,9 @@ private:
     QToolButton* m_sessionsTabBtn;
     QToolButton* m_sftpTabBtn;
     QAction* m_multiInputAction = nullptr;
+    QAction* m_sensitiveMultiInputAction = nullptr;
+    QStringList m_sensitiveInputNames;
+    QStringList m_sensitiveInputValues;
 
     QWidget* m_tabSplitter = nullptr;
     QGridLayout* m_tabGrid = nullptr;

@@ -164,6 +164,7 @@ set(SOURCES
     src/sftptransferworker.h
     src/terminaltab.cpp
     src/terminaltab.h
+    src/sensitivedatafilter.h
     src/remoteeditordialog.cpp
     src/remoteeditordialog.h
     src/settingsdialog.cpp
@@ -479,6 +480,7 @@ add_executable(banchoxterm_tests
     src/sshtunnel.h
     src/terminaltab.cpp
     src/terminaltab.h
+    src/sensitivedatafilter.h
     src/mainwindow.cpp
     src/mainwindow.h
     src/sessiondialog.cpp

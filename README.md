@@ -17,13 +17,30 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Serial console** — supports picocom, screen, and minicom, with XMODEM/YMODEM
   and optional ZMODEM sending through `sz` from lrzsz
 - **Local terminal** — open local shell sessions
-- **Multi-input** — send commands to all open terminals simultaneously
+- **Multi-input** — send commands to selected terminals, with a separate sensitive mode for temporary entries
 - **Remote monitoring** — CPU, RAM, disk, and uptime stats in the status bar
 - **Session manager** — save, organize, and quickly reconnect to your sessions
 - **SSH tunnels** — local, remote, and dynamic (SOCKS5) port forwarding
 - **Session logging** — record terminal output to a file
 - **Dark & Light themes** — the default interface adapts to the system or can be forced to light/dark mode
 - **Internationalization** — English, Spanish, and Portuguese
+
+## Sensitive multi-input
+
+Open **Tools > Sensitive Multi-Input** to add named entries such as a password or
+proxy command. Values are hidden in the editor and exist only in memory until
+BanchoXterm closes. Select an entry, click **Send**, and choose the active writable
+terminal sessions that should receive it. The value is sent unchanged, followed
+by Enter. Closing the dialog keeps the entries available during the current run;
+**Delete** removes an entry.
+
+Sensitive sends bypass both the multi-input dropdown history and the application’s
+global/session command histories. Exact echoed values are replaced by `[redacted]`
+in application-owned session logs and saved output, including values split across
+network packets. The live terminal can still display what the server echoes.
+Server-side logs and shell history are controlled by the server; transformed or
+reformatted echoes may not match the filter. This feature does not erase entries
+previously sent through normal input. Normal multi-input retains its usual history.
 
 ## Macros
 

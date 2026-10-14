@@ -1285,6 +1285,42 @@ Do you want to continue?</source>
         <source>EXPECT and RESPOND cannot contain a closing brace or nested tokens. To send a response with Enter, write plain text followed by {{ENTER}} after EXPECT.</source>
         <translation>EXPECT y RESPOND no pueden contener una llave de cierre ni tokens anidados. Para enviar una respuesta con Enter, escribe texto normal seguido de {{ENTER}} después de EXPECT.</translation>
     </message>
+    <message>
+        <source>Sensitive Multi-Input</source>
+        <translation>Entrada múltiple sensible</translation>
+    </message>
+    <message>
+        <source>No active writable terminal sessions are available.</source>
+        <translation>No hay sesiones de terminal activas que permitan escritura.</translation>
+    </message>
+    <message>
+        <source>This sensitive entry may modify or destroy data. Do you want to continue?</source>
+        <translation>Esta entrada sensible puede modificar o destruir datos. ¿Quieres continuar?</translation>
+    </message>
+    <message>
+        <source>Confirm Sensitive Multi-Input</source>
+        <translation>Confirmar entrada múltiple sensible</translation>
+    </message>
+    <message>
+        <source>Sensitive value hidden. It will be sent with Enter.</source>
+        <translation>Valor sensible oculto. Se enviará seguido de Enter.</translation>
+    </message>
+    <message>
+        <source>Entries are kept only until BanchoXterm closes and are excluded from input histories. Remote shell history and server-side logging remain under the server's control.</source>
+        <translation>Las entradas se conservan solo hasta cerrar BanchoXterm y se excluyen de los historiales de entrada. El historial del shell remoto y los registros del servidor dependen del servidor.</translation>
+    </message>
+    <message>
+        <source>Entry name</source>
+        <translation>Nombre de la entrada</translation>
+    </message>
+    <message>
+        <source>Sensitive value</source>
+        <translation>Valor sensible</translation>
+    </message>
+    <message>
+        <source>&amp;Tools</source>
+        <translation>Herramien&amp;tas</translation>
+    </message>
 </context>
 <context>
     <name>QMessageBox</name>
