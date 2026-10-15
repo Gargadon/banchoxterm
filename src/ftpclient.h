@@ -3,6 +3,7 @@
 #include <QList>
 #include <QString>
 #include <functional>
+#include <optional>
 #include "session.h"
 
 class QTcpSocket;
@@ -67,6 +68,8 @@ private:
     QByteArray m_replyBuffer;
     QStringList m_replyLines;
     std::function<void(const Reply&)> m_pendingHandler;
+    std::optional<Reply> m_earlyTransferReply;
+    bool m_transferInProgress = false;
     bool m_connected = false;
     QString m_host;
     QString m_user;

@@ -229,6 +229,11 @@ jobs:
           Write-Host "CTest exit code: $testExitCode"
           if (Test-Path build/session-tests.txt) {
             Get-Content build/session-tests.txt
+            # Repeat failures at the end so verbose plugin diagnostics cannot
+            # bury the actual failing assertion in truncated console output.
+            Write-Host 'QtTest failure summary:'
+            Select-String -Path build/session-tests.txt -Pattern '^FAIL!|^QFATAL|^Totals:' -Context 0,4 |
+              ForEach-Object { $_.Line; $_.Context.PostContext }
           } else {
             Write-Host "QtTest did not create its report; inspect startup and runtime dependencies."
           }

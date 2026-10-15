@@ -87,6 +87,10 @@ void FtpClient::connectToHost(const QString& host, int port, const QString& user
                     auto h = std::move(m_pendingHandler);
                     m_pendingHandler = nullptr;
                     h(r);
+                } else if (m_transferInProgress && r.code >= 200) {
+                    // Control and data sockets are independent: the final
+                    // reply can arrive before the data disconnected signal.
+                    m_earlyTransferReply = r;
                 }
             }
         }
@@ -191,6 +195,8 @@ void FtpClient::disconnectFromHost() {
     m_replyBuffer.clear();
     m_replyLines.clear();
     m_pendingHandler = nullptr;
+    m_earlyTransferReply.reset();
+    m_transferInProgress = false;
 }
 
 void FtpClient::scheduleReconnect() {
@@ -213,6 +219,10 @@ void FtpClient::scheduleReconnect() {
 void FtpClient::sendCommand(const QString& cmd, std::function<void(const Reply&)> handler) {
     if (!m_control)
         return;
+    if (cmd.startsWith("LIST ") || cmd.startsWith("RETR ") || cmd.startsWith("STOR ")) {
+        m_earlyTransferReply.reset();
+        m_transferInProgress = true;
+    }
     m_pendingHandler = std::move(handler);
     if (!cmd.isEmpty())
         m_control->write(cmd.toUtf8() + "\r\n");
@@ -307,11 +317,20 @@ bool FtpClient::configureTlsSocket(QSslSocket* socket, QString* error) const {
 // An empty data stream may close before the preliminary 150 reply arrives.
 // Keep waiting for the final reply before starting the next queued operation.
 void FtpClient::expectTransferReply(std::function<void(const Reply&)> handler) {
+    if (m_earlyTransferReply) {
+        const Reply reply = *m_earlyTransferReply;
+        m_earlyTransferReply.reset();
+        m_transferInProgress = false;
+        handler(reply);
+        return;
+    }
     expectReply([this, handler](const Reply& reply) {
         if (reply.code >= 100 && reply.code < 200)
             expectTransferReply(handler);
-        else
+        else {
+            m_transferInProgress = false;
             handler(reply);
+        }
     });
 }
 

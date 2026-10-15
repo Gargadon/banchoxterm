@@ -618,7 +618,17 @@ private slots:
         QVERIFY(restored.ftpTlsAllowInvalidCertificates);
     }
 
+    void testFtpProtocolAgainstLocalServer_data() {
+        QTest::addColumn<int>("dataAcceptDelay");
+        QTest::addColumn<bool>("earlyCompletionReply");
+        QTest::newRow("immediate-data-accept") << 0 << false;
+        QTest::newRow("command-before-data-accept") << 100 << false;
+        QTest::newRow("completion-before-data-close") << 0 << true;
+    }
+
     void testFtpProtocolAgainstLocalServer() {
+        QFETCH(int, dataAcceptDelay);
+        QFETCH(bool, earlyCompletionReply);
         QTcpServer controlServer;
         QTcpServer dataServer;
         if (!controlServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
@@ -628,7 +638,30 @@ private slots:
         QTcpSocket* dataSocket = nullptr;
         QByteArray controlBuffer;
         QByteArray uploadedData;
-        bool dataIsUpload = false;
+        QByteArray pendingDataCommand;
+        bool completionSent = false;
+        auto sendPendingData = [&]() {
+            if (!dataSocket || pendingDataCommand.isEmpty() || pendingDataCommand.startsWith("STOR"))
+                return;
+            const QByteArray command = pendingDataCommand;
+            pendingDataCommand.clear();
+            if (command.startsWith("RETR"))
+                dataSocket->write("hello");
+            else if (command == "LIST /tree")
+                dataSocket->write("drwxr-xr-x 1 user group 0 Jan 01 00:00 folder\r\n");
+            else if (command == "LIST /tree/folder")
+                dataSocket->write("drwxr-xr-x 1 user group 0 Jan 01 00:00 empty\r\n"
+                                  "-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
+            else if (command != "LIST /tree/folder/empty")
+                dataSocket->write("-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
+            if (earlyCompletionReply) {
+                completionSent = true;
+                controlSocket->write("226 Transfer complete\r\n");
+                QTimer::singleShot(100, dataSocket, &QTcpSocket::disconnectFromHost);
+            } else {
+                dataSocket->disconnectFromHost();
+            }
+        };
 
         connect(&controlServer, &QTcpServer::newConnection, this, [&]() {
             controlSocket = controlServer.nextPendingConnection();
@@ -648,34 +681,16 @@ private slots:
                     } else if (upper.startsWith("TYPE")) {
                         controlSocket->write("200 Type set\r\n");
                     } else if (upper == "PASV") {
+                        completionSent = false;
                         QVERIFY(dataServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))));
                         const quint16 port = dataServer.serverPort();
                         controlSocket->write(QByteArray("227 Entering Passive Mode (127,0,0,1,") +
                                              QByteArray::number(port / 256) + "," + QByteArray::number(port % 256) +
                                              ")\r\n");
-                    } else if (upper.startsWith("LIST")) {
-                        dataIsUpload = false;
+                    } else if (upper.startsWith("LIST") || upper.startsWith("RETR") || upper.startsWith("STOR")) {
+                        pendingDataCommand = command;
                         controlSocket->write("150 Opening data connection\r\n");
-                        if (dataSocket) {
-                            if (command == "LIST /tree")
-                                dataSocket->write("drwxr-xr-x 1 user group 0 Jan 01 00:00 folder\r\n");
-                            else if (command == "LIST /tree/folder")
-                                dataSocket->write("drwxr-xr-x 1 user group 0 Jan 01 00:00 empty\r\n"
-                                                  "-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
-                            else if (command != "LIST /tree/folder/empty")
-                                dataSocket->write("-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
-                            dataSocket->disconnectFromHost();
-                        }
-                    } else if (upper.startsWith("RETR")) {
-                        dataIsUpload = false;
-                        controlSocket->write("150 Opening data connection\r\n");
-                        if (dataSocket) {
-                            dataSocket->write("hello");
-                            dataSocket->disconnectFromHost();
-                        }
-                    } else if (upper.startsWith("STOR")) {
-                        dataIsUpload = true;
-                        controlSocket->write("150 Opening data connection\r\n");
+                        sendPendingData();
                     }
                 }
             });
@@ -683,18 +698,26 @@ private slots:
             controlSocket->write("220 Local test FTP server\r\n");
         });
 
-        connect(&dataServer, &QTcpServer::newConnection, this, [&]() {
-            dataSocket = dataServer.nextPendingConnection();
-            connect(dataSocket, &QTcpSocket::readyRead, this, [&]() { uploadedData += dataSocket->readAll(); });
-            connect(dataSocket, &QTcpSocket::disconnected, this, [&]() {
-                if (controlSocket)
+        connect(&dataServer, &QTcpServer::newConnection, &dataServer, [&]() {
+            auto* socket = dataServer.nextPendingConnection();
+            connect(socket, &QTcpSocket::readyRead, &dataServer, [&, socket]() { uploadedData += socket->readAll(); });
+            connect(socket, &QTcpSocket::disconnected, &dataServer, [&, socket]() {
+                if (controlSocket && !completionSent)
                     controlSocket->write("226 Transfer complete\r\n");
-                dataSocket->deleteLater();
-                dataSocket = nullptr;
+                pendingDataCommand.clear();
+                if (dataSocket == socket)
+                    dataSocket = nullptr;
+                socket->deleteLater();
                 dataServer.close();
             });
-            if (dataIsUpload)
-                return;
+            auto acceptDataConnection = [&, socket]() {
+                dataSocket = socket;
+                sendPendingData();
+            };
+            if (dataAcceptDelay)
+                QTimer::singleShot(dataAcceptDelay, socket, acceptDataConnection);
+            else
+                acceptDataConnection();
         });
 
         FtpClient client;
