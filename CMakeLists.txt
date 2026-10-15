@@ -597,6 +597,12 @@ set_tests_properties(SessionTests PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 120
 )
+if(WIN32 AND DEFINED ENV{WINDIR})
+    # The offscreen plugin does not use the native Windows font database.
+    # Qt ships no fonts, so use the runner's installed fonts for UI metrics.
+    file(TO_CMAKE_PATH "$ENV{WINDIR}/Fonts" BANCHO_TEST_FONT_DIR)
+    set_property(TEST SessionTests APPEND PROPERTY ENVIRONMENT "QT_QPA_FONTDIR=${BANCHO_TEST_FONT_DIR}")
+endif()
 
 # ── Formatting ──────────────────────────────────────────────────────
 
