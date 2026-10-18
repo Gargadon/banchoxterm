@@ -25,6 +25,18 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Dark & Light themes** — the default interface adapts to the system or can be forced to light/dark mode
 - **Internationalization** — English, Spanish, and Portuguese
 
+## SSH resource monitoring
+
+Configure monitoring in **Configuration > Appearance > SSH resource monitoring**.
+It is enabled by default and updates every 3 seconds. Choose an interval from
+1 to 3600 seconds, or disable it entirely. Changes apply to open SSH sessions.
+
+Monitoring reuses one persistent SSH command channel, requesting each sample
+through its standard input. Changing the interval does not open another channel.
+Disabling monitoring closes the remote input loop and hides the metrics bar.
+This reduces repeated SSH session log entries; server process auditing may still
+record the commands used to collect metrics.
+
 ## Terminal keyboard shortcuts
 
 Application defaults leave plain `Ctrl+letter` combinations available to terminal

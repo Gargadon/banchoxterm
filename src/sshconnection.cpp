@@ -837,13 +837,12 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     m_readNotifier->setEnabled(true);
     m_writeNotifier->setEnabled(false);
 
+    m_remoteIsWindows = false;
     m_statsTimer = new QTimer(this);
     connect(m_statsTimer, &QTimer::timeout, this, &SshConnection::onStatsTimer);
-    // Stats are lightweight and should feel live in the status bar. Keep a
-    // short interval without polling aggressively while a previous probe is
-    // still running (startStats guards against overlapping channels).
-    m_statsTimer->start(3000);
-    QTimer::singleShot(500, this, &SshConnection::startStats);
+    // Drive non-blocking channel operations independently of the sample interval.
+    m_statsTimer->setInterval(100);
+    reloadMonitoringSettings();
 
     if (m_keepAliveSeconds > 0) {
         libssh2_keepalive_config(m_session, 1, m_keepAliveSeconds);
@@ -1654,10 +1653,13 @@ void SshConnection::uploadDirectory(const QString& localPath, const QString& rem
 }
 
 void SshConnection::startStats() {
-    if (!m_session || m_statsState != StatsState::Idle)
+    if (!m_connected || !m_session || !m_statsEnabled || m_statsState != StatsState::Idle)
         return;
     m_statsState = StatsState::Opening;
+    m_statsSampleTimer.start();
     m_statsBuffer.clear();
+    m_statsReceivedSample = false;
+    m_statsSamplePending = false;
     // No socket event necessarily fires to start the stats channel, so kick the
     // processing once; from then on the socket notifiers drive it.
     if (m_connected)
@@ -1669,14 +1671,42 @@ void SshConnection::onStatsTimer() {
         return;
 
     if (m_statsState == StatsState::Idle) {
-        startStats();
+        if (!m_statsEnabled) {
+            m_statsTimer->stop();
+            return;
+        }
+        // Back off after remote command failures instead of opening channels
+        // at the I/O timer frequency on unsupported hosts.
+        if (!m_statsSampleTimer.isValid() || m_statsSampleTimer.elapsed() >= qMax(3000, m_statsIntervalSeconds * 1000))
+            startStats();
     } else {
-        // The socket notifier handles normal network replies, but a
-        // non-blocking libssh2 operation may be waiting without any socket
-        // activity (for example while the remote command is still running).
-        // Advance the active probe periodically so stats do not depend on the
-        // user typing in the terminal.
+        if (m_statsEnabled && m_statsState == StatsState::Reading && !m_statsSamplePending) {
+            if (m_statsSampleTimer.elapsed() < m_statsIntervalSeconds * 1000)
+                return;
+            m_statsState = StatsState::Writing;
+        }
         onSocketActivity();
+    }
+}
+
+void SshConnection::reloadMonitoringSettings() {
+    QSettings settings;
+    m_statsEnabled = settings.value("ssh/monitoringEnabled", true).toBool();
+    m_statsIntervalSeconds = qBound(1, settings.value("ssh/monitoringIntervalSeconds", 3).toInt(), 3600);
+    if (!m_statsTimer)
+        return;
+    if (m_statsEnabled) {
+        if (m_statsState == StatsState::Idle)
+            m_statsSampleTimer.invalidate();
+        m_statsTimer->start();
+    } else if (m_statsState != StatsState::Idle) {
+        // Let the remote read loop exit on stdin EOF before releasing its channel.
+        // Finish pending libssh2 open/exec calls before sending EOF.
+        if (m_statsState == StatsState::Reading)
+            m_statsState = StatsState::Closing;
+        m_statsTimer->start();
+    } else {
+        m_statsTimer->stop();
     }
 }
 
@@ -1707,49 +1737,126 @@ void SshConnection::pollStats() {
             "cat /proc/uptime | awk '{print $1}'";
         static const char* winCmd =
             R"(powershell -NoProfile -Command "$cpu=(Get-CimInstance Win32_Processor).LoadPercentage; $os=Get-CimInstance Win32_OperatingSystem; $mem=[math]::round(100*($os.TotalVisibleMemorySize-$os.FreePhysicalMemory)/$os.TotalVisibleMemorySize); $d=Get-CimInstance Win32_LogicalDisk -Filter 'DeviceID=''C:'''; $disk=[math]::round(100*($d.Size-$d.FreeSpace)/$d.Size); $up=((Get-Date)-$os.LastBootUpTime).TotalSeconds; Write-Output $cpu; Write-Output $mem; Write-Output $disk; Write-Output $up")";
-        const char* cmd = m_remoteIsWindows ? winCmd : linuxCmd;
-        int rc = libssh2_channel_exec(m_statsChannel, cmd);
+        if (m_statsCommand.isEmpty()) {
+            if (m_remoteIsWindows) {
+                QString command = QString::fromLatin1(winCmd);
+                command.insert(command.indexOf('"') + 1, "while ($null -ne [Console]::ReadLine()) { ");
+                command.insert(command.size() - 1, "; Write-Output '##BanchoStats##'; }");
+                m_statsCommand = command.toUtf8();
+            } else {
+                // A single process serves requests over stdin. No new SSH exec
+                // channel is opened for subsequent samples, even after interval changes.
+                QString script = "test -r /proc/stat && test -r /proc/meminfo || exit 1; "
+                                 "while IFS= read -r request; do ";
+                script += QString::fromLatin1(linuxCmd);
+                script += "; echo '##BanchoStats##'; done";
+                script.replace("'", "'\"'\"'");
+                m_statsCommand = ("sh -c '" + script + "'").toUtf8();
+            }
+        }
+        int rc = libssh2_channel_exec(m_statsChannel, m_statsCommand.constData());
         if (rc == 0) {
-            m_statsState = StatsState::Reading;
+            m_statsState = m_statsEnabled ? StatsState::Writing : StatsState::Closing;
         } else if (rc != LIBSSH2_ERROR_EAGAIN) {
-            closeStats();
+            // A rejected exec never starts the stdin loop, so close explicitly.
+            m_statsState = StatsState::Freeing;
+        }
+        break;
+    }
+    case StatsState::Writing: {
+        // One byte is enough to request a sample; no partial-write bookkeeping.
+        int rc = libssh2_channel_write(m_statsChannel, "\n", 1);
+        if (rc == 1) {
+            m_statsSamplePending = true;
+            m_statsSampleTimer.start();
+            m_statsState = m_statsEnabled ? StatsState::Reading : StatsState::Closing;
+        } else if (rc < 0 && rc != LIBSSH2_ERROR_EAGAIN) {
+            m_statsState = StatsState::Closing;
         }
         break;
     }
     case StatsState::Reading: {
         char buffer[256];
-        while (true) {
+        for (int i = 0; i < 64; ++i) {
             int bytesRead = libssh2_channel_read(m_statsChannel, buffer, sizeof(buffer));
             if (bytesRead > 0) {
                 m_activityProgress = true;
                 m_statsBuffer.append(buffer, bytesRead);
-            } else if (bytesRead == 0) {
                 finishStats();
-                return;
+                if (m_statsBuffer.size() > 65536) {
+                    m_statsState = StatsState::Closing;
+                    break;
+                }
             } else {
-                break; // EAGAIN or error
+                if (bytesRead < 0 && bytesRead != LIBSSH2_ERROR_EAGAIN)
+                    m_statsState = StatsState::Closing;
+                break;
             }
         }
+        // Drain errors separately; they are never parsed as numeric metrics.
+        for (int i = 0; i < 64 && libssh2_channel_read_stderr(m_statsChannel, buffer, sizeof(buffer)) > 0; ++i) {
+        }
+        if (libssh2_channel_eof(m_statsChannel)) {
+            if (!m_statsReceivedSample && !m_remoteIsWindows) {
+                m_remoteIsWindows = true;
+                // Try the other collector immediately, even with an hourly interval.
+                m_statsSampleTimer.invalidate();
+            }
+            m_statsState = StatsState::Closing;
+        }
+        break;
+    }
+    case StatsState::Closing: {
+        if (m_statsChannel) {
+            int rc = libssh2_channel_send_eof(m_statsChannel);
+            if (rc == LIBSSH2_ERROR_EAGAIN)
+                break;
+            char buffer[1024];
+            for (int i = 0; i < 64 && libssh2_channel_read(m_statsChannel, buffer, sizeof(buffer)) > 0; ++i) {
+            }
+            for (int i = 0; i < 64 && libssh2_channel_read_stderr(m_statsChannel, buffer, sizeof(buffer)) > 0; ++i) {
+            }
+            if (!libssh2_channel_eof(m_statsChannel))
+                break;
+        }
+        m_statsState = StatsState::Freeing;
+        break;
+    }
+    case StatsState::Freeing: {
+        if (m_statsChannel && libssh2_channel_free(m_statsChannel) == LIBSSH2_ERROR_EAGAIN)
+            break;
+        m_statsChannel = nullptr;
+        m_statsCommand.clear();
+        m_statsBuffer.clear();
+        m_statsState = StatsState::Idle;
+        if (!m_statsEnabled)
+            m_statsTimer->stop();
         break;
     }
     }
 }
 
 void SshConnection::finishStats() {
-    QString resStr = QString::fromUtf8(m_statsBuffer).trimmed();
-    QStringList lines = resStr.split('\n');
-    if (lines.size() >= 4) {
-        double cpu = lines[0].toDouble();
-        double mem = lines[1].toDouble();
-        double disk = lines[2].toDouble();
-        double uptimeSecs = lines[3].toDouble();
-        emit remoteStatsUpdated(cpu, mem, disk, uptimeSecs);
-    } else if (!m_remoteIsWindows) {
-        // The Linux /proc command failed: the remote host is probably Windows.
-        // Switch to the PowerShell probe for subsequent polls.
-        m_remoteIsWindows = true;
+    const QByteArray marker("##BanchoStats##\n");
+    // Windows OpenSSH may return CRLF; normalize before looking for complete frames.
+    m_statsBuffer.replace("\r\n", "\n");
+    int end;
+    while ((end = m_statsBuffer.indexOf(marker)) >= 0) {
+        QStringList lines = QString::fromUtf8(m_statsBuffer.left(end)).trimmed().split('\n');
+        m_statsBuffer.remove(0, end + marker.size());
+        m_statsSamplePending = false;
+        if (lines.size() != 4)
+            continue;
+        bool valid[4];
+        double values[4];
+        for (int i = 0; i < 4; ++i)
+            values[i] = lines[i].trimmed().toDouble(&valid[i]);
+        if (valid[0] && valid[1] && valid[2] && valid[3]) {
+            m_statsReceivedSample = true;
+            if (m_statsEnabled)
+                emit remoteStatsUpdated(values[0], values[1], values[2], values[3]);
+        }
     }
-    closeStats();
 }
 
 void SshConnection::closeStats() {
@@ -1759,6 +1866,9 @@ void SshConnection::closeStats() {
         m_statsChannel = nullptr;
     }
     m_statsState = StatsState::Idle;
+    m_statsCommand.clear();
+    m_statsBuffer.clear();
+    m_statsSampleTimer.invalidate();
 }
 
 void SshConnection::setX11Forwarding(bool enabled) {

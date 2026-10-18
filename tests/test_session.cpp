@@ -1054,7 +1054,8 @@ private slots:
                                                  "StrictModes no\n"
                                                  "PermitRootLogin no\n"
                                                  "AcceptEnv COLORTERM TERM_PROGRAM\n"
-                                                 "Subsystem sftp internal-sftp\n")
+                                                 "Subsystem sftp internal-sftp\n"
+                                                 "LogLevel VERBOSE\n")
                                       .arg(hostKey, authorizedKeys)
                                       .toUtf8();
         QVERIFY(configFile.write(config) == config.size());
@@ -1117,6 +1118,21 @@ private slots:
         portReservations.clear();
 
         SshConnection connection;
+        QSettings monitoringSettings;
+        const QVariant previousMonitoring = monitoringSettings.value("ssh/monitoringEnabled");
+        const QVariant previousInterval = monitoringSettings.value("ssh/monitoringIntervalSeconds");
+        const auto restoreMonitoring = qScopeGuard([&]() {
+            for (const auto& entry : {qMakePair(QString("ssh/monitoringEnabled"), previousMonitoring),
+                                      qMakePair(QString("ssh/monitoringIntervalSeconds"), previousInterval)}) {
+                if (entry.second.isValid())
+                    monitoringSettings.setValue(entry.first, entry.second);
+                else
+                    monitoringSettings.remove(entry.first);
+            }
+        });
+        monitoringSettings.setValue("ssh/monitoringEnabled", false);
+        monitoringSettings.setValue("ssh/monitoringIntervalSeconds", 1);
+        QSignalSpy statsSpy(&connection, &SshConnection::remoteStatsUpdated);
         QSignalSpy connectedSpy(&connection, &SshConnection::connectionSuccess);
         QSignalSpy failureSpy(&connection, &SshConnection::connectionFailed);
         QSignalSpy tunnelStateSpy(&connection, &SshConnection::tunnelStateChanged);
@@ -1131,6 +1147,46 @@ private slots:
             QSKIP("libssh2 authentication is unavailable with the local sshd configuration");
         }
         QCOMPARE(failureSpy.count(), 0);
+
+        QTest::qWait(1200);
+        QCOMPARE(statsSpy.count(), 0);
+        QByteArray monitoringLog = sshd.readAll();
+        QCOMPARE(monitoringLog.count("Starting session: command"), 0);
+        monitoringSettings.setValue("ssh/monitoringEnabled", true);
+        connection.reloadMonitoringSettings();
+        QTRY_VERIFY_WITH_TIMEOUT(statsSpy.count() >= 3, 5000);
+        const auto sample = statsSpy.last();
+        for (int i = 0; i < 3; ++i) {
+            QVERIFY(sample[i].toDouble() >= 0);
+            QVERIFY(sample[i].toDouble() <= 100);
+        }
+        QVERIFY(sample[3].toDouble() > 0);
+        monitoringLog += sshd.readAll();
+        QCOMPARE(monitoringLog.count("Starting session: command"), 1);
+
+        monitoringSettings.setValue("ssh/monitoringIntervalSeconds", 3600);
+        connection.reloadMonitoringSettings();
+        const int slowCount = statsSpy.count();
+        QTest::qWait(1400);
+        QCOMPARE(statsSpy.count(), slowCount);
+        monitoringSettings.setValue("ssh/monitoringIntervalSeconds", 1);
+        connection.reloadMonitoringSettings();
+        QTRY_VERIFY_WITH_TIMEOUT(statsSpy.count() > slowCount, 2000);
+        monitoringLog += sshd.readAll();
+        QCOMPARE(monitoringLog.count("Starting session: command"), 1);
+
+        monitoringSettings.setValue("ssh/monitoringEnabled", false);
+        connection.reloadMonitoringSettings();
+        const int disabledCount = statsSpy.count();
+        QTest::qWait(1400);
+        QCOMPARE(statsSpy.count(), disabledCount);
+        monitoringLog += sshd.readAll();
+        QVERIFY(monitoringLog.contains("Close session: user"));
+        monitoringSettings.setValue("ssh/monitoringEnabled", true);
+        connection.reloadMonitoringSettings();
+        QTRY_VERIFY_WITH_TIMEOUT(statsSpy.count() > disabledCount, 2000);
+        monitoringLog += sshd.readAll();
+        QCOMPARE(monitoringLog.count("Starting session: command"), 2);
 
         // Exercise the sidebar queue with actual nested files and an empty directory.
         const QString sourceFolder = serverDir.filePath("sidebar-source");
@@ -2607,6 +2663,49 @@ private slots:
         }
         SettingsDialog reopened;
         QCOMPARE(reopened.findChild<QSpinBox*>("terminalBackgroundOpacity")->value(), 0);
+    }
+
+    void testMonitoringSettings() {
+        QSettings settings;
+        const QVariant oldEnabled = settings.value("ssh/monitoringEnabled");
+        const QVariant oldInterval = settings.value("ssh/monitoringIntervalSeconds");
+        const auto restore = qScopeGuard([&]() {
+            for (const auto& entry : {qMakePair(QString("ssh/monitoringEnabled"), oldEnabled),
+                                      qMakePair(QString("ssh/monitoringIntervalSeconds"), oldInterval)}) {
+                if (entry.second.isValid())
+                    settings.setValue(entry.first, entry.second);
+                else
+                    settings.remove(entry.first);
+            }
+        });
+        settings.remove("ssh/monitoringEnabled");
+        settings.remove("ssh/monitoringIntervalSeconds");
+        {
+            SettingsDialog dialog;
+            auto* enabled = dialog.findChild<QCheckBox*>("sshMonitoringEnabled");
+            auto* interval = dialog.findChild<QSpinBox*>("sshMonitoringInterval");
+            QVERIFY(enabled && interval);
+            QVERIFY(enabled->isChecked());
+            QCOMPARE(interval->value(), 3);
+            QCOMPARE(interval->minimum(), 1);
+            QCOMPARE(interval->maximum(), 3600);
+            enabled->setChecked(false);
+            QVERIFY(!interval->isEnabled());
+            interval->setValue(3600);
+            dialog.reject();
+            QVERIFY(!settings.contains("ssh/monitoringEnabled"));
+        }
+        {
+            SettingsDialog dialog;
+            dialog.findChild<QCheckBox*>("sshMonitoringEnabled")->setChecked(false);
+            dialog.findChild<QSpinBox*>("sshMonitoringInterval")->setValue(3600);
+            QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept", Qt::DirectConnection));
+            QCOMPARE(settings.value("ssh/monitoringEnabled").toBool(), false);
+            QCOMPARE(settings.value("ssh/monitoringIntervalSeconds").toInt(), 3600);
+        }
+        SettingsDialog reopened;
+        QVERIFY(!reopened.findChild<QCheckBox*>("sshMonitoringEnabled")->isChecked());
+        QCOMPARE(reopened.findChild<QSpinBox*>("sshMonitoringInterval")->value(), 3600);
     }
 
     void testSettingsTypographyAccessible() {

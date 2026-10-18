@@ -224,6 +224,25 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     transferLayout->addStretch();
     appLayout->addLayout(transferLayout);
 
+    auto* monitoringGroup = new QGroupBox(tr("SSH resource monitoring"), appearanceTab);
+    auto* monitoringLayout = new QVBoxLayout(monitoringGroup);
+    m_monitoringCheck = new QCheckBox(tr("Enable resource monitoring"), monitoringGroup);
+    m_monitoringCheck->setObjectName("sshMonitoringEnabled");
+    m_monitoringCheck->setChecked(QSettings().value("ssh/monitoringEnabled", true).toBool());
+    monitoringLayout->addWidget(m_monitoringCheck);
+    m_monitoringIntervalSpin = new QSpinBox(monitoringGroup);
+    m_monitoringIntervalSpin->setObjectName("sshMonitoringInterval");
+    m_monitoringIntervalSpin->setRange(1, 3600);
+    m_monitoringIntervalSpin->setSuffix(tr(" seconds"));
+    m_monitoringIntervalSpin->setValue(QSettings().value("ssh/monitoringIntervalSeconds", 3).toInt());
+    m_monitoringIntervalSpin->setEnabled(m_monitoringCheck->isChecked());
+    connect(m_monitoringCheck, &QCheckBox::toggled, m_monitoringIntervalSpin, &QWidget::setEnabled);
+    auto* monitoringIntervalLayout = new QHBoxLayout();
+    monitoringIntervalLayout->addWidget(new QLabel(tr("Update interval:"), monitoringGroup));
+    monitoringIntervalLayout->addWidget(m_monitoringIntervalSpin);
+    monitoringLayout->addLayout(monitoringIntervalLayout);
+    appLayout->addWidget(monitoringGroup);
+
     appLayout->addStretch();
     tabWidget->addTab(appearanceScroll, tr("Appearance"));
 
@@ -465,6 +484,8 @@ void SettingsDialog::saveSettings() {
     settings.setValue("terminal/loggingEnabled", m_loggingEnabled);
     settings.setValue("terminal/logDirectory", m_logDir);
     settings.setValue("sftp/maxParallelTransfers", m_parallelTransfersSpin->value());
+    settings.setValue("ssh/monitoringEnabled", m_monitoringCheck->isChecked());
+    settings.setValue("ssh/monitoringIntervalSeconds", m_monitoringIntervalSpin->value());
 
     if (newLang != m_lang) {
         settings.setValue("locale/lang", newLang);

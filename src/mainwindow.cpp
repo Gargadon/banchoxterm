@@ -1595,6 +1595,8 @@ void MainWindow::applyThemeMode(const QString& mode) {
 void MainWindow::onOpenSettings() {
     SettingsDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
+        if (!QSettings().value("ssh/monitoringEnabled", true).toBool())
+            m_remoteMonitorWidget->hide();
         for (QWidget* window : QApplication::topLevelWidgets())
             TerminalAppearance::refreshWindow(window);
         if (dialog.themeMode() != m_themeMode)
@@ -1610,6 +1612,12 @@ void MainWindow::onOpenSettings() {
                     tab->updateFontFromSettings();
                 }
             }
+        }
+        // Detached terminals also keep live SSH connections.
+        for (QWidget* widget : QApplication::allWidgets()) {
+            auto* tab = qobject_cast<TerminalTab*>(widget);
+            if (tab && tab->connection())
+                QMetaObject::invokeMethod(tab->connection(), "reloadMonitoringSettings", Qt::QueuedConnection);
         }
     }
 }
@@ -1926,7 +1934,7 @@ void MainWindow::onRemoteStatsUpdated(double cpu, double mem, double disk, doubl
     m_remoteMemValue->setText(QString("%1%").arg(mem, 0, 'f', 0));
     m_remoteDiskValue->setText(QString("%1%").arg(disk, 0, 'f', 0));
     m_remoteUptimeValue->setText(uptimeStr);
-    m_remoteMonitorWidget->setVisible(true);
+    m_remoteMonitorWidget->setVisible(QSettings().value("ssh/monitoringEnabled", true).toBool());
 }
 
 void MainWindow::setupMenuBar() {

@@ -2741,6 +2741,22 @@ Do you want to continue?</source>
         <source>The shortcut %1 is assigned to both '%2' and '%3'. Choose different shortcuts.</source>
         <translation>El atajo %1 está asignado a '%2' y a '%3'. Elige atajos diferentes.</translation>
     </message>
+    <message>
+        <source>SSH resource monitoring</source>
+        <translation>Monitoreo de recursos SSH</translation>
+    </message>
+    <message>
+        <source>Enable resource monitoring</source>
+        <translation>Activar monitoreo de recursos</translation>
+    </message>
+    <message>
+        <source> seconds</source>
+        <translation> segundos</translation>
+    </message>
+    <message>
+        <source>Update interval:</source>
+        <translation>Intervalo de actualización:</translation>
+    </message>
 </context>
 <context>
     <name>SftpSidebar</name>

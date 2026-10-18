@@ -42,6 +42,7 @@ public slots:
                        const QString& sessionId = QString());
     void setX11Forwarding(bool enabled);
     void setKeepAliveSeconds(int seconds);
+    void reloadMonitoringSettings();
     void setCipherAlgorithms(const QString& ciphers);
     void setKexAlgorithm(const QString& kex);
     void setMacAlgorithm(const QString& mac);
@@ -181,10 +182,16 @@ private:
     QString m_language;
 
     // non-blocking stats query state machine
-    enum class StatsState { Idle, Opening, Execing, Reading };
+    enum class StatsState { Idle, Opening, Execing, Writing, Reading, Closing, Freeing };
     StatsState m_statsState = StatsState::Idle;
     LIBSSH2_CHANNEL* m_statsChannel = nullptr;
     QByteArray m_statsBuffer;
+    QByteArray m_statsCommand;
+    QElapsedTimer m_statsSampleTimer;
+    int m_statsIntervalSeconds = 3;
+    bool m_statsEnabled = true;
+    bool m_statsSamplePending = false;
+    bool m_statsReceivedSample = false;
     bool m_remoteIsWindows = false;
 
     // Event-loop kick guard: when libssh2 is buffering data internally without
