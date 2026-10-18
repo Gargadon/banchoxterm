@@ -51,8 +51,8 @@ void RdpClientWidget::stop() {
     m_connected = false;
 }
 BOOL RdpClientWidget::authenticate(freerdp*, char**, char**, char**, rdp_auth_reason) {
-    // Credentials are collected in Qt before connecting; never prompt on stdin.
-    return FALSE;
+    // Continue with credentials already collected in Qt. FALSE would abort the connection.
+    return TRUE;
 }
 BOOL RdpClientWidget::postConnect(freerdp* instance) {
     if (!gdi_init(instance, PIXEL_FORMAT_BGRX32))

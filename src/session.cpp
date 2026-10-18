@@ -100,6 +100,8 @@ QJsonObject Session::toJson() const {
     json["id"] = id;
     json["name"] = name;
     json["group"] = group;
+    json["tags"] = tags;
+    json["notes"] = notes;
     json["favorite"] = favorite;
     json["type"] = sessionTypeToString(type);
     json["host"] = host;
@@ -165,6 +167,8 @@ Session Session::fromJson(const QJsonObject& json) {
     }
     s.name = json["name"].toString();
     s.group = json["group"].toString();
+    s.tags = json["tags"].toObject();
+    s.notes = json["notes"].toString();
     s.favorite = json["favorite"].toBool(false);
     s.type = sessionTypeFromString(json["type"].toString());
     s.host = json["host"].toString();

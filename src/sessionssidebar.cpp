@@ -1,3 +1,11 @@
+#include <QDropEvent>
+#include "sessiontags.h"
+#include <QInputDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QTreeWidgetItemIterator>
+#include <functional>
+#include <QTimer>
 #include "sessionssidebar.h"
 #include "sessiondialog.h"
 #include <QVBoxLayout>
@@ -23,6 +31,41 @@
 namespace {
 constexpr int kSessionIdRole = Qt::UserRole;
 constexpr int kIsGroupRole = Qt::UserRole + 1;
+constexpr int kGroupPathRole = Qt::UserRole + 2;
+// Reject duplicate sibling groups rather than merging their paths on reload.
+class SessionTree : public QTreeWidget {
+public:
+    explicit SessionTree(QWidget* parent) : QTreeWidget(parent) {
+    }
+
+protected:
+    void dropEvent(QDropEvent* event) override {
+        auto* target = itemAt(event->position().toPoint());
+        QTreeWidgetItem* parent = nullptr;
+        if (target)
+            parent = dropIndicatorPosition() == OnItem ? target : target->parent();
+        for (auto* moving : selectedItems()) {
+            if (!moving->data(0, kIsGroupRole).toBool())
+                continue;
+            for (auto* ancestor = parent; ancestor; ancestor = ancestor->parent()) {
+                if (ancestor == moving) {
+                    event->ignore();
+                    return;
+                }
+            }
+            const int count = parent ? parent->childCount() : topLevelItemCount();
+            for (int i = 0; i < count; ++i) {
+                auto* sibling = parent ? parent->child(i) : topLevelItem(i);
+                if (sibling != moving && sibling->data(0, kIsGroupRole).toBool() &&
+                    sibling->text(0) == moving->text(0)) {
+                    event->ignore();
+                    return;
+                }
+            }
+        }
+        QTreeWidget::dropEvent(event);
+    }
+};
 } // namespace
 
 SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
@@ -54,12 +97,19 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     quickConnectRow->addWidget(m_quickConnectEdit, 1);
     layout->addLayout(quickConnectRow);
 
+    m_filterEdit = new QLineEdit(this);
+    m_filterEdit->setObjectName("sessionFilterEdit");
+    m_filterEdit->setPlaceholderText(tr("Filter sessions, groups or key:value tags"));
+    m_filterEdit->setClearButtonEnabled(true);
+    layout->addWidget(m_filterEdit);
+    connect(m_filterEdit, &QLineEdit::textChanged, this, &SessionsSidebar::applyFilter);
+
     auto* actionsLayout = new QHBoxLayout();
     actionsLayout->setSpacing(4);
     actionsLayout->setAlignment(Qt::AlignLeft);
     auto* newRemoteBtn = new QPushButton(QIcon(":/icons/add.svg"), QString(), this);
     newRemoteBtn->setObjectName("sessionActionButton");
-    newRemoteBtn->setToolTip(tr("Create a new SSH or remote session"));
+    newRemoteBtn->setToolTip(tr("Create a saved session"));
     newRemoteBtn->setAccessibleName(tr("New Remote Session"));
     actionsLayout->addWidget(newRemoteBtn);
 
@@ -88,7 +138,7 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     }
     layout->addLayout(actionsLayout);
 
-    m_treeWidget = new QTreeWidget(this);
+    m_treeWidget = new SessionTree(this);
     m_treeWidget->setColumnCount(2);
     m_treeWidget->setHeaderLabels({tr("Session"), tr("Endpoint")});
     m_treeWidget->header()->setStretchLastSection(true);
@@ -118,8 +168,17 @@ SessionsSidebar::SessionsSidebar(QWidget* parent) : QWidget(parent) {
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SessionsSidebar::showContextMenu);
     connect(m_treeWidget->model(), &QAbstractItemModel::rowsMoved, this,
             [this](const QModelIndex&, int, int, const QModelIndex&, int) { onSessionsReordered(); });
+    connect(m_treeWidget->model(), &QAbstractItemModel::rowsRemoved, this, [this]() {
+        if (!m_loading)
+            QTimer::singleShot(0, this, [this]() {
+                onSessionsReordered();
+                loadSessions();
+            });
+    });
     connect(m_quickConnectEdit, &QLineEdit::returnPressed, this, &SessionsSidebar::onQuickConnect);
 
+    connect(m_treeWidget, &QTreeWidget::itemCollapsed, this, [this]() { saveGroupState(); });
+    connect(m_treeWidget, &QTreeWidget::itemExpanded, this, [this]() { saveGroupState(); });
     loadSessions();
 }
 
@@ -172,6 +231,7 @@ void SessionsSidebar::refreshSessions() {
 }
 
 void SessionsSidebar::loadSessions() {
+    m_loading = true;
     m_treeWidget->clear();
     m_sessions = SessionManager::loadSessions();
     if (m_sessionSummaryLabel)
@@ -193,37 +253,43 @@ void SessionsSidebar::loadSessions() {
     m_quickConnectCompleter->setFilterMode(Qt::MatchContains);
     m_quickConnectEdit->setCompleter(m_quickConnectCompleter);
 
-    // Map group -> tree item, preserving first-seen order.
     QMap<QString, QTreeWidgetItem*> groupItems;
-
+    std::function<QTreeWidgetItem*(const QString&)> ensureGroup = [&](const QString& path) {
+        if (path.isEmpty())
+            return static_cast<QTreeWidgetItem*>(nullptr);
+        if (groupItems.contains(path))
+            return groupItems.value(path);
+        const int slash = path.lastIndexOf('/');
+        auto* parent = slash >= 0 ? ensureGroup(path.left(slash)) : nullptr;
+        auto* item = new QTreeWidgetItem();
+        item->setText(0, path.mid(slash + 1));
+        item->setFirstColumnSpanned(true);
+        item->setIcon(0, QIcon(":/icons/folder.svg"));
+        QFont font = m_treeWidget->font();
+        font.setWeight(QFont::DemiBold);
+        item->setFont(0, font);
+        const auto notes = settings.value("sessions/groupMetadata").toMap().value(path).toMap().value("notes").toString();
+        item->setToolTip(0, tr("Session group: %1").arg(path) + (notes.isEmpty() ? QString() : '\n' + notes));
+        item->setData(0, kIsGroupRole, true);
+        item->setData(0, kGroupPathRole, path);
+        item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled | Qt::ItemIsDropEnabled);
+        if (parent)
+            parent->addChild(item);
+        else
+            m_treeWidget->addTopLevelItem(item);
+        groupItems.insert(path, item);
+        return item;
+    };
+    for (const QString& group : settings.value("sessions/groups").toStringList())
+        ensureGroup(group);
     for (const Session& session : m_sessions) {
-        QTreeWidgetItem* parent = nullptr;
-        if (!session.group.isEmpty()) {
-            auto it = groupItems.find(session.group);
-            if (it == groupItems.end()) {
-                auto* groupItem = new QTreeWidgetItem();
-                groupItem->setText(0, session.group);
-                groupItem->setFirstColumnSpanned(true);
-                groupItem->setIcon(0, QIcon(":/icons/folder.svg"));
-                QFont groupFont = m_treeWidget->font();
-                groupFont.setWeight(QFont::DemiBold);
-                groupItem->setFont(0, groupFont);
-                groupItem->setToolTip(0, tr("Session group: %1").arg(session.group));
-                groupItem->setData(0, kIsGroupRole, true);
-                groupItem->setData(0, kSessionIdRole, QString());
-                groupItem->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDropEnabled);
-                m_treeWidget->addTopLevelItem(groupItem);
-                groupItems.insert(session.group, groupItem);
-                parent = groupItem;
-            } else {
-                parent = it.value();
-            }
-        }
+        QTreeWidgetItem* parent = ensureGroup(session.group);
 
         auto* item = new QTreeWidgetItem();
         item->setText(0, session.favorite ? QStringLiteral("★ %1").arg(session.name) : session.name);
         item->setData(0, kSessionIdRole, session.id);
         item->setData(0, kIsGroupRole, false);
+        item->setFlags(item->flags() & ~Qt::ItemIsDropEnabled);
 
         switch (session.type) {
         case SessionType::SSH:
@@ -266,6 +332,7 @@ void SessionsSidebar::loadSessions() {
             break;
         }
 
+        if (!session.notes.isEmpty()) item->setToolTip(0, item->toolTip(0) + '\n' + session.notes);
         if (parent) {
             parent->addChild(item);
         } else {
@@ -273,7 +340,11 @@ void SessionsSidebar::loadSessions() {
         }
     }
 
-    m_treeWidget->expandAll();
+    const QStringList collapsed = settings.value("sessions/collapsedGroups").toStringList();
+    for (auto it = groupItems.cbegin(); it != groupItems.cend(); ++it)
+        it.value()->setExpanded(!collapsed.contains(it.key()));
+    m_loading = false;
+    applyFilter();
 }
 
 void SessionsSidebar::saveSessions() {
@@ -285,18 +356,9 @@ void SessionsSidebar::saveCurrentOrder() {
 }
 
 QTreeWidgetItem* SessionsSidebar::findSessionItem(const QString& id) const {
-    const int top = m_treeWidget->topLevelItemCount();
-    for (int i = 0; i < top; ++i) {
-        QTreeWidgetItem* item = m_treeWidget->topLevelItem(i);
-        if (!item->data(0, kIsGroupRole).toBool() && item->data(0, kSessionIdRole).toString() == id)
-            return item;
-        const int childCount = item->childCount();
-        for (int j = 0; j < childCount; ++j) {
-            QTreeWidgetItem* child = item->child(j);
-            if (child->data(0, kSessionIdRole).toString() == id)
-                return child;
-        }
-    }
+    for (QTreeWidgetItemIterator it(m_treeWidget); *it; ++it)
+        if (sessionIdForItem(*it) == id)
+            return *it;
     return nullptr;
 }
 
@@ -308,11 +370,12 @@ QString SessionsSidebar::sessionIdForItem(QTreeWidgetItem* item) const {
 
 void SessionsSidebar::onNewSession() {
     SessionDialog dialog(this);
+    dialog.setSaveSession(true);
     if (dialog.exec() == QDialog::Accepted) {
-        Session newSession = dialog.getSession();
-        m_sessions.append(newSession);
-        saveSessions();
-        loadSessions();
+        if (dialog.savesSession())
+            loadSessions();
+        else
+            emit connectSession(dialog.getSession());
     }
 }
 
@@ -505,9 +568,12 @@ void SessionsSidebar::onItemDoubleClicked(QTreeWidgetItem* item, int column) {
 
 void SessionsSidebar::showContextMenu(const QPoint& pos) {
     auto* item = m_treeWidget->itemAt(pos);
+    m_treeWidget->setCurrentItem(item);
     QString id = sessionIdForItem(item);
-    if (id.isEmpty())
+    if (id.isEmpty()) {
+        manageGroup(item, pos);
         return;
+    }
 
     QMenu menu(this);
     auto* connectAction = menu.addAction(QIcon(":/icons/terminal.svg"), tr("Connect"));
@@ -576,49 +642,231 @@ void SessionsSidebar::onDuplicateSession() {
 }
 
 void SessionsSidebar::onSessionsReordered() {
+    if (m_loading || !m_filterEdit->text().isEmpty())
+        return;
     QList<Session> reordered;
     QSet<QString> seen;
+    QStringList groups;
+    std::function<void(QTreeWidgetItem*, const QString&)> visit = [&](QTreeWidgetItem* item, const QString& parent) {
+        if (item->data(0, kIsGroupRole).toBool()) {
+            const QString path = parent.isEmpty() ? item->text(0) : parent + '/' + item->text(0);
+            const QString oldPath = item->data(0, kGroupPathRole).toString();
+            QSettings settings;
+            QVariantMap metadata = settings.value("sessions/groupMetadata").toMap();
+            if (oldPath != path && metadata.contains(oldPath)) {
+                metadata.insert(path, metadata.take(oldPath));
+                settings.setValue("sessions/groupMetadata", metadata);
+            }
+            item->setData(0, kGroupPathRole, path);
+            groups.append(path);
+            for (int i = 0; i < item->childCount(); ++i)
+                visit(item->child(i), path);
+        } else {
+            const QString id = sessionIdForItem(item);
+            for (Session session : m_sessions) {
+                if (session.id == id && !seen.contains(id)) {
+                    session.group = parent;
+                    reordered.append(session);
+                    seen.insert(id);
+                    break;
+                }
+            }
+            // Older trees may contain sessions dropped onto other sessions.
+            for (int i = 0; i < item->childCount(); ++i)
+                visit(item->child(i), parent);
+        }
+    };
+    for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i)
+        visit(m_treeWidget->topLevelItem(i), {});
+    for (const Session& session : m_sessions)
+        if (!seen.contains(session.id))
+            reordered.append(session);
+    m_sessions = reordered;
+    QSettings().setValue("sessions/groups", groups);
+    saveGroupState();
+    saveSessions();
+}
 
-    auto appendById = [&](const QString& id) {
-        for (const Session& s : m_sessions) {
-            if (s.id == id) {
-                Session copy = s;
-                copy.group.clear();
-                reordered.append(copy);
-                seen.insert(id);
+void SessionsSidebar::saveGroupState() {
+    if (m_loading || !m_filterEdit->text().isEmpty())
+        return;
+    QStringList collapsed;
+    for (QTreeWidgetItemIterator it(m_treeWidget); *it; ++it)
+        if ((*it)->data(0, kIsGroupRole).toBool() && !(*it)->isExpanded())
+            collapsed.append((*it)->data(0, kGroupPathRole).toString());
+    QSettings().setValue("sessions/collapsedGroups", collapsed);
+}
+
+void SessionsSidebar::applyFilter() {
+    const QString query = m_filterEdit->text().trimmed();
+    const QStringList terms = query.split(' ', Qt::SkipEmptyParts);
+    m_treeWidget->setDragEnabled(query.isEmpty());
+    m_treeWidget->setAcceptDrops(query.isEmpty());
+    const QVariantMap metadata = QSettings().value("sessions/groupMetadata").toMap();
+    std::function<bool(QTreeWidgetItem*)> visit = [&](QTreeWidgetItem* item) {
+        bool visible = false;
+        if (item->data(0, kIsGroupRole).toBool()) {
+            for (int i = 0; i < item->childCount(); ++i)
+                visible = visit(item->child(i)) || visible;
+            if (item->childCount() == 0)
+                visible =
+                    query.isEmpty() || item->data(0, kGroupPathRole).toString().contains(query, Qt::CaseInsensitive);
+            if (!query.isEmpty() && visible)
+                item->setExpanded(true);
+        } else {
+            for (const Session& session : m_sessions) {
+                if (session.id != sessionIdForItem(item))
+                    continue;
+                QString searchable =
+                    session.name + ' ' + session.host + ' ' + session.user + ' ' + session.group + ' ' + session.notes;
+                auto appendTags = [&](const QJsonObject& tags) {
+                    for (auto it = tags.begin(); it != tags.end(); ++it) {
+                        searchable += ' ' + it.key();
+                        for (const auto& value : it.value().toArray())
+                            searchable += ' ' + it.key() + ':' + value.toString();
+                    }
+                };
+                appendTags(session.tags);
+                QSet<QString> assignedKeys;
+                for (auto it = session.tags.begin(); it != session.tags.end(); ++it)
+                    assignedKeys.insert(it.key());
+                QString group = session.group;
+                while (!group.isEmpty()) {
+                    const auto data = metadata.value(group).toMap();
+                    searchable += ' ' + data.value("notes").toString();
+                    auto inherited = QJsonDocument::fromJson(data.value("tags").toByteArray()).object();
+                    const auto keys = inherited.keys();
+                    for (const QString& key : keys) {
+                        if (assignedKeys.contains(key))
+                            inherited.remove(key);
+                        assignedKeys.insert(key);
+                    }
+                    appendTags(inherited);
+                    const int slash = group.lastIndexOf('/');
+                    group = slash < 0 ? QString() : group.left(slash);
+                }
+                visible = true;
+                for (const QString& term : terms)
+                    visible = visible && searchable.contains(term, Qt::CaseInsensitive);
                 break;
             }
         }
+        item->setHidden(!visible);
+        return visible;
     };
+    m_loading = true;
+    for (int i = 0; i < m_treeWidget->topLevelItemCount(); ++i)
+        visit(m_treeWidget->topLevelItem(i));
+    if (query.isEmpty()) {
+        const auto collapsed = QSettings().value("sessions/collapsedGroups").toStringList();
+        for (QTreeWidgetItemIterator it(m_treeWidget); *it; ++it)
+            if ((*it)->data(0, kIsGroupRole).toBool())
+                (*it)->setExpanded(!collapsed.contains((*it)->data(0, kGroupPathRole).toString()));
+    }
+    m_loading = false;
+}
 
-    const int top = m_treeWidget->topLevelItemCount();
-    for (int i = 0; i < top; ++i) {
-        QTreeWidgetItem* item = m_treeWidget->topLevelItem(i);
-        if (item->data(0, kIsGroupRole).toBool()) {
-            const QString group = item->text(0);
-            for (int j = 0; j < item->childCount(); ++j) {
-                const QString id = item->child(j)->data(0, kSessionIdRole).toString();
-                for (const Session& s : m_sessions) {
-                    if (s.id == id) {
-                        Session copy = s;
-                        copy.group = group;
-                        reordered.append(copy);
-                        seen.insert(id);
-                        break;
-                    }
-                }
+void SessionsSidebar::manageGroup(QTreeWidgetItem* item, const QPoint& pos) {
+    QMenu menu(this);
+    auto* create = menu.addAction(tr("Create group"));
+    QAction* rename = nullptr;
+    QAction* remove = nullptr;
+    QAction* notes = nullptr;
+    QAction* tags = nullptr;
+    const QString path = item ? item->data(0, kGroupPathRole).toString() : QString();
+    if (item) {
+        rename = menu.addAction(tr("Rename group"));
+        notes = menu.addAction(tr("Edit group notes"));
+        tags = menu.addAction(tr("Edit group tags"));
+        remove = menu.addAction(tr("Delete group and its sessions"));
+    }
+    const auto selected = menu.exec(m_treeWidget->mapToGlobal(pos));
+    if (!selected)
+        return;
+    QSettings settings;
+    QStringList groups = settings.value("sessions/groups").toStringList();
+    for (QTreeWidgetItemIterator it(m_treeWidget); *it; ++it)
+        if ((*it)->data(0, kIsGroupRole).toBool())
+            groups.append((*it)->data(0, kGroupPathRole).toString());
+    groups.removeDuplicates();
+    QVariantMap metadata = settings.value("sessions/groupMetadata").toMap();
+    auto data = metadata.value(path).toMap();
+    bool ok = false;
+    if (selected == create || selected == rename) {
+        const QString name =
+            QInputDialog::getText(this, selected->text(), tr("Group name (use / for subgroups):"), QLineEdit::Normal,
+                                  selected == rename ? path
+                                  : path.isEmpty()   ? QString()
+                                                     : path + '/',
+                                  &ok)
+                .trimmed();
+        if (!ok || name.isEmpty() || name.startsWith('/') || name.endsWith('/') || name.contains("//") ||
+            groups.contains(name))
+            return;
+        if (selected == create)
+            groups.append(name);
+        else {
+            const auto replacePath = [&](const QString& value) {
+                return value == path || value.startsWith(path + '/') ? name + value.mid(path.size()) : value;
+            };
+            if (name.startsWith(path + '/'))
+                return;
+            for (const QString& group : groups) {
+                const QString renamed = replacePath(group);
+                if (renamed != group && groups.contains(renamed))
+                    return;
             }
-        } else {
-            appendById(item->data(0, kSessionIdRole).toString());
+            for (Session& session : m_sessions)
+                session.group = replacePath(session.group);
+            for (QString& group : groups)
+                group = replacePath(group);
+            QVariantMap changed;
+            for (auto it = metadata.begin(); it != metadata.end(); ++it)
+                changed.insert(replacePath(it.key()), it.value());
+            metadata = changed;
+            QStringList collapsed = settings.value("sessions/collapsedGroups").toStringList();
+            for (QString& group : collapsed)
+                group = replacePath(group);
+            settings.setValue("sessions/collapsedGroups", collapsed);
         }
+    } else if (selected == remove) {
+        if (localizedQuestion(this, tr("Delete group"),
+                              tr("Delete this group, its subgroups and all their saved sessions?"),
+                              QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+            return;
+        const auto belongs = [&](const QString& group) { return group == path || group.startsWith(path + '/'); };
+        for (int i = m_sessions.size() - 1; i >= 0; --i)
+            if (belongs(m_sessions[i].group))
+                m_sessions.removeAt(i);
+        for (int i = groups.size() - 1; i >= 0; --i)
+            if (belongs(groups[i])) {
+                metadata.remove(groups[i]);
+                groups.removeAt(i);
+            }
+    } else if (selected == notes) {
+        const QString text =
+            QInputDialog::getMultiLineText(this, tr("Group notes"), tr("Notes:"), data.value("notes").toString(), &ok);
+        if (!ok)
+            return;
+        data.insert("notes", text);
+        metadata.insert(path, data);
+    } else if (selected == tags) {
+        const QString text = QInputDialog::getMultiLineText(
+            this, tr("Group tags"), tr("One key:value per line (repeat keys for multiple values):"),
+            formatSessionTags(QJsonDocument::fromJson(data.value("tags").toByteArray()).object()), &ok);
+        if (!ok)
+            return;
+        bool valid = false;
+        const auto tags = parseSessionTags(text, &valid);
+        if (!valid) {
+            QMessageBox::warning(this, tr("Invalid tags"), tr("Enter one key:value pair per line."));
+            return;
+        }
+        data.insert("tags", QJsonDocument(tags).toJson(QJsonDocument::Compact));
+        metadata.insert(path, data);
     }
-
-    // Preserve any session that is not visible in the tree (safety net).
-    for (const Session& s : m_sessions) {
-        if (!seen.contains(s.id))
-            reordered.append(s);
-    }
-
-    m_sessions = reordered;
+    settings.setValue("sessions/groups", groups);
+    settings.setValue("sessions/groupMetadata", metadata);
     saveSessions();
+    loadSessions();
 }

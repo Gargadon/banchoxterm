@@ -1,3 +1,5 @@
+#include "sessiontags.h"
+#include <QPlainTextEdit>
 #include <QTest>
 #include <QCoreApplication>
 #include <QTemporaryDir>
@@ -253,6 +255,190 @@ private slots:
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            QDir(QDir::tempPath()).filePath("banchoxterm-test-settings"));
         QDir(settingsPath()).removeRecursively();
+    }
+
+    void testSessionOrganizationRoundtrip() {
+        Session original;
+        original.id = "organization";
+        original.group = "Production/Databases";
+        original.notes = "Database maintenance instructions";
+        original.tags = parseSessionTags("App:MiApp\nApp:OtherApp\nDatabase:PostgreSQL");
+        const Session restored = Session::fromJson(original.toJson());
+        QCOMPARE(restored.group, original.group);
+        QCOMPARE(restored.notes, original.notes);
+        QCOMPARE(restored.tags, original.tags);
+        QVERIFY(Session::fromJson(QJsonObject()).tags.isEmpty());
+        bool valid = false;
+        QCOMPARE(parseSessionTags(formatSessionTags(original.tags), &valid), original.tags);
+        QVERIFY(valid);
+        parseSessionTags("missing separator", &valid);
+        QVERIFY(!valid);
+    }
+
+    void testSessionSaveChoice() {
+        const auto previous = SessionManager::loadSessions();
+        const auto restore = qScopeGuard([&]() { SessionManager::saveSessions(previous); });
+        SessionManager::saveSessions({});
+        SessionDialog temporary;
+        temporary.findChild<QComboBox*>()->setCurrentIndex(1);
+        QVERIFY(!temporary.findChild<QCheckBox*>("saveSessionCheck")->isChecked());
+        temporary.accept();
+        QVERIFY(SessionManager::loadSessions().isEmpty());
+        SessionDialog saved;
+        saved.findChild<QComboBox*>()->setCurrentIndex(1);
+        saved.setSaveSession(true);
+        saved.findChild<QPlainTextEdit*>("sessionTagsEdit")->setPlainText("App:MiApp");
+        saved.findChild<QPlainTextEdit*>("sessionNotesEdit")->setPlainText("Example notes");
+        saved.accept();
+        auto sessions = SessionManager::loadSessions();
+        QCOMPARE(sessions.size(), 1);
+        QCOMPARE(sessions.first().notes, QString("Example notes"));
+        sessions.first().favorite = true;
+        SessionDialog edit(sessions.first());
+        edit.accept();
+        QCOMPARE(SessionManager::loadSessions().size(), 1);
+        QVERIFY(SessionManager::loadSessions().first().favorite);
+    }
+
+    void testSessionGroupsAndFiltering() {
+        const auto previous = SessionManager::loadSessions();
+        QSettings settings;
+        const auto oldGroups = settings.value("sessions/groups");
+        const auto oldCollapsed = settings.value("sessions/collapsedGroups");
+        const auto oldMetadata = settings.value("sessions/groupMetadata");
+        const auto restore = qScopeGuard([&]() {
+            SessionManager::saveSessions(previous);
+            settings.setValue("sessions/groups", oldGroups);
+            settings.setValue("sessions/collapsedGroups", oldCollapsed);
+            settings.setValue("sessions/groupMetadata", oldMetadata);
+        });
+        settings.setValue("sessions/groups", QStringList{"Production", "Development", "Empty"});
+        settings.remove("sessions/collapsedGroups");
+        QVariantMap groupData;
+        groupData.insert(
+            "tags", QJsonDocument(parseSessionTags("Environment:Live\nApp:OtherApp")).toJson(QJsonDocument::Compact));
+        QVariantMap metadata;
+        metadata.insert("Production", groupData);
+        settings.setValue("sessions/groupMetadata", metadata);
+        Session first;
+        first.id = "first";
+        first.name = "Primary";
+        first.group = "Production/Databases";
+        first.tags = parseSessionTags("App:MiApp\nDatabase:PostgreSQL");
+        Session second;
+        second.id = "second";
+        second.name = "Secondary";
+        second.group = "Development";
+        SessionManager::saveSessions({first, second});
+        SessionsSidebar sidebar;
+        auto* tree = sidebar.findChild<QTreeWidget*>("sessionTree");
+        auto* filter = sidebar.findChild<QLineEdit*>("sessionFilterEdit");
+        QCOMPARE(tree->topLevelItemCount(), 3);
+        auto* production = tree->topLevelItem(0);
+        production->setExpanded(false);
+        sidebar.refreshSessions();
+        production = tree->topLevelItem(0);
+        QVERIFY(!production->isExpanded());
+        QCOMPARE(production->child(0)->text(0), QString("Databases"));
+        filter->setText("App:MiApp Environment:Live");
+        QVERIFY(!production->isHidden());
+        QVERIFY(production->isExpanded());
+        QVERIFY(tree->topLevelItem(1)->isHidden());
+        filter->setText("App:OtherApp");
+        QVERIFY(production->isHidden()); // Session values override group defaults for the same key.
+        filter->clear();
+        QVERIFY(!production->isExpanded());
+        filter->setText("no-match");
+        QVERIFY(production->isHidden());
+        filter->clear();
+        auto* development = tree->takeTopLevelItem(1);
+        production->addChild(development);
+        sidebar.saveCurrentOrder();
+        QCOMPARE(SessionManager::loadSessions().last().group, QString("Production/Development"));
+        sidebar.refreshSessions();
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 2);
+        QVERIFY(settings.value("sessions/groups").toStringList().contains("Empty"));
+    }
+
+    void testGroupManagement() {
+        QSettings settings;
+        const auto previous = SessionManager::loadSessions();
+        const auto oldGroups = settings.value("sessions/groups");
+        const auto oldCollapsed = settings.value("sessions/collapsedGroups");
+        const auto oldMetadata = settings.value("sessions/groupMetadata");
+        const auto restore = qScopeGuard([&]() {
+            SessionManager::saveSessions(previous);
+            settings.setValue("sessions/groups", oldGroups);
+            settings.setValue("sessions/collapsedGroups", oldCollapsed);
+            settings.setValue("sessions/groupMetadata", oldMetadata);
+        });
+        settings.setValue("sessions/groups", QStringList{"Production", "Production/Database"});
+        settings.setValue("sessions/collapsedGroups", QStringList{"Production"});
+        settings.remove("sessions/groupMetadata");
+        Session session;
+        session.id = "group-management";
+        session.group = "Production/Database";
+        SessionManager::saveSessions({session});
+        SessionsSidebar sidebar;
+        sidebar.resize(500, 600);
+        sidebar.show();
+        auto* tree = sidebar.findChild<QTreeWidget*>("sessionTree");
+        auto runAction = [&](const QString& name, const QString& text, bool deleting = false) {
+            QTimer::singleShot(0, &sidebar, [&, name, text, deleting]() {
+                auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+                if (!menu)
+                    return;
+                QAction* selected = nullptr;
+                for (auto* action : menu->actions())
+                    if (action->text() == name)
+                        selected = action;
+                if (!selected) {
+                    menu->close();
+                    return;
+                }
+                QTimer::singleShot(0, &sidebar, [text, deleting]() {
+                    if (deleting) {
+                        auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+                        if (box)
+                            box->button(QMessageBox::Yes)->click();
+                    } else {
+                        auto* input = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+                        if (input) {
+                            input->setTextValue(text);
+                            input->accept();
+                        }
+                    }
+                });
+                menu->setActiveAction(selected);
+                QTest::keyClick(menu, Qt::Key_Return);
+            });
+            return QMetaObject::invokeMethod(&sidebar, "showContextMenu", Qt::DirectConnection,
+                                             Q_ARG(QPoint, tree->visualItemRect(tree->topLevelItem(0)).center()));
+        };
+        QVERIFY(runAction("Edit group notes", "Production runbook"));
+        QVERIFY(runAction("Edit group tags", "App:MiApp\nApp:OtherApp"));
+        {
+            SessionDialog dialog(session);
+            auto* choices = dialog.findChild<QComboBox*>("groupTagChoices");
+            QVERIFY(choices);
+            QCOMPARE(choices->count(), 3);
+            const int index = choices->findText("App:MiApp");
+            QVERIFY(index > 0);
+            QVERIFY(QMetaObject::invokeMethod(choices, "activated", Q_ARG(int, index)));
+            QCOMPARE(dialog.getSession().tags, parseSessionTags("App:MiApp"));
+        }
+        QVERIFY(runAction("Rename group", "Live"));
+        QCOMPARE(SessionManager::loadSessions().first().group, QString("Live/Database"));
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("Live"));
+        QVERIFY(!tree->topLevelItem(0)->isExpanded());
+        QCOMPARE(settings.value("sessions/groupMetadata").toMap().value("Live").toMap().value("notes").toString(),
+                 QString("Production runbook"));
+        QVERIFY(runAction("Create group", "Live/Empty"));
+        QVERIFY(settings.value("sessions/groups").toStringList().contains("Live/Empty"));
+        QVERIFY(runAction("Delete group and its sessions", {}, true));
+        QVERIFY(SessionManager::loadSessions().isEmpty());
+        QCOMPARE(tree->topLevelItemCount(), 0);
+        QVERIFY(settings.value("sessions/groupMetadata").toMap().isEmpty());
     }
 
     void testSshSessionRoundtrip() {

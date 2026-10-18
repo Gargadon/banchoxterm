@@ -31,6 +31,8 @@ struct Session {
     QString id;
     QString name;
     QString group;
+    QJsonObject tags; // Keys map to arrays of values.
+    QString notes;
     bool favorite = false;
     SessionType type = SessionType::Local;
 

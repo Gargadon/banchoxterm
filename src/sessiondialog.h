@@ -11,6 +11,7 @@ class QTableWidget;
 class QPushButton;
 class QLabel;
 class QFont;
+class QPlainTextEdit;
 
 class SessionDialog : public QDialog {
     Q_OBJECT
@@ -20,6 +21,8 @@ public:
 
     Session getSession() const;
     void accept() override;
+    void setSaveSession(bool save, bool editable = true);
+    bool savesSession() const;
 
 private:
     void setupUi();
@@ -27,6 +30,10 @@ private:
 
     QLineEdit* m_nameEdit;
     QLineEdit* m_groupEdit;
+    QPlainTextEdit* m_tagsEdit;
+    QPlainTextEdit* m_notesEdit;
+    QCheckBox* m_saveSessionCheck;
+    bool m_favorite = false;
     QComboBox* m_typeCombo;
     QStackedWidget* m_stackedWidget;
     QWidget* m_terminalSettingsWidget = nullptr;

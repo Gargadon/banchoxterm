@@ -37,6 +37,9 @@ private slots:
 
 private:
     void loadSessions();
+    void applyFilter();
+    void saveGroupState();
+    void manageGroup(QTreeWidgetItem* item, const QPoint& pos);
     void saveSessions();
     void onSessionsReordered();
     void recordRecent(const Session& session);
@@ -44,6 +47,8 @@ private:
     QString sessionIdForItem(QTreeWidgetItem* item) const;
 
     QTreeWidget* m_treeWidget;
+    QLineEdit* m_filterEdit = nullptr;
+    bool m_loading = false;
     QLineEdit* m_quickConnectEdit = nullptr;
     QCompleter* m_quickConnectCompleter = nullptr;
     QLabel* m_sessionSummaryLabel = nullptr;

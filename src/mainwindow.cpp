@@ -63,6 +63,23 @@
 #include <QPointer>
 
 namespace {
+class RibbonStatusContext : public QWidget {
+public:
+    explicit RibbonStatusContext(QTabBar* tabBar, QWidget* parent) : QWidget(parent), m_tabBar(tabBar) {
+    }
+
+    QSize sizeHint() const override {
+        QSize size = QWidget::sizeHint();
+        // QTabWidget bottom-aligns its corner widget. Match the tab header's
+        // height so the session status shares the tabs' vertical alignment.
+        size.setHeight(qMax(size.height(), m_tabBar->sizeHint().height()));
+        return size;
+    }
+
+private:
+    QTabBar* m_tabBar;
+};
+
 void logMacroEvent(const Session& session, const QString& message) {
     QSettings settings;
     QStringList entries = settings.value(QStringLiteral("macros/log")).toStringList();
@@ -434,8 +451,10 @@ void MainWindow::setupUi() {
     newRemoteAction->setToolTip(tr("Create a new remote session"));
     connect(newRemoteAction, &QAction::triggered, this, [this]() {
         SessionDialog dialog(this);
-        if (dialog.exec() == QDialog::Accepted)
+        if (dialog.exec() == QDialog::Accepted) {
+            m_sessionsSidebar->refreshSessions();
             onConnectSession(dialog.getSession());
+        }
     });
 
     auto* localAction = toolBar->addAction(QIcon(":/icons/terminal.svg"), tr("Local"));
@@ -638,7 +657,7 @@ void MainWindow::setupUi() {
     m_contextSessionLabel->setObjectName("sessionContextSession");
     sessionContextLayout->addWidget(m_contextProtocolLabel);
     sessionContextLayout->addWidget(m_contextSessionLabel);
-    auto* statusContext = new QWidget(ribbonTabs);
+    auto* statusContext = new RibbonStatusContext(ribbonTabs->tabBar(), ribbonTabs);
     statusContext->setObjectName("statusContextWidget");
     auto* statusContextLayout = new QHBoxLayout(statusContext);
     statusContextLayout->setContentsMargins(8, 0, 2, 0);
@@ -915,8 +934,10 @@ void MainWindow::setupUi() {
 
     connect(welcomeRemoteButton, &QPushButton::clicked, this, [this]() {
         SessionDialog dialog(this);
-        if (dialog.exec() == QDialog::Accepted)
+        if (dialog.exec() == QDialog::Accepted) {
+            m_sessionsSidebar->refreshSessions();
             onConnectSession(dialog.getSession());
+        }
     });
     connect(welcomeLocalButton, &QPushButton::clicked, this, &MainWindow::onNewLocalTerminal);
     connect(allSessionsButton, &QPushButton::clicked, this, [this]() {
@@ -1944,6 +1965,7 @@ void MainWindow::setupMenuBar() {
     connect(newTabAction, &QAction::triggered, this, [this]() {
         SessionDialog dialog(this);
         if (dialog.exec() == QDialog::Accepted) {
+            m_sessionsSidebar->refreshSessions();
             onConnectSession(dialog.getSession());
         }
     });
@@ -2210,8 +2232,10 @@ void MainWindow::showCommandPalette() {
 
     if (command == tr("New Remote Session")) {
         SessionDialog dialog(this);
-        if (dialog.exec() == QDialog::Accepted)
+        if (dialog.exec() == QDialog::Accepted) {
+            m_sessionsSidebar->refreshSessions();
             onConnectSession(dialog.getSession());
+        }
     } else if (command == tr("Open Local Terminal")) {
         onNewLocalTerminal();
     } else if (command == tr("Toggle Split View")) {
@@ -2626,13 +2650,16 @@ void MainWindow::setRibbonExpanded(bool expanded) {
     if (!m_ribbonTabs || !m_ribbonToolBar || !m_ribbonToggle)
         return;
 
-    // The styled tabs and corner controls can be taller than 30 px, especially
-    // with larger fonts or DPI scaling. Keep the entire header and a small
-    // bottom inset visible when the command pages are collapsed.
+    // Hide the command page instead of relying on clipping its height, which
+    // can leave the buttons' top borders visible below the tab header.
+    if (auto* page = m_ribbonTabs->currentWidget())
+        page->setVisible(expanded);
+
+    // Keep the entire styled header visible with larger fonts or DPI scaling.
     int headerHeight = m_ribbonTabs->tabBar()->sizeHint().height();
     if (auto* corner = m_ribbonTabs->cornerWidget(Qt::TopRightCorner))
         headerHeight = qMax(headerHeight, corner->sizeHint().height());
-    const int tabsHeight = expanded ? 94 : headerHeight + 4;
+    const int tabsHeight = expanded ? 94 : headerHeight;
     m_ribbonTabs->setFixedHeight(tabsHeight);
     m_ribbonToolBar->setFixedHeight(tabsHeight + 4);
     m_ribbonToggle->setIcon(QIcon(expanded ? ":/icons/chevron-up.svg" : ":/icons/chevron-down.svg"));

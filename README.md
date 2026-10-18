@@ -25,6 +25,29 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Dark & Light themes** — the default interface adapts to the system or can be forced to light/dark mode
 - **Internationalization** — English, Spanish, and Portuguese
 
+## Organizing sessions
+
+Use **Save this session** in the session dialog to keep a profile. The sidebar's
+add button selects this option by default; other entry points initially create a
+temporary connection. QuickConnect remains available above the separate filter.
+
+Right-click a group (or empty space in the session tree) to create groups, rename
+them, edit their notes and tags, or delete a group with all its saved sessions.
+Use `/` in group names for subgroups, such as `Production/Databases`. Drag groups
+or sessions to reorder or nest them. Group order and collapsed state survive
+refreshes and restarts.
+
+Enter tags as one `key:value` pair per line. Repeat a key for several values,
+for example `App:MiApp` and `App:OtherApp`. Group tags provide inherited defaults;
+a session's values override group defaults for the same key. The session editor
+also offers a picker for values defined in its group or parent groups.
+
+The filter matches names, endpoints, groups, notes, tag keys and `key:value`
+pairs, ignoring case. Combine terms with spaces, for example
+`Production App:MiApp`. Clearing the filter restores the previous collapsed
+state. Notes and tags on sessions travel with JSON and encrypted session exports;
+group notes, defaults, ordering and collapsed state are local preferences.
+
 ## SSH resource monitoring
 
 Configure monitoring in **Configuration > Appearance > SSH resource monitoring**.

@@ -1,3 +1,7 @@
+#include <QJsonDocument>
+#include <QSettings>
+#include "sessiontags.h"
+#include <QPlainTextEdit>
 #include "sessiondialog.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -177,10 +181,64 @@ void SessionDialog::setupUi() {
     auto* groupLayout = new QHBoxLayout();
     auto* groupLabel = new QLabel(tr("Group:"), this);
     m_groupEdit = new QLineEdit(this);
-    m_groupEdit->setPlaceholderText(tr("Optional (e.g. Production)"));
+    m_groupEdit->setPlaceholderText(tr("Optional (e.g. Production/Databases)"));
     groupLayout->addWidget(groupLabel);
     groupLayout->addWidget(m_groupEdit);
     identityLayout->addLayout(groupLayout);
+    m_saveSessionCheck = new QCheckBox(tr("Save this session"), this);
+    m_saveSessionCheck->setObjectName("saveSessionCheck");
+    identityLayout->addWidget(m_saveSessionCheck);
+    m_tagsEdit = new QPlainTextEdit(this);
+    m_tagsEdit->setObjectName("sessionTagsEdit");
+    m_tagsEdit->setPlaceholderText(tr("One key:value per line, e.g. App:MiApp\nApp:OtherApp"));
+    m_tagsEdit->setMaximumHeight(70);
+    identityLayout->addWidget(new QLabel(tr("Tags (key: values):"), this));
+    identityLayout->addWidget(m_tagsEdit);
+    auto* groupTagChoices = new QComboBox(this);
+    groupTagChoices->setObjectName("groupTagChoices");
+    groupTagChoices->setToolTip(tr("Choose a tag defined in this group"));
+    identityLayout->addWidget(groupTagChoices);
+    auto updateGroupTags = [this, groupTagChoices]() {
+        groupTagChoices->clear();
+        groupTagChoices->addItem(tr("Add a group tag…"), QString());
+        const auto metadata = QSettings().value("sessions/groupMetadata").toMap();
+        QString group = m_groupEdit->text().trimmed();
+        QStringList choices;
+        while (!group.isEmpty()) {
+            const auto tags =
+                QJsonDocument::fromJson(metadata.value(group).toMap().value("tags").toByteArray()).object();
+            choices.append(formatSessionTags(tags).split('\n', Qt::SkipEmptyParts));
+            const int slash = group.lastIndexOf('/');
+            group = slash < 0 ? QString() : group.left(slash);
+        }
+        choices.removeDuplicates();
+        for (const QString& choice : choices)
+            groupTagChoices->addItem(choice, choice);
+        groupTagChoices->setEnabled(!choices.isEmpty());
+    };
+    connect(m_groupEdit, &QLineEdit::textChanged, this, updateGroupTags);
+    connect(groupTagChoices, &QComboBox::activated, this, [this, groupTagChoices](int index) {
+        const QString tag = groupTagChoices->itemData(index).toString();
+        if (!tag.isEmpty()) {
+            auto tags = parseSessionTags(m_tagsEdit->toPlainText());
+            const auto added = parseSessionTags(tag);
+            for (auto it = added.begin(); it != added.end(); ++it) {
+                auto values = tags.value(it.key()).toArray();
+                for (const auto& value : it.value().toArray())
+                    if (!values.contains(value))
+                        values.append(value);
+                tags.insert(it.key(), values);
+            }
+            m_tagsEdit->setPlainText(formatSessionTags(tags));
+        }
+        groupTagChoices->setCurrentIndex(0);
+    });
+    updateGroupTags();
+    m_notesEdit = new QPlainTextEdit(this);
+    m_notesEdit->setObjectName("sessionNotesEdit");
+    m_notesEdit->setMaximumHeight(90);
+    identityLayout->addWidget(new QLabel(tr("Notes:"), this));
+    identityLayout->addWidget(m_notesEdit);
     contentLayout->addWidget(identityPanel);
 
     m_stackedWidget = new QStackedWidget(this);
@@ -773,10 +831,15 @@ void SessionDialog::setupUi() {
     btnLayout->addStretch();
     auto* cancelBtn = new QPushButton(tr("Cancel"), this);
     cancelBtn->setObjectName("cancelButton");
-    auto* saveBtn = new QPushButton(tr("Save"), this);
+    auto* saveBtn = new QPushButton(tr("Connect"), this);
     saveBtn->setObjectName("primaryButton");
 
     btnLayout->addWidget(cancelBtn);
+    auto updateAction = [this, saveBtn]() {
+        saveBtn->setText(m_saveSessionCheck->isChecked() ? tr("Save") : tr("Connect"));
+    };
+    connect(m_saveSessionCheck, &QCheckBox::toggled, this, updateAction);
+    updateAction();
     btnLayout->addWidget(saveBtn);
     mainLayout->addLayout(btnLayout);
 
@@ -787,6 +850,10 @@ void SessionDialog::setupUi() {
 void SessionDialog::loadSession(const Session& session) {
     m_nameEdit->setText(session.name);
     m_groupEdit->setText(session.group);
+    m_favorite = session.favorite;
+    m_tagsEdit->setPlainText(formatSessionTags(session.tags));
+    m_notesEdit->setPlainText(session.notes);
+    setSaveSession(true, false);
 
     switch (session.type) {
     case SessionType::SSH:
@@ -964,6 +1031,9 @@ Session SessionDialog::getSession() const {
     s.id = m_id;
     s.name = m_nameEdit->text().trimmed();
     s.group = m_groupEdit->text().trimmed();
+    s.favorite = m_favorite;
+    s.tags = parseSessionTags(m_tagsEdit->toPlainText());
+    s.notes = m_notesEdit->toPlainText();
 
     int index = m_typeCombo->currentIndex();
     if (s.name.isEmpty()) {
@@ -1093,7 +1163,23 @@ Session SessionDialog::getSession() const {
     return s;
 }
 
+bool SessionDialog::savesSession() const {
+    return m_saveSessionCheck->isChecked();
+}
+
+void SessionDialog::setSaveSession(bool save, bool editable) {
+    m_saveSessionCheck->setChecked(save);
+    m_saveSessionCheck->setEnabled(editable);
+}
+
 void SessionDialog::accept() {
+    bool validTags = false;
+    parseSessionTags(m_tagsEdit->toPlainText(), &validTags);
+    if (!validTags) {
+        QMessageBox::warning(this, tr("Invalid tags"),
+                             tr("Enter one key:value pair per line. Repeat a key to add more values."));
+        return;
+    }
     const QString breakSequence = m_ciscoBreakEdit->text().remove(' ').trimmed();
     static const QRegularExpression hexBytes(QStringLiteral("^[0-9A-Fa-f]{2,64}$"));
     if (!hexBytes.match(breakSequence).hasMatch() || (breakSequence.size() % 2) != 0) {
@@ -1149,6 +1235,21 @@ void SessionDialog::accept() {
         } else {
             Keyring::deletePassword(m_id);
         }
+    }
+    if (m_saveSessionCheck->isChecked()) {
+        auto sessions = SessionManager::loadSessions();
+        const Session session = getSession();
+        bool found = false;
+        for (Session& saved : sessions) {
+            if (saved.id == session.id) {
+                saved = session;
+                found = true;
+                break;
+            }
+        }
+        if (!found)
+            sessions.append(session);
+        SessionManager::saveSessions(sessions);
     }
     QDialog::accept();
 }

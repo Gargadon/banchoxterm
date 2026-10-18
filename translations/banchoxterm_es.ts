@@ -2161,6 +2161,48 @@ Do you want to continue?</source>
         <source>Local Shell</source>
         <translation>Consola local</translation>
     </message>
+    <message>
+        <source>Save this session</source>
+        <translation>Guardar esta sesión</translation>
+    </message>
+    <message>
+        <source>Connect</source>
+        <translation>Conectar</translation>
+    </message>
+    <message>
+        <source>One key:value per line, e.g. App:MiApp
+App:OtherApp</source>
+        <translation>Una clave:valor por línea, p. ej. App:MiApp
+App:OtraApp</translation>
+    </message>
+    <message>
+        <source>Tags (key: values):</source>
+        <translation>Etiquetas (clave: valores):</translation>
+    </message>
+    <message>
+        <source>Notes:</source>
+        <translation>Notas:</translation>
+    </message>
+    <message>
+        <source>Invalid tags</source>
+        <translation>Etiquetas no válidas</translation>
+    </message>
+    <message>
+        <source>Enter one key:value pair per line. Repeat a key to add more values.</source>
+        <translation>Introduce un par clave:valor por línea. Repite una clave para añadir más valores.</translation>
+    </message>
+    <message>
+        <source>Optional (e.g. Production/Databases)</source>
+        <translation>Opcional (p. ej. Producción/Bases de datos)</translation>
+    </message>
+    <message>
+        <source>Choose a tag defined in this group</source>
+        <translation>Escoge una etiqueta definida en este grupo</translation>
+    </message>
+    <message>
+        <source>Add a group tag…</source>
+        <translation>Añadir una etiqueta del grupo…</translation>
+    </message>
 </context>
 <context>
     <name>SessionsSidebar</name>
@@ -2413,6 +2455,70 @@ Do you want to continue?</source>
         <location filename="../src/sessionssidebar.cpp" line="565"/>
         <source> (copy)</source>
         <translation>(copia)</translation>
+    </message>
+    <message>
+        <source>Notes:</source>
+        <translation>Notas:</translation>
+    </message>
+    <message>
+        <source>Invalid tags</source>
+        <translation>Etiquetas no válidas</translation>
+    </message>
+    <message>
+        <source>Filter sessions, groups or key:value tags</source>
+        <translation>Filtrar sesiones, grupos o etiquetas clave:valor</translation>
+    </message>
+    <message>
+        <source>Create a saved session</source>
+        <translation>Crear una sesión guardada</translation>
+    </message>
+    <message>
+        <source>Create group</source>
+        <translation>Crear grupo</translation>
+    </message>
+    <message>
+        <source>Rename group</source>
+        <translation>Renombrar grupo</translation>
+    </message>
+    <message>
+        <source>Edit group notes</source>
+        <translation>Editar notas del grupo</translation>
+    </message>
+    <message>
+        <source>Edit group tags</source>
+        <translation>Editar etiquetas del grupo</translation>
+    </message>
+    <message>
+        <source>Delete group and its sessions</source>
+        <translation>Eliminar grupo y sus sesiones</translation>
+    </message>
+    <message>
+        <source>Group name (use / for subgroups):</source>
+        <translation>Nombre del grupo (usa / para subgrupos):</translation>
+    </message>
+    <message>
+        <source>Delete group</source>
+        <translation>Eliminar grupo</translation>
+    </message>
+    <message>
+        <source>Delete this group, its subgroups and all their saved sessions?</source>
+        <translation>¿Eliminar este grupo, sus subgrupos y todas sus sesiones guardadas?</translation>
+    </message>
+    <message>
+        <source>Group notes</source>
+        <translation>Notas del grupo</translation>
+    </message>
+    <message>
+        <source>Group tags</source>
+        <translation>Etiquetas del grupo</translation>
+    </message>
+    <message>
+        <source>One key:value per line (repeat keys for multiple values):</source>
+        <translation>Una clave:valor por línea (repite claves para varios valores):</translation>
+    </message>
+    <message>
+        <source>Enter one key:value pair per line.</source>
+        <translation>Introduce un par clave:valor por línea.</translation>
     </message>
 </context>
 <context>
