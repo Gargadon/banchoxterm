@@ -39,6 +39,7 @@ private:
     void loadSessions();
     void applyFilter();
     void saveGroupState();
+    void saveTreeOrder();
     void manageGroup(QTreeWidgetItem* item, const QPoint& pos);
     void saveSessions();
     void onSessionsReordered();

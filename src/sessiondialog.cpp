@@ -836,7 +836,9 @@ void SessionDialog::setupUi() {
 
     btnLayout->addWidget(cancelBtn);
     auto updateAction = [this, saveBtn]() {
-        saveBtn->setText(m_saveSessionCheck->isChecked() ? tr("Save") : tr("Connect"));
+        saveBtn->setText(!m_saveSessionCheck->isEnabled() ? tr("Save")
+                        : m_saveSessionCheck->isChecked()  ? tr("Save and connect")
+                                                          : tr("Connect"));
     };
     connect(m_saveSessionCheck, &QCheckBox::toggled, this, updateAction);
     updateAction();
@@ -1168,8 +1170,8 @@ bool SessionDialog::savesSession() const {
 }
 
 void SessionDialog::setSaveSession(bool save, bool editable) {
-    m_saveSessionCheck->setChecked(save);
     m_saveSessionCheck->setEnabled(editable);
+    m_saveSessionCheck->setChecked(save);
 }
 
 void SessionDialog::accept() {

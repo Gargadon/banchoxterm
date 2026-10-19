@@ -300,18 +300,58 @@ private slots:
         QVERIFY(SessionManager::loadSessions().first().favorite);
     }
 
+    void testNewSessionConnectsWithOptionalSave() {
+        const auto previous = SessionManager::loadSessions();
+        const auto restore = qScopeGuard([&]() { SessionManager::saveSessions(previous); });
+        SessionManager::saveSessions({});
+        SessionsSidebar sidebar;
+        QSignalSpy connections(&sidebar, &SessionsSidebar::connectSession);
+        for (bool save : {false, true}) {
+            bool savingInitiallyDisabled = false;
+            QTimer::singleShot(0, &sidebar, [&]() {
+                auto* dialog = qobject_cast<SessionDialog*>(QApplication::activeModalWidget());
+                if (!dialog)
+                    return;
+                savingInitiallyDisabled = !dialog->savesSession();
+                dialog->findChild<QComboBox*>()->setCurrentIndex(1);
+                dialog->setSaveSession(save);
+                dialog->accept();
+            });
+            sidebar.onNewSession();
+            QVERIFY(savingInitiallyDisabled);
+            QCOMPARE(connections.count(), save ? 2 : 1);
+            const auto session = qvariant_cast<Session>(connections.last().first());
+            const auto stored = SessionManager::loadSessions();
+            QCOMPARE(stored.size(), save ? 1 : 0);
+            if (save)
+                QCOMPARE(stored.first().id, session.id);
+        }
+        auto* tree = sidebar.findChild<QTreeWidget*>("sessionTree");
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QTimer::singleShot(0, &sidebar, []() {
+            if (auto* dialog = qobject_cast<SessionDialog*>(QApplication::activeModalWidget()))
+                dialog->reject();
+        });
+        sidebar.onNewSession();
+        QCOMPARE(connections.count(), 2);
+        QCOMPARE(SessionManager::loadSessions().size(), 1);
+    }
+
     void testSessionGroupsAndFiltering() {
         const auto previous = SessionManager::loadSessions();
         QSettings settings;
         const auto oldGroups = settings.value("sessions/groups");
         const auto oldCollapsed = settings.value("sessions/collapsedGroups");
         const auto oldMetadata = settings.value("sessions/groupMetadata");
+        const auto oldOrder = settings.value("sessions/treeOrder");
         const auto restore = qScopeGuard([&]() {
             SessionManager::saveSessions(previous);
             settings.setValue("sessions/groups", oldGroups);
             settings.setValue("sessions/collapsedGroups", oldCollapsed);
             settings.setValue("sessions/groupMetadata", oldMetadata);
+            settings.setValue("sessions/treeOrder", oldOrder);
         });
+        settings.remove("sessions/treeOrder");
         settings.setValue("sessions/groups", QStringList{"Production", "Development", "Empty"});
         settings.remove("sessions/collapsedGroups");
         QVariantMap groupData;
@@ -324,7 +364,7 @@ private slots:
         first.id = "first";
         first.name = "Primary";
         first.group = "Production/Databases";
-        first.tags = parseSessionTags("App:MiApp\nDatabase:PostgreSQL");
+        first.tags = parseSessionTags("App:MiApp\nDatabase:PostgreSQL\nEnvironment:Live");
         Session second;
         second.id = "second";
         second.name = "Secondary";
@@ -345,7 +385,8 @@ private slots:
         QVERIFY(production->isExpanded());
         QVERIFY(tree->topLevelItem(1)->isHidden());
         filter->setText("App:OtherApp");
-        QVERIFY(production->isHidden()); // Session values override group defaults for the same key.
+        QVERIFY(!production->isHidden());          // The group itself defines this value.
+        QVERIFY(production->child(0)->isHidden()); // Its sessions do not inherit it.
         filter->clear();
         QVERIFY(!production->isExpanded());
         filter->setText("no-match");
@@ -360,18 +401,166 @@ private slots:
         QVERIFY(settings.value("sessions/groups").toStringList().contains("Empty"));
     }
 
+    void testExplicitSessionTagsAndGroupMatches() {
+        QSettings settings;
+        const auto previous = SessionManager::loadSessions();
+        const auto previousSettings = settings.value("sessions/groupMetadata");
+        const auto previousGroups = settings.value("sessions/groups");
+        const auto previousCollapsed = settings.value("sessions/collapsedGroups");
+        const auto previousOrder = settings.value("sessions/treeOrder");
+        const auto restore = qScopeGuard([&]() {
+            SessionManager::saveSessions(previous);
+            settings.setValue("sessions/groupMetadata", previousSettings);
+            settings.setValue("sessions/groups", previousGroups);
+            settings.setValue("sessions/collapsedGroups", previousCollapsed);
+            settings.setValue("sessions/treeOrder", previousOrder);
+        });
+        settings.remove("sessions/treeOrder");
+        settings.setValue("sessions/groups", QStringList{"Production", "Development", "Empty"});
+        settings.setValue("sessions/collapsedGroups", QStringList{"Production"});
+        QVariantMap metadata;
+        QVariantMap definition;
+        definition.insert("tags",
+                          QJsonDocument(parseSessionTags("App:MiApp\nApp:OtherApp")).toJson(QJsonDocument::Compact));
+        metadata.insert("Production", definition);
+        definition.insert("tags", QJsonDocument(parseSessionTags("App:EmptyApp")).toJson(QJsonDocument::Compact));
+        definition.insert("notes", "Empty group runbook");
+        metadata.insert("Empty", definition);
+        settings.setValue("sessions/groupMetadata", metadata);
+        Session assigned;
+        assigned.id = "assigned";
+        assigned.name = "Assigned";
+        assigned.group = "Production";
+        assigned.tags = parseSessionTags("App:MiApp");
+        Session unassigned = assigned;
+        unassigned.id = "unassigned";
+        unassigned.name = "Unassigned";
+        unassigned.tags = {};
+        Session development = assigned;
+        development.id = "development";
+        development.group = "Development";
+        SessionManager::saveSessions({assigned, unassigned, development});
+        SessionsSidebar sidebar;
+        auto* tree = sidebar.findChild<QTreeWidget*>("sessionTree");
+        auto* filter = sidebar.findChild<QLineEdit*>("sessionFilterEdit");
+        auto* production = tree->topLevelItem(0);
+        auto* dev = tree->topLevelItem(1);
+        auto* empty = tree->topLevelItem(2);
+        filter->setText("app:miapp");
+        QVERIFY(!production->isHidden());
+        QVERIFY(!production->child(0)->isHidden());
+        QVERIFY(production->child(1)->isHidden());
+        QVERIFY(!dev->isHidden()); // The matching session keeps its parent visible.
+        QVERIFY(!dev->child(0)->isHidden());
+        filter->setText("App:OtherApp");
+        QVERIFY(!production->isHidden());
+        QVERIFY(production->child(0)->isHidden());
+        QVERIFY(production->child(1)->isHidden());
+        QVERIFY(dev->isHidden());
+        filter->setText("App:EmptyApp");
+        QVERIFY(!empty->isHidden());
+        QVERIFY(production->isHidden());
+        filter->setText("Empty runbook");
+        QVERIFY(!empty->isHidden());
+        filter->setText("App");
+        QVERIFY(!empty->isHidden());
+        QVERIFY(production->child(1)->isHidden());
+        filter->setText("Production");
+        QVERIFY(!production->child(1)->isHidden()); // Its actual group name is searchable.
+        filter->clear();
+        QVERIFY(!production->isExpanded());
+        QVERIFY(!production->child(1)->isHidden());
+        QVERIFY(SessionManager::loadSessions()[1].tags.isEmpty());
+    }
+
+    void testMixedSessionTreeOrder() {
+        QSettings settings;
+        const auto previous = SessionManager::loadSessions();
+        const auto previousGroups = settings.value("sessions/groups");
+        const auto previousCollapsed = settings.value("sessions/collapsedGroups");
+        const auto previousOrder = settings.value("sessions/treeOrder");
+        const auto restore = qScopeGuard([&]() {
+            SessionManager::saveSessions(previous);
+            settings.setValue("sessions/groups", previousGroups);
+            settings.setValue("sessions/collapsedGroups", previousCollapsed);
+            settings.setValue("sessions/treeOrder", previousOrder);
+        });
+        settings.remove("sessions/treeOrder");
+        settings.setValue("sessions/groups", QStringList{"G", "G/Nested", "Empty"});
+        settings.setValue("sessions/collapsedGroups", QStringList{"G"});
+        QList<Session> sessions;
+        for (const QString& name : {"Loose1", "Grouped1", "Loose2", "Grouped2"}) {
+            Session session;
+            session.id = session.name = name;
+            if (name.startsWith("Grouped"))
+                session.group = "G";
+            sessions.append(session);
+        }
+        SessionManager::saveSessions(sessions);
+        SessionsSidebar sidebar;
+        auto* tree = sidebar.findChild<QTreeWidget*>("sessionTree");
+        auto* root = tree->invisibleRootItem();
+        auto children = root->takeChildren(); // Legacy load: G, Empty, Loose1, Loose2.
+        QCOMPARE(children.size(), 4);
+        auto* group = children[0];
+        root->addChildren({children[3], children[1], children[0], children[2]});
+        auto nested = group->takeChildren(); // Nested, Grouped1, Grouped2.
+        QCOMPARE(nested.size(), 3);
+        group->addChildren({nested[2], nested[0], nested[1]});
+        group->setExpanded(false);
+        sidebar.saveCurrentOrder();
+        auto verifyOrder = [&](QTreeWidget* current) {
+            QStringList top;
+            for (int i = 0; i < current->topLevelItemCount(); ++i)
+                top.append(current->topLevelItem(i)->text(0));
+            QCOMPARE(top, (QStringList{"Loose2", "Empty", "G", "Loose1"}));
+            auto* g = current->topLevelItem(2);
+            QStringList inner;
+            for (int i = 0; i < g->childCount(); ++i)
+                inner.append(g->child(i)->text(0));
+            QCOMPARE(inner, (QStringList{"Grouped2", "Nested", "Grouped1"}));
+            QVERIFY(!g->isExpanded());
+        };
+        sidebar.refreshSessions();
+        verifyOrder(tree);
+        {
+            SessionsSidebar reopened;
+            verifyOrder(reopened.findChild<QTreeWidget*>("sessionTree"));
+        }
+        Session added;
+        added.id = added.name = "New session";
+        sessions = SessionManager::loadSessions();
+        sessions.append(added);
+        SessionManager::saveSessions(sessions);
+        sidebar.refreshSessions();
+        QCOMPARE(tree->topLevelItemCount(), 5);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("Loose2"));
+        QCOMPARE(tree->topLevelItem(4)->text(0), added.name);
+        // A stale/deleted entry must neither resurrect a profile nor lose its siblings' order.
+        sessions.removeLast();
+        SessionManager::saveSessions(sessions);
+        sidebar.refreshSessions();
+        verifyOrder(tree);
+        QVERIFY(!settings.value("sessions/treeOrder").toMap().value("").toStringList().contains("s:New session"));
+        QCoreApplication::processEvents(); // Flush deferred saves from the manual moves.
+        verifyOrder(tree);
+    }
+
     void testGroupManagement() {
         QSettings settings;
         const auto previous = SessionManager::loadSessions();
         const auto oldGroups = settings.value("sessions/groups");
         const auto oldCollapsed = settings.value("sessions/collapsedGroups");
         const auto oldMetadata = settings.value("sessions/groupMetadata");
+        const auto oldOrder = settings.value("sessions/treeOrder");
         const auto restore = qScopeGuard([&]() {
             SessionManager::saveSessions(previous);
             settings.setValue("sessions/groups", oldGroups);
             settings.setValue("sessions/collapsedGroups", oldCollapsed);
             settings.setValue("sessions/groupMetadata", oldMetadata);
+            settings.setValue("sessions/treeOrder", oldOrder);
         });
+        settings.remove("sessions/treeOrder");
         settings.setValue("sessions/groups", QStringList{"Production", "Production/Database"});
         settings.setValue("sessions/collapsedGroups", QStringList{"Production"});
         settings.remove("sessions/groupMetadata");
@@ -422,6 +611,7 @@ private slots:
             auto* choices = dialog.findChild<QComboBox*>("groupTagChoices");
             QVERIFY(choices);
             QCOMPARE(choices->count(), 3);
+            QVERIFY(dialog.getSession().tags.isEmpty());
             const int index = choices->findText("App:MiApp");
             QVERIFY(index > 0);
             QVERIFY(QMetaObject::invokeMethod(choices, "activated", Q_ARG(int, index)));
@@ -433,6 +623,11 @@ private slots:
         QVERIFY(!tree->topLevelItem(0)->isExpanded());
         QCOMPARE(settings.value("sessions/groupMetadata").toMap().value("Live").toMap().value("notes").toString(),
                  QString("Production runbook"));
+        const auto renamedOrder = settings.value("sessions/treeOrder").toMap();
+        QVERIFY(!renamedOrder.contains("Production"));
+        QCOMPARE(renamedOrder.value("Live").toStringList(), QStringList{"g:Live/Database"});
+        QVERIFY(!renamedOrder.contains("Production/Database"));
+        QCOMPARE(renamedOrder.value("Live/Database").toStringList(), QStringList{"s:group-management"});
         QVERIFY(runAction("Create group", "Live/Empty"));
         QVERIFY(settings.value("sessions/groups").toStringList().contains("Live/Empty"));
         QVERIFY(runAction("Delete group and its sessions", {}, true));

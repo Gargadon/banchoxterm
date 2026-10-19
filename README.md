@@ -27,9 +27,9 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 
 ## Organizing sessions
 
-Use **Save this session** in the session dialog to keep a profile. The sidebar's
-add button selects this option by default; other entry points initially create a
-temporary connection. QuickConnect remains available above the separate filter.
+All **New Session** buttons open the same dialog with saving initially unchecked.
+Use **Save this session** to keep a profile when connecting, or leave it unchecked
+for a temporary connection. QuickConnect remains available above the separate filter.
 
 Right-click a group (or empty space in the session tree) to create groups, rename
 them, edit their notes and tags, or delete a group with all its saved sessions.
@@ -38,15 +38,16 @@ or sessions to reorder or nest them. Group order and collapsed state survive
 refreshes and restarts.
 
 Enter tags as one `key:value` pair per line. Repeat a key for several values,
-for example `App:MiApp` and `App:OtherApp`. Group tags provide inherited defaults;
-a session's values override group defaults for the same key. The session editor
-also offers a picker for values defined in its group or parent groups.
+for example `App:MiApp` and `App:OtherApp`. Group tags define available choices;
+they are not automatically assigned to sessions. The session editor offers a
+picker for values defined in its group or parent groups. Select the values that
+apply to each session.
 
 The filter matches names, endpoints, groups, notes, tag keys and `key:value`
 pairs, ignoring case. Combine terms with spaces, for example
 `Production App:MiApp`. Clearing the filter restores the previous collapsed
 state. Notes and tags on sessions travel with JSON and encrypted session exports;
-group notes, defaults, ordering and collapsed state are local preferences.
+group notes, available tags, ordering and collapsed state are local preferences.
 
 ## SSH resource monitoring
 

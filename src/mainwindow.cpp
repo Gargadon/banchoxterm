@@ -450,11 +450,7 @@ void MainWindow::setupUi() {
     auto* newRemoteAction = toolBar->addAction(QIcon(":/icons/add.svg"), tr("New Session"));
     newRemoteAction->setToolTip(tr("Create a new remote session"));
     connect(newRemoteAction, &QAction::triggered, this, [this]() {
-        SessionDialog dialog(this);
-        if (dialog.exec() == QDialog::Accepted) {
-            m_sessionsSidebar->refreshSessions();
-            onConnectSession(dialog.getSession());
-        }
+        m_sessionsSidebar->onNewSession();
     });
 
     auto* localAction = toolBar->addAction(QIcon(":/icons/terminal.svg"), tr("Local"));
@@ -933,11 +929,7 @@ void MainWindow::setupUi() {
     m_tabGrid->addWidget(m_welcomeWidget, 0, 0, 2, 2);
 
     connect(welcomeRemoteButton, &QPushButton::clicked, this, [this]() {
-        SessionDialog dialog(this);
-        if (dialog.exec() == QDialog::Accepted) {
-            m_sessionsSidebar->refreshSessions();
-            onConnectSession(dialog.getSession());
-        }
+        m_sessionsSidebar->onNewSession();
     });
     connect(welcomeLocalButton, &QPushButton::clicked, this, &MainWindow::onNewLocalTerminal);
     connect(allSessionsButton, &QPushButton::clicked, this, [this]() {
@@ -1963,11 +1955,7 @@ void MainWindow::setupMenuBar() {
 
     auto* newTabAction = fileMenu->addAction(tr("&New Remote Session..."));
     connect(newTabAction, &QAction::triggered, this, [this]() {
-        SessionDialog dialog(this);
-        if (dialog.exec() == QDialog::Accepted) {
-            m_sessionsSidebar->refreshSessions();
-            onConnectSession(dialog.getSession());
-        }
+        m_sessionsSidebar->onNewSession();
     });
 
     auto* closeTabAction = fileMenu->addAction(tr("Close session"));
@@ -2231,11 +2219,7 @@ void MainWindow::showCommandPalette() {
         return;
 
     if (command == tr("New Remote Session")) {
-        SessionDialog dialog(this);
-        if (dialog.exec() == QDialog::Accepted) {
-            m_sessionsSidebar->refreshSessions();
-            onConnectSession(dialog.getSession());
-        }
+        m_sessionsSidebar->onNewSession();
     } else if (command == tr("Open Local Terminal")) {
         onNewLocalTerminal();
     } else if (command == tr("Toggle Split View")) {

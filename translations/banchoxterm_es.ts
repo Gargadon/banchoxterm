@@ -2203,6 +2203,10 @@ App:OtraApp</translation>
         <source>Add a group tag…</source>
         <translation>Añadir una etiqueta del grupo…</translation>
     </message>
+    <message>
+        <source>Save and connect</source>
+        <translation>Guardar y conectar</translation>
+    </message>
 </context>
 <context>
     <name>SessionsSidebar</name>
