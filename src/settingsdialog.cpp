@@ -434,13 +434,7 @@ void SettingsDialog::loadSettings() {
     if (m_themeMode != "system" && m_themeMode != "light" && m_themeMode != "dark")
         m_themeMode = "system";
     // Font
-    if (settings.contains("terminal/font")) {
-        m_font.fromString(settings.value("terminal/font").toString());
-    } else {
-        m_font = QFont("Monospace", 11);
-        m_font.setStyleHint(QFont::Monospace);
-    }
-    m_font.setFixedPitch(true);
+    m_font = TerminalAppearance::globalFont();
 
     // Editor
     m_useCustomEditor = settings.value("editor/useCustom", false).toBool();
@@ -474,7 +468,9 @@ void SettingsDialog::saveSettings() {
     m_loggingEnabled = m_loggingCheck->isChecked();
     m_logDir = m_logDirEdit->text().trimmed();
 
-    settings.setValue("terminal/font", m_font.toString());
+    // Qt 6.12 appends fields that Qt 6.8 (the installed 1.2.5 release)
+    // rejects. Keep the shared setting in the 16-field Qt 6.8 format.
+    settings.setValue("terminal/font", m_font.toString().section(',', 0, 15));
     settings.setValue("editor/useCustom", m_useCustomEditor);
     settings.setValue("editor/customPath", m_customEditorPath);
     settings.setValue("terminal/colorScheme", m_colorScheme);

@@ -5,6 +5,7 @@
 #include <QOperatingSystemVersion>
 #include <QTimer>
 #include <QApplication>
+#include <QFontDatabase>
 #include <qtermwidget.h>
 #include <cmath>
 #ifdef BANCHO_HAVE_KWINDOWSYSTEM
@@ -60,6 +61,25 @@ private:
 } // namespace
 
 namespace TerminalAppearance {
+QFont defaultFont() {
+    QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    font.setPointSize(11);
+    font.setStyleHint(QFont::Monospace);
+    font.setFixedPitch(true);
+    return font;
+}
+
+QFont globalFont() {
+    QFont font = defaultFont();
+    QFont stored;
+    const QString value = QSettings().value("terminal/font").toString();
+    if (!value.trimmed().isEmpty() && stored.fromString(value) && !stored.family().trimmed().isEmpty())
+        font = stored;
+    font.setStyleHint(QFont::Monospace);
+    font.setFixedPitch(true);
+    return font;
+}
+
 int opacityPercent() {
     return qBound(0, QSettings().value("terminal/backgroundOpacity", 100).toInt(), 100);
 }

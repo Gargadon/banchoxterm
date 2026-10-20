@@ -3,6 +3,7 @@
 #include "sessiontags.h"
 #include <QPlainTextEdit>
 #include "sessiondialog.h"
+#include "terminalappearance.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -785,9 +786,7 @@ void SessionDialog::setupUi() {
 
     auto* fontRow = new QHBoxLayout();
     m_fontLabel = new QLabel(m_terminalSettingsWidget);
-    m_font = QFont("Monospace", 11);
-    m_font.setStyleHint(QFont::Monospace);
-    m_font.setFixedPitch(true);
+    m_font = TerminalAppearance::globalFont();
     m_fontLabel->setText(tr("Global default"));
     fontRow->addWidget(m_fontLabel, 1);
     auto* chooseFontBtn = new QPushButton(tr("Choose Font..."), m_terminalSettingsWidget);

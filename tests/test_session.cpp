@@ -69,6 +69,7 @@
 #include <QCheckBox>
 #include <QScreen>
 #include <QPainter>
+#include <QStyle>
 #ifdef Q_OS_WIN
 #include "conpty.h"
 #include <qt_windows.h>
@@ -103,6 +104,66 @@ private:
     }
 
 private slots:
+    void testGlobalTerminalFontValidation() {
+        QSettings settings;
+        const QVariant previous = settings.value("terminal/font");
+        const bool existed = settings.contains("terminal/font");
+        const auto restore = qScopeGuard([&]() {
+            if (existed)
+                settings.setValue("terminal/font", previous);
+            else
+                settings.remove("terminal/font");
+        });
+        settings.remove("terminal/font");
+        const QFont fallback = TerminalAppearance::defaultFont();
+        QCOMPARE(TerminalAppearance::globalFont(), fallback);
+        for (const QString& value : {QString(), QStringLiteral("invalid,font,data")}) {
+            settings.setValue("terminal/font", value);
+            QCOMPARE(TerminalAppearance::globalFont(), fallback);
+            SettingsDialog dialog;
+            QCOMPARE(dialog.selectedFont(), fallback);
+        }
+        QFont chosen(QStringLiteral("Consolas"), 17);
+        settings.setValue("terminal/font", chosen.toString());
+        QCOMPARE(TerminalAppearance::globalFont().family(), chosen.family());
+        QCOMPARE(TerminalAppearance::globalFont().pointSize(), chosen.pointSize());
+        SettingsDialog dialog;
+        QCOMPARE(dialog.selectedFont().family(), chosen.family());
+        QCOMPARE(dialog.selectedFont().pointSize(), chosen.pointSize());
+        QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept", Qt::DirectConnection));
+        const QString saved = settings.value("terminal/font").toString();
+        QCOMPARE(saved.split(',').size(), 16);
+        QFont restored;
+        QVERIFY(restored.fromString(saved));
+        QCOMPARE(restored.family(), chosen.family());
+        QCOMPARE(restored.pointSize(), chosen.pointSize());
+    }
+
+    void testTerminalFontSurvivesStyleRefresh() {
+        const QString previousStyle = qApp->styleSheet();
+        const auto restore = qScopeGuard([&]() { qApp->setStyleSheet(previousStyle); });
+        QTermWidget terminal(0);
+        QFont chosen(QStringLiteral("Consolas"), 17);
+        chosen.setStyleHint(QFont::Monospace);
+        chosen.setFixedPitch(true);
+        terminal.setTerminalFont(chosen);
+        terminal.show();
+        QCoreApplication::processEvents();
+        const QFont before = terminal.getTerminalFont();
+        qApp->setStyleSheet(QStringLiteral("QWidget { color: #eeeeee; background-color: #222222; }"));
+        QCoreApplication::processEvents();
+        QCOMPARE(terminal.getTerminalFont().family(), before.family());
+        QCOMPARE(terminal.getTerminalFont().pointSize(), before.pointSize());
+        qApp->setStyleSheet(QStringLiteral("QWidget { color: #222222; background-color: #eeeeee; }"));
+        for (QWidget* widget : QApplication::allWidgets()) {
+            qApp->style()->unpolish(widget);
+            qApp->style()->polish(widget);
+        }
+        QCoreApplication::processEvents();
+        QCOMPARE(terminal.getTerminalFont().family(), before.family());
+        QCOMPARE(terminal.getTerminalFont().pointSize(), before.pointSize());
+    }
+
     void testSftpLocalActions() {
         QTemporaryDir dir;
         QVERIFY(dir.isValid());

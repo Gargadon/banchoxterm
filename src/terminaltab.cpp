@@ -758,15 +758,10 @@ void TerminalTab::onRemoteDirChanged(const QString& dir) {
 void TerminalTab::updateFontFromSettings() {
     QSettings settings;
 
-    QFont font;
+    QFont font = TerminalAppearance::globalFont();
     if (!m_session.fontFamily.isEmpty()) {
         // Per-session font overrides the global one.
         font = QFont(m_session.fontFamily, m_session.fontSize > 0 ? m_session.fontSize : 11);
-        font.setStyleHint(QFont::Monospace);
-    } else if (settings.contains("terminal/font")) {
-        font.fromString(settings.value("terminal/font").toString());
-    } else {
-        font = QFont("Monospace", 11);
         font.setStyleHint(QFont::Monospace);
     }
     font.setFixedPitch(true);
