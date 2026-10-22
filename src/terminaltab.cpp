@@ -5,6 +5,10 @@
 #include "keyring.h"
 #include "keyboardshortcuts.h"
 #include <qtermwidget.h>
+#ifndef Q_OS_WIN
+#include <Session.h>
+#include <Pty.h>
+#endif
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -515,6 +519,30 @@ void TerminalTab::setupLocalTerminal() {
     // terminal consistent: Backspace is DEL and Delete is CSI 3 ~.
     if (QTermWidget::availableKeyBindings().contains(QStringLiteral("linux")))
         m_terminal->setKeyBindings(QStringLiteral("linux"));
+    // QTermWidget's auto-close both hides the display and suppresses finished()
+    // when disabled. Keep the view and observe the actual shell process instead,
+    // including abnormal exits for which Session::finished() is not emitted.
+    m_terminal->setAutoClose(false);
+    disconnect(m_terminal, &QTermWidget::finished, this, &TerminalTab::onTerminalFinished);
+    if (auto* localSession = m_terminal->findChild<Konsole::Session*>()) {
+        auto* process = localSession->shellProcess();
+        connect(process, &Konsole::Pty::receivedData, this, [this](const char* data, int size) {
+            // The PTY already renders these bytes; capture them without feeding
+            // them into the emulator a second time, so S also saves local output.
+            recordTerminalData(QByteArray(data, size));
+        });
+        connect(
+            process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this]() {
+                if (m_closing)
+                    return;
+                // Hand keyboard input to the stopped-session actions instead of the
+                // terminated PTY. Queue this until QTermWidget has handled the exit.
+                m_terminal->startExternal();
+                onTerminalFinished();
+            },
+            Qt::QueuedConnection);
+    }
     m_terminal->setShellProgram(shell);
     m_terminal->startShellProgram();
 #endif
@@ -745,7 +773,10 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
 }
 
 void TerminalTab::onTerminalFinished() {
+    if (m_closing || m_stopPromptShown)
+        return;
     m_isActive = false;
+    feedTerminalData(tr("\r\n[Connection closed]\r\n").toUtf8());
     emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     showStoppedPrompt();
     maybeScheduleReconnect();
@@ -1684,7 +1715,7 @@ bool TerminalTab::hasSelection() const {
     return m_terminal && !m_terminal->selectedText().isEmpty();
 }
 
-void TerminalTab::feedTerminalData(const QByteArray& data) {
+void TerminalTab::recordTerminalData(const QByteArray& data) {
     if (!data.isEmpty()) {
         m_outputBuffer.append(m_sensitiveOutputFilter.process(data));
         emit terminalDataReceived(data);
@@ -1705,6 +1736,10 @@ void TerminalTab::feedTerminalData(const QByteArray& data) {
             }
         }
     }
+}
+
+void TerminalTab::feedTerminalData(const QByteArray& data) {
+    recordTerminalData(data);
     if (m_terminal) {
         m_terminal->feedData(data);
     }

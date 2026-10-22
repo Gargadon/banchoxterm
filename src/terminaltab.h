@@ -119,6 +119,7 @@ private:
     void saveTerminalOutput();
     void applyTerminalSize(int rows, int cols);
     void feedTerminalData(const QByteArray& data);
+    void recordTerminalData(const QByteArray& data);
     QWidget* terminalView() const;
     bool hasSelection() const;
     void doSendText(const QString& text);

@@ -63,6 +63,10 @@ record the commands used to collect metrics.
 
 ## Terminal keyboard shortcuts
 
+When a local shell exits, its tab keeps the output and displays the stopped-session
+prompt. Press **Enter** to close the tab, **R** to restart the session, or **S** to
+save the captured output to a file.
+
 Application defaults leave plain `Ctrl+letter` combinations available to terminal
 programs, including nano and readline:
 

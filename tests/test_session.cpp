@@ -1,3 +1,5 @@
+#include <QBuffer>
+#include <QFileDialog>
 #include "sessiontags.h"
 #include <QPlainTextEdit>
 #include <QTest>
@@ -885,6 +887,85 @@ private slots:
         QCOMPARE(restored.tunnels[1].socksUsername, QString("proxy-user"));
         QVERIFY(!json["tunnels"].toArray().at(1).toObject().contains("socksPassword"));
         QVERIFY(restored.tunnels[1].socksPassword.isEmpty());
+    }
+
+    void testLocalShellStoppedPrompt_data() {
+        QTest::addColumn<QByteArray>("termination");
+        QTest::newRow("normal-exit") << QByteArray("exit 0");
+        QTest::newRow("nonzero-exit") << QByteArray("exit 7");
+        QTest::newRow("crashed-shell") << QByteArray("kill -KILL $$");
+    }
+
+    void testLocalShellStoppedPrompt() {
+#ifdef Q_OS_WIN
+        QSKIP("Exercises the Unix local PTY; Windows uses ConPTY.");
+#else
+        QFETCH(QByteArray, termination);
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString program = directory.filePath("shell");
+        QFile script(program);
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("#!/bin/sh\nprintf 'local-output-café\\n'\n" + termination + "\n");
+        script.close();
+        QVERIFY(script.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner));
+        const bool nativeDialogsDisabled = QApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
+        QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
+        const auto restore =
+            qScopeGuard([&]() { QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, nativeDialogsDisabled); });
+        Session session;
+        session.id = "local-exit-test";
+        session.name = "Local shell";
+        session.type = SessionType::Local;
+        session.shellPath = program;
+        TerminalTab tab(session);
+        QSignalSpy output(&tab, &TerminalTab::terminalDataReceived);
+        QSignalSpy reconnect(&tab, &TerminalTab::reconnectRequested);
+        QSignalSpy close(&tab, &TerminalTab::exitRequested);
+        tab.resize(800, 500);
+        tab.show();
+        QTRY_VERIFY_WITH_TIMEOUT(!tab.isSessionActive(), 5000);
+        auto* terminal = tab.getTerminalWidget();
+        auto* display = terminal->focusProxy();
+        QVERIFY(display);
+        QVERIFY(display->isVisible());
+        auto history = [&]() {
+            QBuffer buffer;
+            buffer.open(QIODevice::WriteOnly);
+            terminal->saveHistory(&buffer);
+            return buffer.data();
+        };
+        QTRY_VERIFY(history().contains("Session stopped"));
+        const auto screen = history();
+        QVERIFY(screen.contains("[Connection closed]"));
+        QVERIFY(screen.contains("local-output-café"));
+        QCOMPARE(screen.count("Session stopped"), 1);
+        QCOMPARE(close.count(), 0);
+        tab.activateWindow();
+        display->setFocus();
+        QTest::keyClick(display, Qt::Key_R);
+        QCOMPARE(reconnect.count(), 1);
+        QCOMPARE(qvariant_cast<Session>(reconnect.first().first()).id, session.id);
+        const QString savedPath = directory.filePath("output.log");
+        QTimer::singleShot(0, &tab, [&]() {
+            if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
+                dialog->selectFile(savedPath);
+                QMetaObject::invokeMethod(dialog, "accept");
+            }
+        });
+        QTest::keyClick(display, Qt::Key_S);
+        QFile saved(savedPath);
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        const auto contents = saved.readAll();
+        QVERIFY(contents.contains("local-output-café"));
+        QVERIFY(contents.contains("Session stopped"));
+        QByteArray captured;
+        for (const auto& args : output)
+            captured += args.first().toByteArray();
+        QCOMPARE(captured.count("Session stopped"), 1);
+        QTest::keyClick(display, Qt::Key_Return);
+        QCOMPARE(close.count(), 1);
+#endif
     }
 
     void testLocalSessionRoundtrip() {
