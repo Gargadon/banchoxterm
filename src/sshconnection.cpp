@@ -9,6 +9,7 @@
 #include <QRegularExpression>
 #include <QSocketNotifier>
 #include <QTimer>
+#include <QScopeGuard>
 #include <cstring>
 #include <cstdlib>
 #include <cerrno>
@@ -852,6 +853,10 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     }
 
     m_connected = true;
+    m_directoryTimer = new QTimer(this);
+    m_directoryTimer->setInterval(1000);
+    connect(m_directoryTimer, &QTimer::timeout, this, &SshConnection::pollRemoteDirectory);
+    m_directoryTimer->start();
 
     // Start active tunnels
     for (int tunnelIndex = 0; tunnelIndex < m_tunnelConfigs.size(); ++tunnelIndex) {
@@ -978,6 +983,125 @@ void SshConnection::openShell() {
     }
 }
 
+QByteArray SshConnection::readRemoteProcFile(const QByteArray& path) {
+    auto* handle = retryPtr([&]() {
+        return libssh2_sftp_open(m_sftp, path.constData(), LIBSSH2_FXF_READ, 0);
+    });
+    if (!handle)
+        return {};
+    QByteArray result;
+    char buffer[4096];
+    while (result.size() < 16384) {
+        const int count = retry([&]() {
+            return static_cast<int>(libssh2_sftp_read(handle, buffer, sizeof(buffer)));
+        });
+        if (count <= 0)
+            break;
+        result.append(buffer, count);
+    }
+    retry([&]() { return libssh2_sftp_close_handle(handle); });
+    return result;
+}
+
+QByteArray SshConnection::readRemoteLink(const QByteArray& path) {
+    char buffer[4096];
+    const int count = retry([&]() {
+        return libssh2_sftp_readlink(m_sftp, path.constData(), buffer, sizeof(buffer));
+    });
+    return count > 0 ? QByteArray(buffer, count) : QByteArray();
+}
+
+void SshConnection::pollRemoteDirectory() {
+    if (!m_connected || !m_sftp || !QSettings().value("terminal/shellIntegration", true).toBool())
+        return;
+    // SFTP reads can buffer data for the shell/stats channels internally.
+    // Drain it even if no new socket notification follows this request.
+    const auto drain = qScopeGuard([this]() { onSocketActivity(); });
+
+    if (m_remoteShellPid.isEmpty()) {
+        // The SFTP subsystem and interactive shell are children of the same
+        // SSH session. Identify its one PTY process without relying on a shell
+        // name, prompt hooks, or commands injected into the user's terminal.
+        auto parentPid = [](const QByteArray& stat) {
+            const int end = stat.lastIndexOf(')');
+            const auto fields = stat.mid(end + 2).simplified().split(' ');
+            return end >= 0 && fields.size() > 1 ? fields[1] : QByteArray();
+        };
+        QByteArray parent = parentPid(readRemoteProcFile("/proc/self/stat"));
+        for (int depth = 0; depth < 3 && !parent.isEmpty() && parent != "1"; ++depth) {
+            const auto children = readRemoteProcFile("/proc/" + parent + "/task/" + parent + "/children")
+                                      .simplified().split(' ');
+            QList<QByteArray> candidates;
+            for (const auto& child : children) {
+                bool valid = false;
+                child.toLongLong(&valid);
+                if (!valid)
+                    continue;
+                const auto tty = readRemoteLink("/proc/" + child + "/fd/0");
+                if (tty.startsWith("/dev/pts/") || tty.startsWith("/dev/tty"))
+                    candidates.append(child);
+            }
+            if (candidates.size() == 1) {
+                m_remoteShellPid = candidates.first();
+                break;
+            }
+            if (candidates.size() > 1)
+                break; // Ambiguous: never follow a different session's shell.
+            parent = parentPid(readRemoteProcFile("/proc/" + parent + "/stat"));
+        }
+        if (m_remoteShellPid.isEmpty()) {
+            if (++m_directoryDiscoveryAttempts >= 5) {
+                m_directoryTimer->stop(); // Non-Linux/restricted servers still use OSC 7.
+                emit diagnosticMessage(QStringLiteral("Automatic directory tracking unavailable: remote /proc "
+                                                       "is inaccessible or the PTY process is ambiguous; "
+                                                       "OSC 7 directory announcements are still supported."));
+            }
+            return;
+        }
+    }
+    const auto path = readRemoteLink("/proc/" + m_remoteShellPid + "/cwd");
+    if (!path.startsWith('/'))
+        return;
+    const QString directory = QString::fromUtf8(path);
+    if (!m_directoryChangeInFlight.isEmpty()) {
+        if (directory == m_directoryChangeInFlight) {
+            m_directoryChangeInFlight.clear();
+        } else if (m_directoryChangeTimer.elapsed() > 5000) {
+            m_directoryChangeInFlight.clear();
+            m_lastRemoteDirectory.clear();
+            emit diagnosticMessage(QStringLiteral("The shell did not accept the requested directory change."));
+        } else {
+            return;
+        }
+    }
+    if (!m_requestedRemoteDirectory.isEmpty()) {
+        if (directory == m_requestedRemoteDirectory) {
+            m_requestedRemoteDirectory.clear();
+        } else {
+            const auto stat = readRemoteProcFile("/proc/" + m_remoteShellPid + "/stat");
+            const int end = stat.lastIndexOf(')');
+            const auto fields = stat.mid(end + 2).simplified().split(' ');
+            // Never type a cd into an editor, pager or other foreground job.
+            // Wait until the interactive shell owns the foreground process group.
+            if (end < 0 || fields.size() < 6 || fields[2] != fields[5])
+                return;
+            QString quoted = m_requestedRemoteDirectory;
+            quoted.replace('\'', QStringLiteral("'\\''"));
+            // Move to the end and clear the editable line. Ctrl+U also clears
+            // canonical PTY input for shells without a line-editing library.
+            sendToShell((QStringLiteral("\x05\x15") + "cd -- '" + quoted + "'\r").toUtf8());
+            m_directoryChangeInFlight = m_requestedRemoteDirectory;
+            m_requestedRemoteDirectory.clear();
+            m_directoryChangeTimer.start();
+            return;
+        }
+    }
+    if (path.startsWith('/') && QString::fromUtf8(path) != m_lastRemoteDirectory) {
+        m_lastRemoteDirectory = QString::fromUtf8(path);
+        emit remoteDirectoryChanged(m_lastRemoteDirectory);
+    }
+}
+
 void SshConnection::readShell() {
     if (!m_channel || !m_connected)
         return;
@@ -1021,6 +1145,8 @@ void SshConnection::readShell() {
 
 void SshConnection::handleShellClosed() {
     m_connected = false;
+    if (m_directoryTimer)
+        m_directoryTimer->stop();
     stopNotifiers();
     if (m_statsTimer)
         m_statsTimer->stop();
@@ -1186,9 +1312,27 @@ void SshConnection::waitIfTransferPaused() const {
 }
 
 void SshConnection::listDirectory(const QString& path) {
+    listDirectoryImpl(path);
+}
+
+void SshConnection::navigateDirectory(const QString& path) {
+    const QString directory = listDirectoryImpl(path);
+    if (directory.isEmpty() || !QSettings().value("terminal/shellIntegration", true).toBool())
+        return;
+    for (const QChar character : directory) {
+        if (character.unicode() < 32 || character.unicode() == 127) {
+            emit diagnosticMessage(QStringLiteral("Cannot send a directory containing control characters to the shell."));
+            return;
+        }
+    }
+    m_requestedRemoteDirectory = directory;
+    pollRemoteDirectory();
+}
+
+QString SshConnection::listDirectoryImpl(const QString& path) {
     if (!m_sftp) {
         emit operationFinished(false, "SFTP session not active");
-        return;
+        return {};
     }
 
     // Resolve relative paths (especially the initial ".") so the SFTP
@@ -1206,7 +1350,7 @@ void SshConnection::listDirectory(const QString& path) {
         retryPtr([this, &listingPath]() { return libssh2_sftp_opendir(m_sftp, listingPath.toUtf8().constData()); });
     if (!handle) {
         emit operationFinished(false, "Failed to open remote directory: " + listingPath);
-        return;
+        return {};
     }
 
     QList<SftpFile> files;
@@ -1237,6 +1381,7 @@ void SshConnection::listDirectory(const QString& path) {
 
     libssh2_sftp_closedir(handle);
     emit directoryListed(listingPath, files);
+    return listingPath;
 }
 
 void SshConnection::downloadFile(const QString& remotePath, const QString& localPath) {
@@ -2070,6 +2215,15 @@ void SshConnection::pollX11Bridges() {
 }
 
 void SshConnection::disconnectFromHost() {
+    if (m_directoryTimer) {
+        delete m_directoryTimer;
+        m_directoryTimer = nullptr;
+    }
+    m_remoteShellPid.clear();
+    m_lastRemoteDirectory.clear();
+    m_requestedRemoteDirectory.clear();
+    m_directoryChangeInFlight.clear();
+    m_directoryDiscoveryAttempts = 0;
     m_connected = false;
 
     for (SshTunnel* t : m_tunnels) {

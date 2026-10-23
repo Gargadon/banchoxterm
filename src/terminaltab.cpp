@@ -6,7 +6,7 @@
 #include "keyboardshortcuts.h"
 #include <qtermwidget.h>
 #ifndef Q_OS_WIN
-#include <Session.h>
+#include "../third_party/qtermwidget/lib/Session.h"
 #include <Pty.h>
 #endif
 #include <QVBoxLayout>
@@ -143,7 +143,8 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         // widget hierarchy.
         qApp->installEventFilter(this);
         connect(m_terminal, &QWidget::customContextMenuRequested, this, &TerminalTab::showTerminalContextMenu);
-        connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
+        if (m_session.type != SessionType::SSH)
+            connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
         connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
         connect(m_terminal, &QTermWidget::urlActivated, this, [this](const QUrl& url, bool) {
             if (!QDesktopServices::openUrl(url))
@@ -577,6 +578,13 @@ void TerminalTab::setupSshTerminal() {
     m_connectionThread = new QThread(this);
     m_connection->moveToThread(m_connectionThread);
     m_connectionThread->start();
+
+    connect(m_connection, &SshConnection::remoteDirectoryChanged, this, [this](const QString& path) {
+        if (m_session.remoteDirectory != path) {
+            m_session.remoteDirectory = path;
+            emit remoteDirChanged(path);
+        }
+    });
 
     connect(m_connection, &SshConnection::shellDataReceived, this, [this](const QByteArray& data) {
         feedTerminalData(data);
@@ -1740,6 +1748,36 @@ void TerminalTab::recordTerminalData(const QByteArray& data) {
 
 void TerminalTab::feedTerminalData(const QByteArray& data) {
     recordTerminalData(data);
+    // QTermWidget only accepts OSC 7 URLs whose host is the local machine.
+    // SSH reports the remote host instead; track those announcements here.
+    if (isSsh() && QSettings().value("terminal/shellIntegration", true).toBool()) {
+        m_directoryBuffer += data;
+        for (;;) {
+            const int start = m_directoryBuffer.indexOf("\x1b]7;");
+            if (start < 0) {
+                m_directoryBuffer = m_directoryBuffer.right(3);
+                break;
+            }
+            m_directoryBuffer.remove(0, start);
+            const int bell = m_directoryBuffer.indexOf('\x07', 4);
+            const int st = m_directoryBuffer.indexOf("\x1b\\", 4);
+            const int end = bell < 0 ? st : (st < 0 ? bell : qMin(bell, st));
+            if (end < 0) {
+                if (m_directoryBuffer.size() > 65536)
+                    m_directoryBuffer.clear();
+                break;
+            }
+            const QUrl url = QUrl::fromEncoded(m_directoryBuffer.mid(4, end - 4));
+            m_directoryBuffer.remove(0, end + (end == st ? 2 : 1));
+            if (url.isValid() && url.scheme() == "file" && url.path().startsWith('/')) {
+                const QString path = url.path();
+                if (m_session.remoteDirectory != path) {
+                    m_session.remoteDirectory = path;
+                    emit remoteDirChanged(path);
+                }
+            }
+        }
+    }
     if (m_terminal) {
         m_terminal->feedData(data);
     }

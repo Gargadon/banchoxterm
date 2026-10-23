@@ -166,6 +166,7 @@ private:
     bool m_closing = false;
     bool m_stopPromptShown = false;
     QByteArray m_outputBuffer;
+    QByteArray m_directoryBuffer;
     QByteArray m_promptBuffer;
     QRegularExpression m_promptPattern;
     QString m_lastDetectedPrompt;

@@ -80,6 +80,8 @@
 #include <TerminalDisplay.h>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QProgressBar>
+#include <QSplitter>
 #include <QGroupBox>
 
 class ExplicitTlsTestServer : public QTcpServer {
@@ -106,6 +108,147 @@ private:
     }
 
 private slots:
+    void testSftpLongTransferNamesKeepSidebarWidth() {
+        QSplitter splitter;
+        auto* sidebar = new SftpSidebar(&splitter);
+        splitter.addWidget(sidebar);
+        splitter.addWidget(new QWidget(&splitter));
+        splitter.resize(1100, 900);
+        splitter.setSizes({380, 720});
+        splitter.show();
+        auto* progress = sidebar->findChild<QLabel*>("sftpTransferLabel");
+        auto* bar = sidebar->findChild<QProgressBar*>("sftpTransferProgress");
+        auto* status = sidebar->findChild<QLabel*>("sftpStatus");
+        QVERIFY(progress && bar && status);
+        progress->show();
+        bar->show();
+        QCoreApplication::processEvents();
+        const int width = sidebar->width();
+        const QString name = QString(400, 'a') + ".zip";
+        status->setText("Downloading " + name);
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onTransferProgress", Qt::DirectConnection,
+                                          Q_ARG(QString, name), Q_ARG(qint64, 524288), Q_ARG(qint64, 1048576)));
+        QCoreApplication::processEvents();
+        QCOMPARE(sidebar->width(), width);
+        QVERIFY(progress->text().contains("512.0 KB / 1.0 MB"));
+        QVERIFY(progress->toolTip().contains(name));
+        QVERIFY(progress->height() >= progress->fontMetrics().height() * 2);
+        QVERIFY(progress->fontMetrics().horizontalAdvance("512.0 KB / 1.0 MB") <= progress->contentsRect().width());
+        QVERIFY(progress->minimumSizeHint().width() < width);
+        splitter.resize(900, 900);
+        QCoreApplication::processEvents();
+        QVERIFY(progress->fontMetrics().horizontalAdvance("512.0 KB / 1.0 MB") <= progress->contentsRect().width());
+    }
+
+    void testSftpUserNavigationIsSeparateFromTerminalUpdates() {
+        SftpSidebar sidebar;
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onConnectionSuccess", Qt::DirectConnection));
+        QSignalSpy navigation(&sidebar, &SftpSidebar::requestNavigate);
+        QSignalSpy listing(&sidebar, &SftpSidebar::requestList);
+        sidebar.navigateTo("/terminal");
+        QCOMPARE(navigation.count(), 0);
+        QCOMPARE(listing.count(), 1);
+        auto* path = sidebar.findChild<QLineEdit*>("remotePathEdit");
+        path->setText("/chosen folder");
+        QVERIFY(QMetaObject::invokeMethod(path, "returnPressed", Qt::DirectConnection));
+        QCOMPARE(navigation.count(), 1);
+        QCOMPARE(navigation.last().first().toString(), QString("/chosen folder"));
+        auto* tree = sidebar.findChild<QTreeWidget*>("sftpTree");
+        auto* directory = new QTreeWidgetItem(tree, {"nested"});
+        directory->setData(0, Qt::UserRole, true);
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onItemDoubleClicked", Qt::DirectConnection,
+                                          Q_ARG(QTreeWidgetItem*, directory), Q_ARG(int, 0)));
+        QCOMPARE(navigation.last().first().toString(), QString("/terminal/nested"));
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onParentDirClicked", Qt::DirectConnection));
+        QCOMPARE(navigation.last().first().toString(), QString("/terminal"));
+    }
+
+    void testRemoteDirectoryAnnouncements() {
+        QSettings settings;
+        const auto previous = settings.value("terminal/shellIntegration");
+        const auto restore = qScopeGuard([&]() {
+            if (previous.isValid())
+                settings.setValue("terminal/shellIntegration", previous);
+            else
+                settings.remove("terminal/shellIntegration");
+        });
+        settings.setValue("terminal/shellIntegration", true);
+        Session session;
+        session.type = SessionType::SSH;
+        TerminalTab tab(session);
+        QSignalSpy changed(&tab, &TerminalTab::remoteDirChanged);
+        auto feed = [&](const QByteArray& bytes) {
+            tab.connection()->shellDataReceived(bytes);
+        };
+        feed("\x1b]7;file://remote.example/srv/my%20");
+        feed("project\x1b");
+        feed("\\");
+        QCOMPARE(changed.count(), 1);
+        QCOMPARE(changed.last().first().toString(), QString("/srv/my project"));
+        QCOMPARE(tab.session().remoteDirectory, QString("/srv/my project"));
+        feed("\x1b]7;file://another-host/var/log\x07");
+        QCOMPARE(changed.count(), 2);
+        QCOMPARE(tab.session().remoteDirectory, QString("/var/log"));
+        feed("\x1b]7;https://remote.example/wrong\x07");
+        QCOMPARE(changed.count(), 2);
+        settings.setValue("terminal/shellIntegration", false);
+        feed("\x1b]7;file://remote.example/ignored\x07");
+        QCOMPARE(changed.count(), 2);
+    }
+
+    void testRemotePanelsFollowActiveTab() {
+        MainWindow window;
+        Session ssh;
+        ssh.type = SessionType::SSH;
+        ssh.name = "remote-one";
+        ssh.host = "127.0.0.1";
+        ssh.port = 1;
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, ssh)));
+        auto* first = window.findChild<TerminalTab*>();
+        QVERIFY(first);
+        auto* pane = qobject_cast<QTabWidget*>(first->parentWidget()->parentWidget());
+        QVERIFY(pane);
+        auto* sidebar = window.findChild<SftpSidebar*>();
+        auto* monitor = window.findChild<QFrame*>("remoteMonitorWidget");
+        QVERIFY(sidebar && monitor);
+        first->connection()->remoteStatsUpdated(10, 20, 30, 60);
+        QVERIFY(!monitor->isHidden());
+
+        Session local;
+        local.type = SessionType::Local;
+        // Do not show the window: this test needs no local shell process.
+        auto* localTab = new TerminalTab(local, pane);
+        pane->addTab(localTab, "local");
+        pane->setCurrentWidget(localTab);
+        QVERIFY(monitor->isHidden());
+        QVERIFY(!sidebar->connection());
+        first->connection()->remoteStatsUpdated(11, 21, 31, 61);
+        QVERIFY(monitor->isHidden());
+
+        ssh.name = "remote-two";
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, ssh)));
+        auto* second = qobject_cast<TerminalTab*>(pane->currentWidget());
+        QVERIFY(second && second != first);
+        first->connection()->remoteStatsUpdated(99, 99, 99, 99);
+        QVERIFY(monitor->isHidden());
+        second->connection()->remoteStatsUpdated(12, 22, 32, 62);
+        QVERIFY(!monitor->isHidden());
+
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onConnectionSuccess", Qt::DirectConnection));
+        QSignalSpy lists(sidebar, &SftpSidebar::requestList);
+        first->remoteDirChanged("/background");
+        QCOMPARE(lists.count(), 0);
+        QCOMPARE(first->session().remoteDirectory, QString("/background"));
+        second->remoteDirChanged("/active");
+        QCOMPARE(lists.count(), 1);
+        QCOMPARE(lists.last().first().toString(), QString("/active"));
+        pane->setCurrentWidget(first);
+        QCOMPARE(sidebar->connection(), first->connection());
+        QVERIFY(monitor->isHidden());
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onConnectionSuccess", Qt::DirectConnection));
+        QCOMPARE(lists.last().first().toString(), QString("/background"));
+    }
+
     void testGlobalTerminalFontValidation() {
         QSettings settings;
         const QVariant previous = settings.value("terminal/font");
@@ -1644,9 +1787,11 @@ private slots:
         QSettings monitoringSettings;
         const QVariant previousMonitoring = monitoringSettings.value("ssh/monitoringEnabled");
         const QVariant previousInterval = monitoringSettings.value("ssh/monitoringIntervalSeconds");
+        const QVariant previousIntegration = monitoringSettings.value("terminal/shellIntegration");
         const auto restoreMonitoring = qScopeGuard([&]() {
             for (const auto& entry : {qMakePair(QString("ssh/monitoringEnabled"), previousMonitoring),
-                                      qMakePair(QString("ssh/monitoringIntervalSeconds"), previousInterval)}) {
+                                      qMakePair(QString("ssh/monitoringIntervalSeconds"), previousInterval),
+                                      qMakePair(QString("terminal/shellIntegration"), previousIntegration)}) {
                 if (entry.second.isValid())
                     monitoringSettings.setValue(entry.first, entry.second);
                 else
@@ -1654,6 +1799,7 @@ private slots:
             }
         });
         monitoringSettings.setValue("ssh/monitoringEnabled", false);
+        monitoringSettings.setValue("terminal/shellIntegration", true);
         monitoringSettings.setValue("ssh/monitoringIntervalSeconds", 1);
         QSignalSpy statsSpy(&connection, &SshConnection::remoteStatsUpdated);
         QSignalSpy connectedSpy(&connection, &SshConnection::connectionSuccess);
@@ -1661,6 +1807,7 @@ private slots:
         QSignalSpy tunnelStateSpy(&connection, &SshConnection::tunnelStateChanged);
         QSignalSpy tunnelStatusSpy(&connection, &SshConnection::tunnelStatus);
         QSignalSpy directorySpy(&connection, &SshConnection::directoryListed);
+        QSignalSpy workingDirectorySpy(&connection, &SshConnection::remoteDirectoryChanged);
         connection.connectToHost(QStringLiteral("127.0.0.1"), port, user, clientKey, QString(), tunnels);
         QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() == 1 || failureSpy.count() > 0, 5000);
         if (connectedSpy.isEmpty()) {
@@ -1670,6 +1817,61 @@ private slots:
             QSKIP("libssh2 authentication is unavailable with the local sshd configuration");
         }
         QCOMPARE(failureSpy.count(), 0);
+
+        // Plain Bash emits no OSC 7. Track the real PTY process even with
+        // monitoring disabled, preserving spaces, percent signs and UTF-8.
+        connection.sendToShell("exec /bin/bash --noprofile --norc\r");
+        const QString trackedPath = serverDir.filePath(QString::fromUtf8("cwd with spaces % ñ"));
+        QVERIFY(QDir().mkpath(trackedPath));
+        connection.sendToShell(("cd -- '" + trackedPath + "'\r").toUtf8());
+        QTRY_VERIFY_WITH_TIMEOUT(!workingDirectorySpy.isEmpty(), 5000);
+        QTRY_COMPARE_WITH_TIMEOUT(workingDirectorySpy.last().first().toString(), trackedPath, 5000);
+        const QString browserPath = serverDir.filePath("SFTP's folder $literal");
+        QVERIFY(QDir().mkpath(browserPath));
+        {
+            SftpSidebar browser;
+            browser.setConnection(&connection);
+            Session browserSession;
+            browserSession.type = SessionType::SSH;
+            browserSession.remoteDirectory = trackedPath;
+            browser.startSession(browserSession);
+            auto* path = browser.findChild<QLineEdit*>("remotePathEdit");
+            path->setText(browserPath);
+            QVERIFY(QMetaObject::invokeMethod(path, "returnPressed", Qt::DirectConnection));
+            QTRY_COMPARE_WITH_TIMEOUT(workingDirectorySpy.last().first().toString(), browserPath, 5000);
+            // A foreground program must not receive the navigation command.
+            QSignalSpy foregroundOutput(&connection, &SshConnection::shellDataReceived);
+            connection.sendToShell("sh -c 'echo BANCHO_WAITING; read line; echo BANCHO_RELEASED'\r");
+            auto output = [&]() {
+                QByteArray text;
+                for (const auto& event : foregroundOutput)
+                    text += event.first().toByteArray();
+                return text;
+            };
+            // The marker occurs once in the echoed command and once in its
+            // output; shell prompt escape sequences can precede the latter.
+            QTRY_VERIFY2_WITH_TIMEOUT(output().count("BANCHO_WAITING") >= 2, output().constData(), 3000);
+            path->setText(trackedPath);
+            QVERIFY(QMetaObject::invokeMethod(path, "returnPressed", Qt::DirectConnection));
+            QTest::qWait(1200);
+            QCOMPARE(workingDirectorySpy.last().first().toString(), browserPath);
+            QVERIFY(output().count("BANCHO_RELEASED") < 2);
+            connection.sendToShell("\r");
+            QTRY_COMPARE_WITH_TIMEOUT(workingDirectorySpy.last().first().toString(), trackedPath, 5000);
+        }
+        QSignalSpy shellOutput(&connection, &SshConnection::shellDataReceived);
+        auto shellText = [&]() {
+            QByteArray text;
+            for (const auto& output : shellOutput)
+                text += output.first().toByteArray();
+            return text;
+        };
+        connection.sendToShell("exec /bin/dash\r");
+        // Wait for the new prompt: interactive shell startup may flush input
+        // queued before its terminal modes have been initialized.
+        QTRY_VERIFY_WITH_TIMEOUT(shellText().contains("exec /bin/dash") && shellText().endsWith("$ "), 3000);
+        connection.sendToShell(("cd -- '" + serverDir.path() + "'\r").toUtf8());
+        QTRY_COMPARE_WITH_TIMEOUT(workingDirectorySpy.last().first().toString(), serverDir.path(), 5000);
 
         QTest::qWait(1200);
         QCOMPARE(statsSpy.count(), 0);

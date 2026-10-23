@@ -1033,7 +1033,6 @@ void MainWindow::setupUi() {
     connect(m_tabWidget4, &QTabWidget::tabCloseRequested, this,
             [this](int i) { onTabCloseRequested(m_tabWidget4, i); });
     connect(m_tabWidget4, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget4, i); });
-    connect(m_sftpSidebar, &SftpSidebar::remoteStatsUpdated, this, &MainWindow::onRemoteStatsUpdated);
     connect(m_sftpSidebar, &SftpSidebar::diagnosticMessage, this, [this](const QString& message) {
         SshConnection* connection = m_sftpSidebar->connection();
         if (!connection)
@@ -1129,8 +1128,14 @@ void MainWindow::onConnectSession(const Session& session) {
         // Keep the SFTP browser in sync with the terminal's working directory
         connect(tab, &TerminalTab::remoteDirChanged, this, [this, tab](const QString& path) {
             tab->setRemoteDirectory(path);
-            m_sftpSidebar->navigateTo(path);
+            if (activePane()->currentWidget() == tab && m_sftpSidebar->connection() == tab->connection())
+                m_sftpSidebar->navigateTo(path);
         });
+        connect(tab->connection(), &SshConnection::remoteStatsUpdated, this,
+                [this, tab](double cpu, double mem, double disk, double uptime) {
+                    if (activePane()->currentWidget() == tab)
+                        onRemoteStatsUpdated(cpu, mem, disk, uptime);
+                });
     } else if (session.type == SessionType::Telnet) {
         pane->setTabIcon(index, QIcon(":/icons/telnet.svg"));
     } else if (session.type == SessionType::RDP) {
@@ -1283,13 +1288,14 @@ void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {
 
 void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
     m_activePane = pane;
+    m_remoteMonitorWidget->hide();
     updateSessionContext();
 
     if (index < 0) {
         // If this pane has no tabs but another visible pane does, switch to it.
         for (QTabWidget* candidate : visiblePanes()) {
             if (candidate->count() > 0) {
-                m_activePane = candidate;
+                onCurrentTabChanged(candidate, candidate->currentIndex());
                 return;
             }
         }
@@ -1926,6 +1932,11 @@ void MainWindow::onReconnectRequested(const Session& session) {
 }
 
 void MainWindow::onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs) {
+    auto* tab = qobject_cast<TerminalTab*>(activePane()->currentWidget());
+    if (!tab || !tab->isSsh()) {
+        m_remoteMonitorWidget->hide();
+        return;
+    }
     int seconds = qMax(0, static_cast<int>(uptimeSecs));
     int days = seconds / 86400;
     int hours = (seconds % 86400) / 3600;
@@ -2651,6 +2662,16 @@ void MainWindow::setRibbonExpanded(bool expanded) {
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::FocusIn) {
+        auto* widget = qobject_cast<QWidget*>(watched);
+        for (QTabWidget* pane : visiblePanes()) {
+            QWidget* current = pane->currentWidget();
+            if (current && widget && (current == widget || current->isAncestorOf(widget)) && activePane() != pane) {
+                onCurrentTabChanged(pane, pane->currentIndex());
+                break;
+            }
+        }
+    }
     if (event->type() == QEvent::ApplicationPaletteChange && m_themeMode == "system") {
         m_systemPalette = qApp->palette();
         applyThemeMode("system");

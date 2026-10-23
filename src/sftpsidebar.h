@@ -16,6 +16,7 @@ class QProgressBar;
 class QSplitter;
 class FtpClient;
 class QThread;
+class SftpProgressLabel;
 
 class SftpSidebar : public QWidget {
     Q_OBJECT
@@ -76,6 +77,7 @@ signals:
     void requestFtpConnect(const QString& host, int port, const QString& user, const QString& password, bool tls,
                            int minimumTlsVersion, const QString& caFile, bool allowInvalidCertificates);
     void requestList(const QString& path);
+    void requestNavigate(const QString& path);
     void requestDownload(const QString& remotePath, const QString& localPath);
     void requestUpload(const QString& localPath, const QString& remotePath);
     void requestDelete(const QString& remotePath, bool isDir);
@@ -137,7 +139,7 @@ private:
     QSplitter* m_fileSplitter = nullptr;
     QLabel* m_statusLabel;
     QProgressBar* m_progressBar;
-    QLabel* m_progressLabel;
+    SftpProgressLabel* m_progressLabel;
     QPushButton* m_cancelTransferBtn;
     QPushButton* m_pauseTransferBtn;
 

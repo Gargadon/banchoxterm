@@ -53,6 +53,7 @@ public slots:
     void sendToShell(const QByteArray& data);
     void resizePty(int rows, int cols);
     void listDirectory(const QString& path);
+    void navigateDirectory(const QString& path);
     void downloadFile(const QString& remotePath, const QString& localPath);
     void uploadFile(const QString& localPath, const QString& remotePath);
     void deleteFile(const QString& remotePath, bool isDir);
@@ -79,11 +80,13 @@ signals:
     void tunnelStateChanged(int index, bool active);
     void diagnosticMessage(const QString& message);
     void remoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs);
+    void remoteDirectoryChanged(const QString& path);
 
 private slots:
     void onSocketActivity();
     void onKeepAlive();
     void onStatsTimer();
+    void pollRemoteDirectory();
 
 private:
     bool openSocket();
@@ -109,6 +112,9 @@ private:
     }
 
     void openShell();
+    QByteArray readRemoteProcFile(const QByteArray& path);
+    QByteArray readRemoteLink(const QByteArray& path);
+    QString listDirectoryImpl(const QString& path);
     void readShell();
     void handleShellClosed();
     void armNotifiers();
@@ -167,6 +173,13 @@ private:
     int m_ptyCols = 80;
 
     QTimer* m_statsTimer = nullptr;
+    QTimer* m_directoryTimer = nullptr;
+    QByteArray m_remoteShellPid;
+    QString m_lastRemoteDirectory;
+    QString m_requestedRemoteDirectory;
+    QString m_directoryChangeInFlight;
+    QElapsedTimer m_directoryChangeTimer;
+    int m_directoryDiscoveryAttempts = 0;
     QTimer* m_keepAliveTimer = nullptr;
     QSocketNotifier* m_readNotifier = nullptr;
     QSocketNotifier* m_writeNotifier = nullptr;

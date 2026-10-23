@@ -8,6 +8,8 @@
 #include <QTreeWidgetItem>
 #include <QSplitter>
 #include <QLabel>
+#include <QPainter>
+#include <QStyle>
 #include <QProgressBar>
 #include <QFileDialog>
 #include <QInputDialog>
@@ -76,6 +78,53 @@ static const QIcon& refreshIcon() {
     static const QIcon icon(QStringLiteral(":/icons/refresh.svg"));
     return icon;
 }
+
+// Text must never contribute a filename-sized minimum width to the sidebar.
+// Keep byte counts on their own line so eliding the name cannot hide them.
+class SftpProgressLabel : public QLabel {
+public:
+    explicit SftpProgressLabel(QWidget* parent) : QLabel(parent) {
+        setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        setTextFormat(Qt::PlainText);
+        setMinimumWidth(0);
+    }
+    void setText(const QString& value) {
+        m_amount.clear();
+        QLabel::setText(value);
+        setToolTip(value);
+        updateGeometry();
+    }
+    void setProgress(const QString& name, const QString& amount) {
+        m_amount = amount;
+        QLabel::setText(name + '\n' + amount);
+        setToolTip(name + '\n' + amount);
+        updateGeometry();
+    }
+    QSize sizeHint() const override {
+        return QSize(0, fontMetrics().height() * (m_amount.isEmpty() ? 1 : 2) + 6);
+    }
+    QSize minimumSizeHint() const override {
+        return sizeHint();
+    }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        const QRect area = contentsRect();
+        QRect nameArea = area;
+        if (!m_amount.isEmpty())
+            nameArea.setHeight(area.height() / 2);
+        const QString name = m_amount.isEmpty() ? text() : text().section('\n', 0, -2);
+        style()->drawItemText(&painter, nameArea, Qt::AlignLeft | Qt::AlignVCenter, palette(), isEnabled(),
+                              fontMetrics().elidedText(name, Qt::ElideMiddle, area.width()), foregroundRole());
+        if (!m_amount.isEmpty()) {
+            const QRect amountArea(area.left(), nameArea.bottom() + 1, area.width(), area.height() - nameArea.height());
+            style()->drawItemText(&painter, amountArea, Qt::AlignLeft | Qt::AlignVCenter, palette(), isEnabled(),
+                                  m_amount, foregroundRole());
+        }
+    }
+private:
+    QString m_amount;
+};
 
 static QString formatBytes(qint64 bytes) {
     const double b = static_cast<double>(bytes);
@@ -372,7 +421,7 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     connect(m_treeWidget, &QTreeWidget::itemSelectionChanged, this, updateDownloadButton);
     connect(m_treeWidget->model(), &QAbstractItemModel::modelReset, this, updateDownloadButton);
 
-    m_progressLabel = new QLabel(remotePanel);
+    m_progressLabel = new SftpProgressLabel(remotePanel);
     m_progressLabel->setObjectName("sftpTransferLabel");
     m_progressLabel->hide();
     remoteLayout->addWidget(m_progressLabel);
@@ -398,7 +447,8 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     m_pauseTransferBtn->hide();
     remoteLayout->addWidget(m_pauseTransferBtn);
 
-    m_statusLabel = new QLabel(tr("Disconnected"), remotePanel);
+    m_statusLabel = new SftpProgressLabel(remotePanel);
+    m_statusLabel->setText(tr("Disconnected"));
     m_statusLabel->setObjectName("sftpStatus");
     remoteLayout->addWidget(m_statusLabel);
 
@@ -428,7 +478,7 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
     connect(m_newFolderBtn, &QPushButton::clicked, this, &SftpSidebar::onNewFolderClicked);
     connect(m_renameBtn, &QPushButton::clicked, this, &SftpSidebar::onRenameClicked);
     connect(m_chmodBtn, &QPushButton::clicked, this, &SftpSidebar::onChmodClicked);
-    connect(m_pathEdit, &QLineEdit::returnPressed, this, [this]() { emit requestList(m_pathEdit->text().trimmed()); });
+    connect(m_pathEdit, &QLineEdit::returnPressed, this, [this]() { emit requestNavigate(m_pathEdit->text()); });
     connect(m_treeWidget, &QTreeWidget::itemDoubleClicked, this, &SftpSidebar::onItemDoubleClicked);
     connect(m_treeWidget, &QTreeWidget::customContextMenuRequested, this, &SftpSidebar::showContextMenu);
 }
@@ -459,6 +509,7 @@ void SftpSidebar::setConnection(SshConnection* connection) {
 
     connect(this, &SftpSidebar::requestConnect, m_connection, &SshConnection::connectToHost);
     connect(this, &SftpSidebar::requestList, m_connection, &SshConnection::listDirectory);
+    connect(this, &SftpSidebar::requestNavigate, m_connection, &SshConnection::navigateDirectory);
     connect(this, &SftpSidebar::requestDownload, m_connection, &SshConnection::downloadFile);
     connect(this, &SftpSidebar::requestUpload, m_connection, &SshConnection::uploadFile);
     connect(this, &SftpSidebar::requestDelete, m_connection, &SshConnection::deleteFile);
@@ -468,9 +519,20 @@ void SftpSidebar::setConnection(SshConnection* connection) {
     connect(this, &SftpSidebar::requestUploadDir, m_connection, &SshConnection::uploadDirectory);
     connect(this, &SftpSidebar::requestDisconnect, m_connection, &SshConnection::disconnectFromHost);
 
-    connect(m_connection, &SshConnection::connectionSuccess, this, &SftpSidebar::onConnectionSuccess);
-    connect(m_connection, &SshConnection::connectionFailed, this, &SftpSidebar::onConnectionFailed);
-    connect(m_connection, &SshConnection::directoryListed, this, &SftpSidebar::onDirectoryListed);
+    // Queued signals from the previous tab can arrive after disconnect().
+    connect(m_connection, &SshConnection::connectionSuccess, this, [this, connection]() {
+        if (m_connection == connection)
+            onConnectionSuccess();
+    });
+    connect(m_connection, &SshConnection::connectionFailed, this, [this, connection](const QString& error) {
+        if (m_connection == connection)
+            onConnectionFailed(error);
+    });
+    connect(m_connection, &SshConnection::directoryListed, this,
+            [this, connection](const QString& path, const QList<SftpFile>& files) {
+                if (m_connection == connection)
+                    onDirectoryListed(path, files);
+            });
     connect(m_connection, &SshConnection::operationFinished, this, &SftpSidebar::onOperationFinished);
     connect(m_connection, &SshConnection::transferProgress, this, &SftpSidebar::onTransferProgress);
     connect(m_connection, &SshConnection::passwordRequired, this, &SftpSidebar::onPasswordRequired);
@@ -497,6 +559,7 @@ void SftpSidebar::setFtpClient(FtpClient* client) {
 
     connect(this, &SftpSidebar::requestFtpConnect, m_ftp, &FtpClient::connectToHost);
     connect(this, &SftpSidebar::requestList, m_ftp, &FtpClient::listDirectory);
+    connect(this, &SftpSidebar::requestNavigate, m_ftp, &FtpClient::listDirectory);
     connect(this, &SftpSidebar::requestDownload, m_ftp, &FtpClient::downloadFile);
     connect(this, &SftpSidebar::requestUpload, m_ftp, &FtpClient::uploadFile);
     connect(this, &SftpSidebar::requestUploadDir, m_ftp, &FtpClient::uploadDirectory);
@@ -560,6 +623,7 @@ void SftpSidebar::startSession(const Session& session) {
 void SftpSidebar::stopSession() {
     stopParallelTransfers();
     m_isConnected = false;
+    detachConnection();
     detachFtp();
     m_treeWidget->clear();
     m_currentRemoteFiles.clear();
@@ -972,14 +1036,17 @@ void SftpSidebar::onParentDirClicked() {
     } else {
         m_currentPath = m_currentPath.left(lastSlash);
     }
-    emit requestList(m_currentPath);
+    emit requestNavigate(m_currentPath);
 }
 
 void SftpSidebar::navigateTo(const QString& path) {
+    if (path.isEmpty())
+        return;
+    m_currentSession.remoteDirectory = path;
     if (!m_isConnected || m_directoryDownloadActive)
         return;
 
-    QString cleanPath = path.trimmed();
+    const QString cleanPath = path;
     if (cleanPath.isEmpty() || cleanPath == m_currentPath)
         return;
 
@@ -1360,7 +1427,7 @@ void SftpSidebar::onItemDoubleClicked(QTreeWidgetItem* item, int column) {
                 m_currentPath += "/";
             m_currentPath += name;
         }
-        emit requestList(m_currentPath);
+        emit requestNavigate(m_currentPath);
     } else {
         QString lowerName = name.toLower();
         if (lowerName.endsWith(".txt") || lowerName.endsWith(".py") || lowerName.endsWith(".sh") ||
@@ -1892,7 +1959,7 @@ void SftpSidebar::onTransferProgress(const QString& fileName, qint64 bytesDone, 
     }
     if (m_progressBar->isVisible()) {
         const QString totalText = totalBytes > 0 ? formatBytes(totalBytes) : tr("? bytes");
-        m_progressLabel->setText(tr("%1: %2 / %3").arg(fileName).arg(formatBytes(bytesDone)).arg(totalText));
+        m_progressLabel->setProgress(fileName, tr("%1 / %2").arg(formatBytes(bytesDone), totalText));
     }
 }
 
