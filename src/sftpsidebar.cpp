@@ -106,6 +106,7 @@ public:
     QSize minimumSizeHint() const override {
         return sizeHint();
     }
+
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter painter(this);
@@ -122,6 +123,7 @@ protected:
                                   m_amount, foregroundRole());
         }
     }
+
 private:
     QString m_amount;
 };

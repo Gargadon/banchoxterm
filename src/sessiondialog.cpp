@@ -835,9 +835,9 @@ void SessionDialog::setupUi() {
 
     btnLayout->addWidget(cancelBtn);
     auto updateAction = [this, saveBtn]() {
-        saveBtn->setText(!m_saveSessionCheck->isEnabled() ? tr("Save")
-                        : m_saveSessionCheck->isChecked()  ? tr("Save and connect")
-                                                          : tr("Connect"));
+        saveBtn->setText(!m_saveSessionCheck->isEnabled()  ? tr("Save")
+                         : m_saveSessionCheck->isChecked() ? tr("Save and connect")
+                                                           : tr("Connect"));
     };
     connect(m_saveSessionCheck, &QCheckBox::toggled, this, updateAction);
     updateAction();

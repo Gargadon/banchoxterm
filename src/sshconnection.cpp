@@ -984,17 +984,13 @@ void SshConnection::openShell() {
 }
 
 QByteArray SshConnection::readRemoteProcFile(const QByteArray& path) {
-    auto* handle = retryPtr([&]() {
-        return libssh2_sftp_open(m_sftp, path.constData(), LIBSSH2_FXF_READ, 0);
-    });
+    auto* handle = retryPtr([&]() { return libssh2_sftp_open(m_sftp, path.constData(), LIBSSH2_FXF_READ, 0); });
     if (!handle)
         return {};
     QByteArray result;
     char buffer[4096];
     while (result.size() < 16384) {
-        const int count = retry([&]() {
-            return static_cast<int>(libssh2_sftp_read(handle, buffer, sizeof(buffer)));
-        });
+        const int count = retry([&]() { return static_cast<int>(libssh2_sftp_read(handle, buffer, sizeof(buffer))); });
         if (count <= 0)
             break;
         result.append(buffer, count);
@@ -1005,9 +1001,7 @@ QByteArray SshConnection::readRemoteProcFile(const QByteArray& path) {
 
 QByteArray SshConnection::readRemoteLink(const QByteArray& path) {
     char buffer[4096];
-    const int count = retry([&]() {
-        return libssh2_sftp_readlink(m_sftp, path.constData(), buffer, sizeof(buffer));
-    });
+    const int count = retry([&]() { return libssh2_sftp_readlink(m_sftp, path.constData(), buffer, sizeof(buffer)); });
     return count > 0 ? QByteArray(buffer, count) : QByteArray();
 }
 
@@ -1029,8 +1023,8 @@ void SshConnection::pollRemoteDirectory() {
         };
         QByteArray parent = parentPid(readRemoteProcFile("/proc/self/stat"));
         for (int depth = 0; depth < 3 && !parent.isEmpty() && parent != "1"; ++depth) {
-            const auto children = readRemoteProcFile("/proc/" + parent + "/task/" + parent + "/children")
-                                      .simplified().split(' ');
+            const auto children =
+                readRemoteProcFile("/proc/" + parent + "/task/" + parent + "/children").simplified().split(' ');
             QList<QByteArray> candidates;
             for (const auto& child : children) {
                 bool valid = false;
@@ -1053,8 +1047,8 @@ void SshConnection::pollRemoteDirectory() {
             if (++m_directoryDiscoveryAttempts >= 5) {
                 m_directoryTimer->stop(); // Non-Linux/restricted servers still use OSC 7.
                 emit diagnosticMessage(QStringLiteral("Automatic directory tracking unavailable: remote /proc "
-                                                       "is inaccessible or the PTY process is ambiguous; "
-                                                       "OSC 7 directory announcements are still supported."));
+                                                      "is inaccessible or the PTY process is ambiguous; "
+                                                      "OSC 7 directory announcements are still supported."));
             }
             return;
         }
@@ -1321,7 +1315,8 @@ void SshConnection::navigateDirectory(const QString& path) {
         return;
     for (const QChar character : directory) {
         if (character.unicode() < 32 || character.unicode() == 127) {
-            emit diagnosticMessage(QStringLiteral("Cannot send a directory containing control characters to the shell."));
+            emit diagnosticMessage(
+                QStringLiteral("Cannot send a directory containing control characters to the shell."));
             return;
         }
     }

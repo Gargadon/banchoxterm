@@ -273,7 +273,8 @@ void SessionsSidebar::loadSessions() {
         QFont font = m_treeWidget->font();
         font.setWeight(QFont::DemiBold);
         item->setFont(0, font);
-        const auto notes = settings.value("sessions/groupMetadata").toMap().value(path).toMap().value("notes").toString();
+        const auto notes =
+            settings.value("sessions/groupMetadata").toMap().value(path).toMap().value("notes").toString();
         item->setToolTip(0, tr("Session group: %1").arg(path) + (notes.isEmpty() ? QString() : '\n' + notes));
         item->setData(0, kIsGroupRole, true);
         item->setData(0, kGroupPathRole, path);
@@ -337,7 +338,8 @@ void SessionsSidebar::loadSessions() {
             break;
         }
 
-        if (!session.notes.isEmpty()) item->setToolTip(0, item->toolTip(0) + '\n' + session.notes);
+        if (!session.notes.isEmpty())
+            item->setToolTip(0, item->toolTip(0) + '\n' + session.notes);
         if (parent) {
             parent->addChild(item);
         } else {
