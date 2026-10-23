@@ -380,8 +380,8 @@ Destino: %2</translation></message>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="435"/>
-        <source>Toggle split view</source>
-        <translation>Alternar vista dividida</translation>
+        <source>Split left/right</source>
+        <translation>Dividir izquierda/derecha</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="438"/>
@@ -391,7 +391,7 @@ Destino: %2</translation></message>
     <message>
         <location filename="../src/mainwindow.cpp" line="439"/>
         <source>Toggle 2x2 grid view</source>
-        <translation>Alternar vista de cuadrícula 2×2</translation>
+        <translation>Organizar pestañas en cuadrícula 2×2</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="442"/>
@@ -741,15 +741,11 @@ Comando:
         <source>&amp;View</source>
         <translation>&amp;Ver</translation>
     </message>
-    <message>
-        <location filename="../src/mainwindow.cpp" line="1960"/>
-        <source>Toggle &amp;Split View</source>
-        <translation>Alternar vista &amp;dividida</translation>
-    </message>
+
     <message>
         <location filename="../src/mainwindow.cpp" line="1964"/>
-        <source>Toggle 2x2 &amp;Grid View</source>
-        <translation>Alternar vista de &amp;cuadrícula 2x2</translation>
+        <source>Arrange Tabs in a &amp;Grid</source>
+        <translation>Organizar pestañas en una cuadrícula</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="1968"/>
@@ -982,17 +978,12 @@ Do you want to continue?</source>
         <source>Open Local Terminal</source>
         <translation>Abrir terminal local</translation>
     </message>
-    <message>
-        <location filename="../src/mainwindow.cpp" line="2004"/>
-        <location filename="../src/mainwindow.cpp" line="2022"/>
-        <source>Toggle Split View</source>
-        <translation>Alternar vista dividida</translation>
-    </message>
+
     <message>
         <location filename="../src/mainwindow.cpp" line="2004"/>
         <location filename="../src/mainwindow.cpp" line="2024"/>
-        <source>Toggle 2x2 Grid View</source>
-        <translation>Alternar vista de cuadrícula 2x2</translation>
+        <source>Arrange Tabs in a Grid</source>
+        <translation>Organizar pestañas en una cuadrícula</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="2005"/>
@@ -1352,6 +1343,155 @@ Do you want to continue?</source>
     <message>
         <source>Search all</source>
         <translation>Buscar en todas</translation>
+    </message>
+    <message>
+        <source>Panels</source>
+        <translation>Paneles</translation>
+    </message>
+
+    <message>
+        <source>Split top/bottom</source>
+        <translation>Dividir arriba/abajo</translation>
+    </message>
+    <message>
+        <source>Close pane</source>
+        <translation>Cerrar panel</translation>
+    </message>
+    <message>
+        <source>Synchronize input</source>
+        <translation>Sincronizar entrada</translation>
+    </message>
+    <message>
+        <source>Panel groups</source>
+        <translation>Grupos de paneles</translation>
+    </message>
+    <message>
+        <source>Toggle sidebar</source>
+        <translation>Mostrar/ocultar barra lateral</translation>
+    </message>
+    <message>
+        <source>Select at least two sessions. Typing and pasting in any selected session will be sent to all selected sessions. Click Synchronize input again to stop.</source>
+        <translation>Selecciona al menos dos sesiones. Lo que escribas o pegues en cualquiera de ellas se enviará a todas las seleccionadas. Pulsa de nuevo Sincronizar entrada para detenerla.</translation>
+    </message>
+    <message>
+        <source>Pane %1: %2</source>
+        <translation>Panel %1: %2</translation>
+    </message>
+    <message>
+        <source>Stop synchronization (%1)</source>
+        <translation>Detener sincronización (%1)</translation>
+    </message>
+    <message>
+        <source>Group name</source>
+        <translation>Nombre del grupo</translation>
+    </message>
+    <message>
+        <source>Choose the open sessions to save with this panel layout:</source>
+        <translation>Elige las sesiones abiertas que guardar con esta distribución de paneles:</translation>
+    </message>
+    <message>
+        <source>Save group</source>
+        <translation>Guardar grupo</translation>
+    </message>
+    <message>
+        <source>Open group</source>
+        <translation>Abrir grupo</translation>
+    </message>
+    <message>
+        <source>Delete group</source>
+        <translation>Eliminar grupo</translation>
+    </message>
+    <message>
+        <source>Replace the saved group %1?</source>
+        <translation>¿Reemplazar el grupo guardado %1?</translation>
+    </message>
+    <message>
+        <source>Equalize sizes</source>
+        <translation>Igualar tamaños</translation>
+    </message>
+    <message>
+        <source>Single pane</source>
+        <translation>Una sola vista</translation>
+    </message>
+    <message>
+        <source>Choose synchronized sessions</source>
+        <translation>Elegir sesiones sincronizadas</translation>
+    </message>
+    <message>
+        <source>Input synchronized</source>
+        <translation>Entrada sincronizada</translation>
+    </message>
+    <message>
+        <source>Tabs</source>
+        <translation>Pestañas</translation>
+    </message>
+    <message>
+        <source>Layout</source>
+        <translation>Disposición</translation>
+    </message>
+    <message>
+        <source>New group</source>
+        <translation>Nuevo grupo</translation>
+    </message>
+    <message>
+        <source>Manage groups</source>
+        <translation>Gestionar grupos</translation>
+    </message>
+    <message>
+        <source>Ungrouped</source>
+        <translation>Sin grupo</translation>
+    </message>
+    <message>
+        <source>No saved groups</source>
+        <translation>Sin grupos guardados</translation>
+    </message>
+    <message>
+        <source>Panel group</source>
+        <translation>Grupo de paneles</translation>
+    </message>
+    <message>
+        <source>Close panel group</source>
+        <translation>Cerrar grupo de paneles</translation>
+    </message>
+    <message>
+        <source>Disconnect the sessions in group %1 and close it?</source>
+        <translation>¿Desconectar las sesiones del grupo %1 y cerrarlo?</translation>
+    </message>
+    <message>
+        <source>Rename group</source>
+        <translation>Renombrar grupo</translation>
+    </message>
+    <message>
+        <source>Close group</source>
+        <translation>Cerrar grupo</translation>
+    </message>
+    <message>
+        <source>A saved group with this name already exists.</source>
+        <translation>Ya existe un grupo guardado con este nombre.</translation>
+    </message>
+    <message>
+        <source>An open group with this name already exists.</source>
+        <translation>Ya existe un grupo abierto con este nombre.</translation>
+    </message>
+    <message>
+        <source>Choose the open tabs to move into the new group. Their sessions stay connected.</source>
+        <translation>Elige las pestañas abiertas que mover al nuevo grupo. Sus sesiones seguirán conectadas.</translation>
+    </message>
+    <message>
+        <source>Save current selection</source>
+        <translation>Guardar selección actual</translation>
+    </message>
+    <message>
+        <source>Saved groups</source>
+        <translation>Grupos guardados</translation>
+    </message>
+    <message>
+        <source>Sessions in the saved group</source>
+        <translation>Sesiones del grupo guardado</translation>
+    </message>
+    <message>
+        <source>%1 sessions</source>
+        <translation>%1 sesiones</translation>
     </message>
 </context>
 <context>
@@ -4382,12 +4522,12 @@ Versión actual: %2</translation>
         <translation>Bloquear aplicación</translation>
     </message>
     <message>
-        <source>Toggle split view</source>
-        <translation>Alternar vista dividida</translation>
+        <source>Split left/right</source>
+        <translation>Dividir izquierda/derecha</translation>
     </message>
     <message>
-        <source>Toggle grid view</source>
-        <translation>Alternar vista en cuadrícula</translation>
+        <source>Arrange tabs in a grid</source>
+        <translation>Organizar pestañas en cuadrícula</translation>
     </message>
     <message>
         <source>Move tab to other pane</source>

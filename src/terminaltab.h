@@ -18,6 +18,7 @@ class QCheckBox;
 class ConPty;
 class QFile;
 class QEvent;
+class QKeyEvent;
 class QAxWidget;
 class VncClientWidget;
 class RdpClientWidget;
@@ -55,6 +56,7 @@ public:
     }
     void updateFontFromSettings();
     void syncTerminalSize();
+    void receiveSynchronizedKey(QKeyEvent* event, bool fromPaste);
     bool capturesApplicationShortcuts() const {
         return m_captureApplicationShortcuts;
     }
@@ -79,6 +81,8 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
+    void userKeyInput(QKeyEvent* event, bool fromPaste);
+    void userStringInput(const QString& text);
     void terminalDataReceived(const QByteArray& data);
     void shortcutCaptureChanged(bool enabled);
     void promptDetected(const QString& prompt);

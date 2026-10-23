@@ -3,6 +3,12 @@
 #include "sessionssidebar.h"
 #include "sftpsidebar.h"
 #include "terminaltab.h"
+#include "terminalpane.h"
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QSignalBlocker>
+#include <qtermwidget.h>
 #include "sshconnection.h"
 #include "sessiondialog.h"
 #include "settingsdialog.h"
@@ -61,6 +67,8 @@
 #include <functional>
 #include <QSharedPointer>
 #include <QPointer>
+#include <QSet>
+#include <QUuid>
 
 namespace {
 class RibbonStatusContext : public QWidget {
@@ -326,22 +334,49 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         m_mainSplitter->setSizes({350, 850});
     }
 
-    setPaneLayout(settings.value("window/tabLayoutMode", 0).toInt());
-    const int savedPane = settings.value("window/activePane", 0).toInt();
-    const QList<QTabWidget*> panes = visiblePanes();
-    if (savedPane >= 0 && savedPane < panes.size())
-        m_activePane = panes[savedPane];
-    restoreOpenTabs(settings);
+    const bool restoredGroups = restorePanelWorkspaces(settings);
+    if (!restoredGroups) {
+        const auto savedTree = QJsonDocument::fromJson(settings.value("window/paneTree").toByteArray()).object();
+        if (!restorePaneTree(savedTree)) {
+            const int mode = settings.value("window/tabLayoutMode", 0).toInt();
+            if (mode == 2) {
+                restorePaneTree(
+                    {{"orientation", "vertical"},
+                     {"children",
+                      QJsonArray{
+                          QJsonObject{{"orientation", "horizontal"},
+                                      {"children", QJsonArray{QJsonObject{{"pane", 0}}, QJsonObject{{"pane", 1}}}}},
+                          QJsonObject{{"orientation", "horizontal"},
+                                      {"children", QJsonArray{QJsonObject{{"pane", 2}}, QJsonObject{{"pane", 3}}}}}}}});
+            } else {
+                setPaneLayout(mode);
+            }
+        }
+    }
+    m_sidebarWidth = settings.value("window/sidebarWidth", 350).toInt();
+    if (settings.value("window/sidebarHidden", false).toBool())
+        m_sidebarContainer->hide();
+    if (!restoredGroups) {
+        const int savedPane = settings.value("window/activePane", 0).toInt();
+        const QList<QTabWidget*> panes = visiblePanes();
+        if (savedPane >= 0 && savedPane < panes.size())
+            m_activePane = panes[savedPane];
+        restoreOpenTabs(settings);
+    }
 
     setWindowTitle("BanchoXterm");
 }
 
 MainWindow::~MainWindow() {
+    // QWidget destroys its children after this class's members. Stop tab
+    // callbacks before the synchronization and diagnostic containers go away.
+    for (auto* tab : findChildren<TerminalTab*>())
+        disconnect(tab, nullptr, this, nullptr);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
     bool hasActive = false;
-    for (QTabWidget* pane : allPanes()) {
+    for (QTabWidget* pane : allOpenPanes()) {
         for (int i = 0; i < pane->count(); ++i) {
             auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
             if (tab && tab->isSessionActive()) {
@@ -353,6 +388,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
             break;
     }
 
+    for (auto* tab : m_detachedTabs.keys())
+        hasActive = hasActive || tab->isSessionActive();
     if (hasActive) {
         QMessageBox::StandardButton res = localizedQuestion(
             this, tr("Exit BanchoXterm"),
@@ -379,13 +416,18 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     settings.setValue("window/state", saveState());
     settings.setValue("window/splitter", m_mainSplitter->saveState());
     settings.setValue("window/tabLayoutMode", m_paneLayoutMode);
+    settings.setValue("window/paneTree", QJsonDocument(paneTree(m_paneRoot)).toJson(QJsonDocument::Compact));
+    settings.setValue("window/sidebarHidden", m_sidebarContainer->isHidden());
+    settings.setValue("window/sidebarWidth",
+                      m_sidebarContainer->isHidden() ? m_sidebarWidth : m_sidebarContainer->width());
     settings.setValue("window/activePane", qMax(0, visiblePanes().indexOf(activePane())));
     settings.setValue("window/ribbonPinned", m_ribbonPinned);
     saveOpenTabs(settings);
+    savePanelWorkspaces(settings);
     QMainWindow::closeEvent(event);
 }
 
-void MainWindow::reattachDetachedTabs() {
+void MainWindow::reattachDetachedTabs(const QString& groupId) {
     if (m_detachedTabs.isEmpty())
         return;
 
@@ -393,13 +435,17 @@ void MainWindow::reattachDetachedTabs() {
     for (auto it = detachedTabs.cbegin(); it != detachedTabs.cend(); ++it) {
         TerminalTab* tab = it.key();
         auto* window = static_cast<DetachedTabWindow*>(it.value());
-        if (!tab || !window)
+        if (!tab || !window || (!groupId.isEmpty() && tab->property("panelGroupId").toString() != groupId))
             continue;
 
         m_detachedTabs.remove(tab);
         QWidget* content = window->takeCentralWidget();
         if (content) {
             QTabWidget* target = activePane();
+            const QString owner = tab->property("panelGroupId").toString();
+            for (int i = 0; i < m_panelGroups.size(); ++i)
+                if (m_panelGroups[i].id == owner && i != m_currentPanelGroup)
+                    target = m_panelGroups[i].activePane ? m_panelGroups[i].activePane : m_panelGroups[i].panes.first();
             if (target) {
                 content->setParent(target);
                 const int newIndex = target->addTab(content, window->windowTitle());
@@ -449,9 +495,7 @@ void MainWindow::setupUi() {
     addToolbarSection(tr("SESSION"));
     auto* newRemoteAction = toolBar->addAction(QIcon(":/icons/add.svg"), tr("New Session"));
     newRemoteAction->setToolTip(tr("Create a new remote session"));
-    connect(newRemoteAction, &QAction::triggered, this, [this]() {
-        m_sessionsSidebar->onNewSession();
-    });
+    connect(newRemoteAction, &QAction::triggered, this, [this]() { m_sessionsSidebar->onNewSession(); });
 
     auto* localAction = toolBar->addAction(QIcon(":/icons/terminal.svg"), tr("Local"));
     localAction->setToolTip(tr("Open a local terminal"));
@@ -462,7 +506,7 @@ void MainWindow::setupUi() {
     addToolbarSection(tr("VIEW"));
     auto* splitAction = findChild<QAction*>("shortcut_toggleSplit");
     splitAction->setIcon(QIcon(":/icons/split.svg"));
-    splitAction->setIconText(tr("Split"));
+    splitAction->setIconText(tr("Split left/right"));
     toolBar->addAction(splitAction);
 
     auto* gridAction = findChild<QAction*>("shortcut_toggleGrid");
@@ -521,6 +565,9 @@ void MainWindow::setupUi() {
     ribbonTabs->setObjectName("ribbonTabs");
     ribbonTabs->setDocumentMode(true);
     ribbonTabs->setTabPosition(QTabWidget::North);
+    // The Ribbon supplies its own selected-tab underline. The native base
+    // paints extra frame lines that break around tabs and corner widgets.
+    ribbonTabs->tabBar()->setDrawBase(false);
     ribbonTabs->tabBar()->setObjectName("ribbonTabBar");
 
     auto makeRibbonPage = [ribbonTabs](const QString& title) {
@@ -565,14 +612,69 @@ void MainWindow::setupUi() {
     connect(exitRibbonAction, &QAction::triggered, this, &QWidget::close);
     addRibbonAction(sessionPage.second, exitRibbonAction);
 
-    auto viewPage = makeRibbonPage(tr("View"));
-    addRibbonAction(viewPage.second, splitAction);
-    addRibbonAction(viewPage.second, gridAction);
-    addRibbonAction(viewPage.second, moveAction);
+    auto panelsPage = makeRibbonPage(tr("Panels"));
+    auto panelAction = [&](const QString& name, const QString& text, const char* icon, auto slot) {
+        auto* action = new QAction(QIcon(icon), text, this);
+        action->setObjectName(name);
+        connect(action, &QAction::triggered, this, slot);
+        addRibbonAction(panelsPage.second, action);
+        return action;
+    };
+    addRibbonAction(panelsPage.second, splitAction);
+    panelAction("splitPaneVertically", tr("Split top/bottom"), ":/icons/grid.svg", &MainWindow::splitPaneVertically);
+    auto* layoutMenu = new QMenu(this);
+    layoutMenu->addAction(gridAction);
+    auto layoutAction = [&](const QString& name, const QString& title, const char* icon, auto slot) {
+        auto* action = new QAction(QIcon(icon), title, this);
+        action->setObjectName(name);
+        connect(action, &QAction::triggered, this, slot);
+        layoutMenu->addAction(action);
+    };
+    layoutAction("equalizePaneSizes", tr("Equalize sizes"), ":/icons/move.svg", &MainWindow::equalizePaneSizes);
+    layoutAction("restoreSinglePane", tr("Single pane"), ":/icons/terminal.svg", &MainWindow::restoreSinglePane);
+    layoutAction("closePane", tr("Close pane"), ":/icons/close.svg", &MainWindow::closePane);
+    auto* layoutMenuAction = new QAction(QIcon(":/icons/grid.svg"), tr("Layout"), this);
+    layoutMenuAction->setMenu(layoutMenu);
+    addRibbonAction(panelsPage.second, layoutMenuAction);
+
     auto* detachRibbonAction = findChild<QAction*>("shortcut_detachTab");
     detachRibbonAction->setIcon(QIcon(":/icons/detach.svg"));
     detachRibbonAction->setIconText(tr("Detach"));
-    addRibbonAction(viewPage.second, detachRibbonAction);
+    auto* tabsMenu = new QMenu(this);
+    tabsMenu->addAction(moveAction);
+    tabsMenu->addAction(detachRibbonAction);
+    auto* tabsMenuAction = new QAction(QIcon(":/icons/move.svg"), tr("Tabs"), this);
+    tabsMenuAction->setMenu(tabsMenu);
+    addRibbonAction(panelsPage.second, tabsMenuAction);
+
+    m_syncAction = panelAction("synchronizePanels", tr("Synchronize input"), ":/icons/multiinput.svg",
+                               &MainWindow::configureSynchronization);
+    m_syncAction->setCheckable(true);
+    auto* syncTargetsAction = new QAction(QIcon(":/icons/multiinput.svg"), tr("Choose synchronized sessions"), this);
+    syncTargetsAction->setObjectName("chooseSynchronizationTargets");
+    connect(syncTargetsAction, &QAction::triggered, this, &MainWindow::chooseSynchronizationTargets);
+    auto* syncMenu = new QMenu(this);
+    syncMenu->addAction(syncTargetsAction);
+    syncMenu->addAction(m_syncAction);
+    for (auto* button : panelsPage.first->findChildren<QToolButton*>()) {
+        if (button->defaultAction() == m_syncAction) {
+            button->setMenu(syncMenu);
+            button->setPopupMode(QToolButton::InstantPopup);
+        }
+    }
+    m_savedPanelGroupsMenu = new QMenu(this);
+    auto* savedGroupsAction = new QAction(QIcon(":/icons/folder.svg"), tr("Open group"), this);
+    savedGroupsAction->setObjectName("openSavedPanelGroup");
+    savedGroupsAction->setMenu(m_savedPanelGroupsMenu);
+    addRibbonAction(panelsPage.second, savedGroupsAction);
+    panelAction("newPanelGroup", tr("New group"), ":/icons/add.svg", &MainWindow::createPanelGroup);
+    panelAction("managePanelGroups", tr("Manage groups"), ":/icons/gear.svg", &MainWindow::managePanelGroups);
+    rebuildPanelGroupsMenu();
+
+    auto viewPage = makeRibbonPage(tr("View"));
+    auto* sidebarAction = new QAction(QIcon(":/icons/server.svg"), tr("Toggle sidebar"), this);
+    sidebarAction->setObjectName("toggleSidebar");
+    connect(sidebarAction, &QAction::triggered, this, &MainWindow::toggleSidebar);
 
     auto toolsPage = makeRibbonPage(tr("Tools"));
     addRibbonAction(toolsPage.second, multiAction);
@@ -597,7 +699,7 @@ void MainWindow::setupUi() {
     auto* themeRibbonAction = new QAction(QIcon(":/icons/palette.svg"), tr("Theme"), this);
     themeRibbonAction->setToolTip(tr("Toggle light and dark theme"));
     connect(themeRibbonAction, &QAction::triggered, this, &MainWindow::toggleTheme);
-    addRibbonAction(toolsPage.second, themeRibbonAction);
+    addRibbonAction(viewPage.second, themeRibbonAction);
 
     auto* diagnosticsAction = new QAction(QIcon(":/icons/gear.svg"), tr("Diagnostics"), this);
     diagnosticsAction->setToolTip(tr("Inspect the active session diagnostics"));
@@ -694,6 +796,11 @@ void MainWindow::setupUi() {
 
     // Main splitter
     m_mainSplitter = new QSplitter(Qt::Horizontal, centralWidget);
+    connect(m_mainSplitter, &QSplitter::splitterMoved, this, [this]() {
+        const int width = m_mainSplitter->sizes().value(0);
+        if (width > 0)
+            m_sidebarWidth = width;
+    });
     mainLayout->addWidget(m_mainSplitter);
 
     // 3. Sidebar container (Vertical toolbar strip + Stacked widget)
@@ -745,35 +852,36 @@ void MainWindow::setupUi() {
     sidebarLayout->addWidget(m_sidebarStacked);
     m_mainSplitter->addWidget(m_sidebarContainer);
 
-    // 4. Terminal panes. The same four-pane container supports the default
-    // single view, a two-pane split, and a 2x2 grid without moving widgets
-    // between layouts when the user changes mode.
+    // Terminal leaves live in a resizable splitter tree; the grid also hosts
+    // the welcome overlay in the same cell.
     m_tabSplitter = new QWidget(m_mainSplitter);
-    m_tabGrid = new QGridLayout(m_tabSplitter);
+    auto* workspaceLayout = new QVBoxLayout(m_tabSplitter);
+    workspaceLayout->setContentsMargins(0, 0, 0, 0);
+    workspaceLayout->setSpacing(0);
+    m_panelGroupTabs = new QTabBar(m_tabSplitter);
+    m_panelGroupTabs->setObjectName("panelGroupTabBar");
+    m_panelGroupTabs->setExpanding(false);
+    m_panelGroupTabs->setTabsClosable(true);
+    m_panelGroupTabs->setAcceptDrops(true);
+    m_panelGroupTabs->setElideMode(Qt::ElideRight);
+    m_panelGroupTabs->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_panelGroupTabs->hide();
+    workspaceLayout->addWidget(m_panelGroupTabs);
+    auto* paneArea = new QWidget(m_tabSplitter);
+    workspaceLayout->addWidget(paneArea, 1);
+    m_tabGrid = new QGridLayout(paneArea);
     m_tabGrid->setContentsMargins(0, 0, 0, 0);
     m_tabGrid->setSpacing(1);
 
-    auto createPane = [this]() {
-        auto* pane = new QTabWidget(m_tabSplitter);
-        pane->setObjectName("terminalTabs");
-        pane->tabBar()->setObjectName("terminalTabBar");
-        pane->setTabsClosable(true);
-        pane->setMovable(true);
-        pane->setDocumentMode(true);
-        pane->tabBar()->setExpanding(false);
-        pane->tabBar()->setElideMode(Qt::ElideRight);
-        return pane;
-    };
-    m_tabWidget = createPane();
-    m_tabWidget2 = createPane();
-    m_tabWidget3 = createPane();
-    m_tabWidget4 = createPane();
-    m_tabGrid->addWidget(m_tabWidget, 0, 0);
-    m_tabGrid->addWidget(m_tabWidget2, 0, 1);
-    m_tabGrid->addWidget(m_tabWidget3, 1, 0);
-    m_tabGrid->addWidget(m_tabWidget4, 1, 1);
-    m_tabGrid->setRowStretch(0, 1);
-    m_tabGrid->setColumnStretch(0, 1);
+    m_paneRoot = new QSplitter(Qt::Horizontal, m_tabSplitter);
+    m_paneRoot->setObjectName("terminalPaneRoot");
+    m_paneRoot->setChildrenCollapsible(false);
+    m_tabGrid->addWidget(m_paneRoot, 0, 0);
+    m_tabWidget = createTerminalPane();
+    m_tabWidget2 = createTerminalPane();
+    m_tabWidget3 = createTerminalPane();
+    m_tabWidget4 = createTerminalPane();
+    m_paneRoot->addWidget(m_tabWidget);
 
     m_welcomeWidget = new QWidget(m_tabSplitter);
     m_welcomeWidget->setObjectName("welcomeScreen");
@@ -926,11 +1034,9 @@ void MainWindow::setupUi() {
     welcomeLayout->addWidget(welcomeContent, 0, Qt::AlignHCenter);
     welcomeLayout->addStretch();
 
-    m_tabGrid->addWidget(m_welcomeWidget, 0, 0, 2, 2);
+    m_tabGrid->addWidget(m_welcomeWidget, 0, 0);
 
-    connect(welcomeRemoteButton, &QPushButton::clicked, this, [this]() {
-        m_sessionsSidebar->onNewSession();
-    });
+    connect(welcomeRemoteButton, &QPushButton::clicked, this, [this]() { m_sessionsSidebar->onNewSession(); });
     connect(welcomeLocalButton, &QPushButton::clicked, this, &MainWindow::onNewLocalTerminal);
     connect(allSessionsButton, &QPushButton::clicked, this, [this]() {
         QDialog dialog(this);
@@ -971,6 +1077,26 @@ void MainWindow::setupUi() {
     m_activePane = m_tabWidget;
     m_mainSplitter->addWidget(m_tabSplitter);
     updateWelcomeScreen();
+
+    auto* sidebarToggle = new QToolButton(ribbonTabs);
+    sidebarToggle->setObjectName("sidebarToggleButton");
+    sidebarToggle->setDefaultAction(sidebarAction);
+    sidebarToggle->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    sidebarToggle->setToolTip(sidebarAction->text());
+    sidebarToggle->setAutoRaise(true);
+    sidebarToggle->setIconSize(QSize(16, 16));
+    // The tab header remains visible when either the sidebar or Ribbon is collapsed.
+    ribbonTabs->setCornerWidget(sidebarToggle, Qt::TopLeftCorner);
+
+    auto* syncIndicator = new QToolButton(this);
+    syncIndicator->setObjectName("synchronizationIndicator");
+    syncIndicator->setDefaultAction(m_syncAction);
+    syncIndicator->setMenu(syncMenu);
+    syncIndicator->setPopupMode(QToolButton::InstantPopup);
+    syncIndicator->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    syncIndicator->hide();
+    statusBar()->addPermanentWidget(syncIndicator);
+    connect(m_syncAction, &QAction::toggled, syncIndicator, &QWidget::setVisible);
 
     m_statusConnectionLabel = new QLabel(tr("Ready"), this);
     statusBar()->addWidget(m_statusConnectionLabel, 1);
@@ -1022,22 +1148,11 @@ void MainWindow::setupUi() {
 
     connect(m_sessionsSidebar, &SessionsSidebar::connectSession, this, &MainWindow::onConnectSession);
     connect(m_sessionsSidebar, &SessionsSidebar::macrosImported, this, &MainWindow::rebuildMacrosMenu);
-    connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, [this](int i) { onTabCloseRequested(m_tabWidget, i); });
-    connect(m_tabWidget, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget, i); });
-    connect(m_tabWidget2, &QTabWidget::tabCloseRequested, this,
-            [this](int i) { onTabCloseRequested(m_tabWidget2, i); });
-    connect(m_tabWidget2, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget2, i); });
-    connect(m_tabWidget3, &QTabWidget::tabCloseRequested, this,
-            [this](int i) { onTabCloseRequested(m_tabWidget3, i); });
-    connect(m_tabWidget3, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget3, i); });
-    connect(m_tabWidget4, &QTabWidget::tabCloseRequested, this,
-            [this](int i) { onTabCloseRequested(m_tabWidget4, i); });
-    connect(m_tabWidget4, &QTabWidget::currentChanged, this, [this](int i) { onCurrentTabChanged(m_tabWidget4, i); });
     connect(m_sftpSidebar, &SftpSidebar::diagnosticMessage, this, [this](const QString& message) {
         SshConnection* connection = m_sftpSidebar->connection();
         if (!connection)
             return;
-        for (QTabWidget* pane : allPanes()) {
+        for (QTabWidget* pane : allOpenPanes()) {
             for (int i = 0; i < pane->count(); ++i) {
                 auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
                 if (tab && tab->connection() == connection) {
@@ -1088,8 +1203,31 @@ void MainWindow::setupUi() {
     m_remoteMonitorWidget->setVisible(false);
     statusBar()->addPermanentWidget(m_remoteMonitorWidget);
 
-    // Start with an empty workspace.  The welcome screen is the bootstrap
-    // view; a local terminal is opened only when the user requests it.
+    m_currentPanelGroup = 0;
+    PanelGroupState initial;
+    initial.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    initial.name = tr("Ungrouped");
+    initial.isDefault = true;
+    m_panelGroups.append(initial);
+    capturePanelGroup();
+    {
+        const QSignalBlocker blocker(m_panelGroupTabs);
+        m_panelGroupTabs->addTab(QIcon(":/icons/folder.svg"), initial.name);
+    }
+    connect(m_panelGroupTabs, &QTabBar::currentChanged, this, [this](int index) { activatePanelGroup(index); });
+    connect(m_panelGroupTabs, &QTabBar::tabCloseRequested, this, &MainWindow::closePanelGroup);
+    connect(m_panelGroupTabs, &QWidget::customContextMenuRequested, this, [this](const QPoint& point) {
+        const int index = m_panelGroupTabs->tabAt(point);
+        if (index < 0)
+            return;
+        activatePanelGroup(index);
+        QMenu menu(this);
+        menu.addAction(tr("Save group"), this, &MainWindow::saveActivePanelGroup);
+        menu.addAction(tr("Rename group"), this, &MainWindow::renameActivePanelGroup);
+        menu.addSeparator();
+        menu.addAction(tr("Close group"), this, [this]() { closePanelGroup(m_currentPanelGroup); });
+        menu.exec(m_panelGroupTabs->mapToGlobal(point));
+    });
     updateSessionContext();
 }
 
@@ -1109,7 +1247,28 @@ void MainWindow::onConnectSession(const Session& session) {
 
     QTabWidget* pane = activePane();
     auto* tab = new TerminalTab(session, pane);
+    if (m_currentPanelGroup >= 0)
+        tab->setProperty("panelGroupId", m_panelGroups[m_currentPanelGroup].id);
     int index = pane->addTab(tab, session.name);
+    connect(tab, &QObject::destroyed, this, [this]() { updateSynchronizationUi(); });
+    connect(tab, &TerminalTab::tabFinished, this, [this]() { updateSynchronizationUi(); });
+    connect(tab, &TerminalTab::titleChanged, this, [this]() { updateSynchronizationUi(); });
+    connect(tab, &TerminalTab::userKeyInput, this, [this, tab](QKeyEvent* event, bool paste) {
+        if (!m_syncAction->isChecked() || !m_syncTargets.contains(tab) || !tab->isSessionActive() ||
+            tab->session().readOnly)
+            return;
+        for (const auto& target : m_syncTargets)
+            if (target && target != tab)
+                target->receiveSynchronizedKey(event, paste);
+    });
+    connect(tab, &TerminalTab::userStringInput, this, [this, tab](const QString& text) {
+        if (!m_syncAction->isChecked() || !m_syncTargets.contains(tab) || !tab->isSessionActive() ||
+            tab->session().readOnly)
+            return;
+        for (const auto& target : m_syncTargets)
+            if (target && target != tab && target->isSessionActive() && !target->session().readOnly)
+                target->sendRaw(text);
+    });
 
     if (session.type == SessionType::SSH) {
         pane->setTabIcon(index, QIcon(":/icons/server.svg"));
@@ -1183,14 +1342,26 @@ void MainWindow::onConnectSession(const Session& session) {
     // dialog (closeEvent) decides whether to actually quit.
     connect(tab, &TerminalTab::closeRequested, this, [this]() { close(); });
 
-    connect(tab, &TerminalTab::exitRequested, this, [this, tab, pane]() {
-        const int tabIndex = pane->indexOf(tab);
-        if (tabIndex >= 0)
-            onTabCloseRequested(pane, tabIndex);
+    connect(tab, &TerminalTab::exitRequested, this, [this, tab]() {
+        for (auto* pane : allOpenPanes()) {
+            const int index = pane->indexOf(tab);
+            if (index >= 0) {
+                onTabCloseRequested(pane, index);
+                break;
+            }
+        }
     });
 
     // Connect title updates
-    connect(tab, &TerminalTab::titleChanged, this, [this, tab, pane](const QString& title) {
+    connect(tab, &TerminalTab::titleChanged, this, [this, tab](const QString& title) {
+        QTabWidget* pane = nullptr;
+        for (auto* candidate : allOpenPanes())
+            if (candidate->indexOf(tab) >= 0) {
+                pane = candidate;
+                break;
+            }
+        if (!pane)
+            return;
         int idx = pane->indexOf(tab);
         if (idx != -1 && !title.isEmpty()) {
             const bool disconnected = title.startsWith(tr("[Closed]"));
@@ -1287,6 +1458,8 @@ void MainWindow::onTabCloseRequested(QTabWidget* pane, int index) {
 }
 
 void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
+    if (!m_panes.contains(pane))
+        return;
     m_activePane = pane;
     m_remoteMonitorWidget->hide();
     updateSessionContext();
@@ -1336,7 +1509,14 @@ void MainWindow::updateWelcomeScreen() {
             break;
         }
     }
+    // Only one surface may receive input. Recreated splitter trees are stacked
+    // above the welcome widget even when their empty panes paint no background.
+    m_paneRoot->setVisible(hasSession);
     m_welcomeWidget->setVisible(!hasSession);
+    if (!hasSession)
+        m_welcomeWidget->raise();
+    refreshPanelGroupBar();
+    QTimer::singleShot(0, this, [this]() { TerminalAppearance::refreshWindow(this); });
 }
 
 void MainWindow::onNewLocalTerminal() {
@@ -1424,6 +1604,11 @@ void MainWindow::applyThemeMode(const QString& mode) {
             "QToolButton { color: %2; border: 1px solid transparent; border-radius: 5px; padding: 5px; }"
             "QToolButton:hover { background: %6; border-color: %4; }"
             "QToolButton:pressed, QToolButton:checked { background: %8; border-color: %4; }"
+            "QToolButton#sidebarToggleButton { background: transparent; color: %5;"
+            " padding: 8px 15px 9px; border: 0; border-bottom: 3px solid transparent;"
+            " border-radius: 0; margin: 0 2px; }"
+            "QToolButton#sidebarToggleButton:hover { background: %6; color: %2; border-radius: 4px; }"
+            "QToolButton#sidebarToggleButton:pressed { background: %8; color: %2; }"
             "QPushButton, QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox { min-height: 30px;"
             " background: %3; color: %2; border: 1px solid %4; border-radius: 5px; padding: 3px 9px; }"
             "QPushButton:hover, QComboBox:hover { background: %6; }"
@@ -1475,6 +1660,7 @@ void MainWindow::applyThemeMode(const QString& mode) {
             "QMenu::item:selected { background: %6; }"
             "QMenu::separator { height: 1px; background: %4; margin: 5px 8px; }"
             "QTabWidget::pane { border: 1px solid %4; background: %1; top: -1px; }"
+            "QTabWidget#terminalTabs[tabDropTarget=\"true\"]::pane { border: 2px solid %7; }"
             "QTabBar { background: transparent; border-bottom: 1px solid %4; }"
             "QTabBar::tab { background: transparent; color: %5; border: 0;"
             " border-bottom: 3px solid transparent; padding: 8px 12px 9px; margin-right: 2px; }"
@@ -1624,7 +1810,7 @@ void MainWindow::onOpenSettings() {
             m_lockAction->setEnabled(MasterPasswordManager::instance().isEnabled());
 
         // Typography Configuration
-        for (QTabWidget* pane : allPanes()) {
+        for (QTabWidget* pane : allOpenPanes()) {
             for (int i = 0; i < pane->count(); ++i) {
                 auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
                 if (tab) {
@@ -1739,7 +1925,7 @@ void MainWindow::onSendMultiInput() {
 bool MainWindow::broadcastInput(const QString& text, bool sensitive) {
     QList<QPointer<TerminalTab>> targets;
     QStringList targetNames;
-    for (QTabWidget* pane : allPanes()) {
+    for (QTabWidget* pane : allOpenPanes()) {
         for (int i = 0; i < pane->count(); ++i) {
             auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
             if (!tab || (sensitive && (!tab->isSessionActive() || tab->isRdpOrVnc() || tab->session().readOnly)))
@@ -1902,6 +2088,16 @@ void MainWindow::onSensitiveMultiInput() {
 }
 
 void MainWindow::onReconnectRequested(const Session& session) {
+    const int previousGroup = m_currentPanelGroup;
+    auto* reconnecting = qobject_cast<TerminalTab*>(sender());
+    if (reconnecting) {
+        for (auto* pane : allOpenPanes())
+            if (pane->indexOf(reconnecting) >= 0) {
+                activatePanelGroup(panelGroupForPane(pane), false);
+                m_activePane = pane;
+                break;
+            }
+    }
     ++m_reconnectCounts[session.id];
     auto* tab = qobject_cast<TerminalTab*>(sender());
     if (tab) {
@@ -1909,7 +2105,7 @@ void MainWindow::onReconnectRequested(const Session& session) {
         if (m_tabWidget->indexOf(tab) != -1)
             pane = m_tabWidget;
         else {
-            for (QTabWidget* candidate : allPanes()) {
+            for (QTabWidget* candidate : allOpenPanes()) {
                 if (candidate->indexOf(tab) != -1) {
                     pane = candidate;
                     break;
@@ -1929,6 +2125,7 @@ void MainWindow::onReconnectRequested(const Session& session) {
         }
     }
     onConnectSession(session);
+    activatePanelGroup(previousGroup, false);
 }
 
 void MainWindow::onRemoteStatsUpdated(double cpu, double mem, double disk, double uptimeSecs) {
@@ -1965,9 +2162,7 @@ void MainWindow::setupMenuBar() {
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
 
     auto* newTabAction = fileMenu->addAction(tr("&New Remote Session..."));
-    connect(newTabAction, &QAction::triggered, this, [this]() {
-        m_sessionsSidebar->onNewSession();
-    });
+    connect(newTabAction, &QAction::triggered, this, [this]() { m_sessionsSidebar->onNewSession(); });
 
     auto* closeTabAction = fileMenu->addAction(tr("Close session"));
     KeyboardShortcuts::bindAction(closeTabAction, "closeTab");
@@ -2151,11 +2346,11 @@ void MainWindow::setupMenuBar() {
 
     auto* viewMenu = menuBar()->addMenu(tr("&View"));
 
-    auto* splitAction = viewMenu->addAction(tr("Toggle &Split View"));
+    auto* splitAction = viewMenu->addAction(tr("Split left/right"));
     KeyboardShortcuts::bindAction(splitAction, "toggleSplit");
     connect(splitAction, &QAction::triggered, this, &MainWindow::toggleSplitView);
 
-    auto* gridAction = viewMenu->addAction(tr("Toggle 2x2 &Grid View"));
+    auto* gridAction = viewMenu->addAction(tr("Arrange Tabs in a &Grid"));
     KeyboardShortcuts::bindAction(gridAction, "toggleGrid");
     connect(gridAction, &QAction::triggered, this, &MainWindow::toggleGridView);
 
@@ -2217,9 +2412,9 @@ void MainWindow::showAbout() {
 
 void MainWindow::showCommandPalette() {
     const QStringList commands = {
-        tr("New Remote Session"),     tr("Open Local Terminal"), tr("Toggle Split View"), tr("Toggle 2x2 Grid View"),
-        tr("Move Tab to Other Pane"), tr("Toggle Multi-Input"),  tr("Open Settings"),     tr("Manage Macros"),
-        tr("Find in All Sessions"),   tr("Open Diagnostics"),    tr("Clear Clipboard"),   tr("Toggle Theme"),
+        tr("New Remote Session"),     tr("Open Local Terminal"), tr("Split left/right"), tr("Arrange Tabs in a Grid"),
+        tr("Move Tab to Other Pane"), tr("Toggle Multi-Input"),  tr("Open Settings"),    tr("Manage Macros"),
+        tr("Find in All Sessions"),   tr("Open Diagnostics"),    tr("Clear Clipboard"),  tr("Toggle Theme"),
         tr("Lock Application"),
     };
 
@@ -2233,9 +2428,9 @@ void MainWindow::showCommandPalette() {
         m_sessionsSidebar->onNewSession();
     } else if (command == tr("Open Local Terminal")) {
         onNewLocalTerminal();
-    } else if (command == tr("Toggle Split View")) {
+    } else if (command == tr("Split left/right")) {
         toggleSplitView();
-    } else if (command == tr("Toggle 2x2 Grid View")) {
+    } else if (command == tr("Arrange Tabs in a Grid")) {
         toggleGridView();
     } else if (command == tr("Move Tab to Other Pane")) {
         moveTabToOtherPane();
@@ -2326,22 +2521,21 @@ TerminalTab* MainWindow::currentTerminalTab() const {
 }
 
 QList<QTabWidget*> MainWindow::allPanes() const {
-    return {m_tabWidget, m_tabWidget2, m_tabWidget3, m_tabWidget4};
+    return m_panes;
 }
 
 QList<QTabWidget*> MainWindow::visiblePanes() const {
-    QList<QTabWidget*> panes = allPanes();
-    if (m_paneLayoutMode == 0)
-        return {m_tabWidget};
-    if (m_paneLayoutMode == 1)
-        return {m_tabWidget, m_tabWidget2};
+    QList<QTabWidget*> panes;
+    for (auto* pane : m_panes)
+        if (pane->parentWidget() != m_tabSplitter)
+            panes.append(pane);
     return panes;
 }
 
 QTabWidget* MainWindow::activePane() const {
     if (m_activePane && allPanes().contains(m_activePane) && visiblePanes().contains(m_activePane))
         return m_activePane;
-    return m_tabWidget;
+    return visiblePanes().isEmpty() ? m_tabWidget : visiblePanes().first();
 }
 
 QTabWidget* MainWindow::otherPane(QTabWidget* pane) const {
@@ -2354,35 +2548,50 @@ QTabWidget* MainWindow::otherPane(QTabWidget* pane) const {
 
 void MainWindow::setPaneLayout(int mode, bool moveCurrentTab) {
     mode = qBound(0, mode, 2);
+    if (mode == 2) {
+        arrangeGrid();
+        return;
+    }
 
     // A hidden pane must not retain tabs when collapsing the layout: moving
     // them back keeps sessions reachable and makes the next layout switch
     // predictable.
-    if (mode == 0 || mode == 1) {
-        const int firstHiddenPane = mode == 0 ? 1 : 2;
+    {
+        const int firstHiddenPane = mode == 0 ? 1 : mode == 1 ? 2 : 4;
         for (int i = firstHiddenPane; i < allPanes().size(); ++i) {
             QTabWidget* from = allPanes()[i];
             while (from->count() > 0) {
                 QWidget* widget = from->widget(0);
                 const QString title = from->tabText(0);
+                const QIcon icon = from->tabIcon(0);
+                const QString tooltip = from->tabToolTip(0);
                 from->removeTab(0);
-                const int newIndex = m_tabWidget->addTab(widget, title);
+                const int newIndex = m_tabWidget->addTab(widget, icon, title);
+                m_tabWidget->setTabToolTip(newIndex, tooltip);
                 m_tabWidget->setCurrentIndex(newIndex);
             }
         }
     }
 
+    // Detach the leaves before deleting their old splitter tree.
+    for (auto* pane : m_panes) {
+        pane->setParent(m_tabSplitter);
+        pane->hide();
+    }
+    delete m_paneRoot;
+    m_paneRoot = new QSplitter(Qt::Horizontal, m_tabSplitter);
+    m_paneRoot->setObjectName("terminalPaneRoot");
+    m_paneRoot->setChildrenCollapsible(false);
+    m_tabGrid->addWidget(m_paneRoot, 0, 0);
+    m_paneRoot->addWidget(m_tabWidget);
+    if (mode == 1)
+        m_paneRoot->addWidget(m_tabWidget2);
+    m_paneRoot->setSizes({1, 1});
     m_paneLayoutMode = mode;
-    const QList<QTabWidget*> panes = allPanes();
-    for (int i = 0; i < panes.size(); ++i)
-        panes[i]->setVisible(visiblePanes().contains(panes[i]));
-
-    // Give only active grid rows/columns stretch. Hidden panes then collapse
-    // completely, allowing the primary pane to occupy the full area.
-    m_tabGrid->setRowStretch(0, mode == 2 ? 1 : 1);
-    m_tabGrid->setRowStretch(1, mode == 2 ? 1 : 0);
-    m_tabGrid->setColumnStretch(0, 1);
-    m_tabGrid->setColumnStretch(1, mode == 0 ? 0 : 1);
+    for (auto* pane : visiblePanes())
+        pane->show();
+    m_paneRoot->show();
+    refreshPanes();
 
     if (mode == 1 && moveCurrentTab && m_tabWidget2->count() == 0 && m_tabWidget->count() > 0) {
         const int index = m_tabWidget->currentIndex();
@@ -2436,7 +2645,7 @@ void MainWindow::restoreOpenTabs(const QSettings& settings) {
         }
     }
 
-    QList<QPair<QTabWidget*, bool>> restored;
+    QList<QPair<QTabWidget*, int>> restored;
     for (const QJsonValue& value : document.array()) {
         if (!value.isObject())
             continue;
@@ -2450,16 +2659,16 @@ void MainWindow::restoreOpenTabs(const QSettings& settings) {
 
         QTabWidget* target = allPanes().at(paneIndex);
         if (!visiblePanes().contains(target))
-            target = m_tabWidget;
+            target = visiblePanes().first();
         m_activePane = target;
         onConnectSession(Session::fromJson(sessionObject));
-        restored.append({target, entry.value("active").toBool(false)});
+        restored.append({target, entry.value("active").toBool(false) ? target->currentIndex() : -1});
     }
 
     for (const auto& item : restored) {
-        if (item.second) {
+        if (item.second >= 0) {
             m_activePane = item.first;
-            item.first->setCurrentIndex(item.first->count() - 1);
+            item.first->setCurrentIndex(item.second);
             break;
         }
     }
@@ -2473,17 +2682,11 @@ void MainWindow::restoreOpenTabs(const QSettings& settings) {
 }
 
 void MainWindow::toggleSplitView() {
-    if (m_paneLayoutMode == 1)
-        setPaneLayout(0);
-    else
-        setPaneLayout(1, true);
+    splitPaneHorizontally();
 }
 
 void MainWindow::toggleGridView() {
-    if (m_paneLayoutMode == 2)
-        setPaneLayout(0);
-    else
-        setPaneLayout(2);
+    setPaneLayout(2);
 }
 
 void MainWindow::moveTabToOtherPane() {
@@ -2577,7 +2780,7 @@ void MainWindow::rebuildMacrosMenu() {
                 QList<TerminalTab*> groupTargets;
                 const QString group = tab->session().group.trimmed();
                 if (!group.isEmpty()) {
-                    for (QTabWidget* pane : allPanes()) {
+                    for (QTabWidget* pane : allOpenPanes()) {
                         for (int tabIndex = 0; tabIndex < pane->count(); ++tabIndex) {
                             auto* candidate = qobject_cast<TerminalTab*>(pane->widget(tabIndex));
                             if (candidate && candidate->session().group.trimmed() == group)
@@ -2662,6 +2865,56 @@ void MainWindow::setRibbonExpanded(bool expanded) {
 }
 
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::DragLeave) {
+        setTabDropTarget(nullptr);
+    } else if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove ||
+               event->type() == QEvent::Drop) {
+        auto* dragEvent = static_cast<QDropEvent*>(event);
+        auto* payload = PaneTabMimeData::fromMimeData(dragEvent->mimeData());
+        auto* widget = qobject_cast<QWidget*>(watched);
+        if (payload && payload->pane && payload->tab && allOpenPanes().contains(payload->pane) && widget) {
+            if (widget == m_panelGroupTabs) {
+                const int index = m_panelGroupTabs->tabAt(dragEvent->position().toPoint());
+                if (index >= 0) {
+                    activatePanelGroup(index);
+                    if (event->type() == QEvent::Drop)
+                        moveTabToPane(payload->tab, payload->pane, activePane());
+                    dragEvent->setDropAction(Qt::MoveAction);
+                    dragEvent->accept();
+                    return true;
+                }
+            }
+            for (auto* pane : visiblePanes()) {
+                if (widget != pane && !pane->isAncestorOf(widget))
+                    continue;
+                if (payload->pane->indexOf(payload->tab) < 0)
+                    break;
+                if (event->type() == QEvent::Drop) {
+                    const QPoint point =
+                        pane->tabBar()->mapFromGlobal(widget->mapToGlobal(dragEvent->position().toPoint()));
+                    const int position = pane->tabBar()->rect().contains(point) ? pane->tabBar()->tabAt(point) : -1;
+                    const bool moved = moveTabToPane(payload->tab, payload->pane, pane, position);
+                    setTabDropTarget(nullptr);
+                    if (!moved)
+                        break;
+                } else {
+                    setTabDropTarget(pane);
+                }
+                dragEvent->setDropAction(Qt::MoveAction);
+                dragEvent->accept();
+                return true;
+            }
+        }
+    }
+    if (event->type() == QEvent::MouseButtonPress) {
+        auto* widget = qobject_cast<QWidget*>(watched);
+        for (auto* pane : visiblePanes())
+            if (widget && (pane == widget || pane->isAncestorOf(widget))) {
+                m_activePane = pane;
+                updateSessionContext();
+                break;
+            }
+    }
     if (event->type() == QEvent::FocusIn) {
         auto* widget = qobject_cast<QWidget*>(watched);
         for (QTabWidget* pane : visiblePanes()) {
@@ -2901,7 +3154,7 @@ void MainWindow::onManageMacros() {
 
 void MainWindow::onGlobalSearch() {
     int total = 0;
-    for (QTabWidget* pane : allPanes())
+    for (QTabWidget* pane : allOpenPanes())
         total += pane->count();
     if (total == 0)
         return;
@@ -2938,7 +3191,7 @@ void MainWindow::onGlobalSearch() {
 
         // Flatten both panes into an ordered list of tabs.
         QVector<QPair<QTabWidget*, int>> tabs;
-        for (QTabWidget* pane : allPanes())
+        for (QTabWidget* pane : allOpenPanes())
             for (int i = 0; i < pane->count(); ++i)
                 tabs.append(qMakePair(pane, i));
 
@@ -2961,6 +3214,7 @@ void MainWindow::onGlobalSearch() {
                 continue;
             bool found = tab->searchText(str, next, caseCheck->isChecked());
             if (found) {
+                activatePanelGroup(panelGroupForPane(pane));
                 pane->setCurrentIndex(idx);
                 m_activePane = pane;
                 statusLabel->setText(tr("Match found in session: %1").arg(pane->tabText(idx)));
@@ -2975,4 +3229,1108 @@ void MainWindow::onGlobalSearch() {
     connect(searchEdit, &QLineEdit::returnPressed, &dlg, [&]() { doSearch(true); });
 
     dlg.exec();
+}
+
+QTabWidget* MainWindow::createTerminalPane() {
+    auto* pane = new TerminalPane(m_tabSplitter);
+    pane->setObjectName("terminalTabs");
+    pane->tabBar()->setObjectName("terminalTabBar");
+    pane->setTabsClosable(true);
+    pane->setMovable(true);
+    pane->setDocumentMode(true);
+    pane->setMinimumSize(100, 80);
+    pane->tabBar()->setExpanding(false);
+    pane->tabBar()->setElideMode(Qt::ElideRight);
+    connect(pane, &QTabWidget::tabCloseRequested, this, [this, pane](int index) { onTabCloseRequested(pane, index); });
+    connect(pane, &QTabWidget::currentChanged, this, [this, pane](int index) { onCurrentTabChanged(pane, index); });
+    m_panes.append(pane);
+    return pane;
+}
+
+void MainWindow::refreshPanes() {
+    QTimer::singleShot(0, this, [this]() {
+        for (auto* pane : visiblePanes()) {
+            pane->update();
+            if (auto* tab = qobject_cast<TerminalTab*>(pane->currentWidget()))
+                tab->syncTerminalSize();
+        }
+        updateWelcomeScreen();
+        updateSessionContext();
+        updateSynchronizationUi();
+    });
+}
+
+void MainWindow::splitPaneHorizontally() {
+    splitActivePane(Qt::Horizontal);
+}
+
+void MainWindow::splitPaneVertically() {
+    splitActivePane(Qt::Vertical);
+}
+
+void MainWindow::splitActivePane(Qt::Orientation orientation) {
+    auto* from = activePane();
+    auto* parent = qobject_cast<QSplitter*>(from->parentWidget());
+    if (!parent)
+        return;
+    auto* to = static_cast<QTabWidget*>(nullptr);
+    for (auto* pane : m_panes)
+        if (pane->parentWidget() == m_tabSplitter) {
+            to = pane;
+            break;
+        }
+    if (!to)
+        to = createTerminalPane();
+    // Prefer an existing background tab. Repeated splits can then expose
+    // three or more open sessions without leaving intermediate panes empty.
+    QTabWidget* donor = from->count() > 1 ? from : nullptr;
+    if (!donor)
+        for (auto* pane : visiblePanes())
+            if (pane->count() > 1) {
+                donor = pane;
+                break;
+            }
+
+    auto sizes = parent->sizes();
+    const int position = parent->indexOf(from);
+    if (parent->orientation() == orientation || parent->count() == 1) {
+        parent->setOrientation(orientation);
+        parent->insertWidget(position + 1, to);
+        from->show();
+        to->show();
+        const int half = qMax(1, sizes.value(position) / 2);
+        sizes[position] = half;
+        sizes.insert(position + 1, half);
+        parent->setSizes(sizes);
+    } else {
+        auto* split = new QSplitter(orientation);
+        split->setChildrenCollapsible(false);
+        parent->replaceWidget(position, split);
+        split->addWidget(from);
+        split->addWidget(to);
+        from->show();
+        to->show();
+        split->show();
+        split->setSizes({1, 1});
+        parent->setSizes(sizes);
+    }
+    from->show();
+    to->show();
+    if (donor) {
+        const int index = donor->currentIndex();
+        QWidget* tab = donor->widget(index);
+        const QString title = donor->tabText(index);
+        const QIcon icon = donor->tabIcon(index);
+        const QString tooltip = donor->tabToolTip(index);
+        donor->removeTab(index);
+        to->setCurrentIndex(to->addTab(tab, icon, title));
+        to->setTabToolTip(0, tooltip);
+    }
+    m_activePane = to;
+    m_paneLayoutMode = 3;
+    refreshPanes();
+}
+
+void MainWindow::equalizePaneSizes() {
+    auto splits = m_paneRoot->findChildren<QSplitter*>();
+    splits.prepend(m_paneRoot);
+    for (auto* split : splits) {
+        QList<int> sizes;
+        for (int i = 0; i < split->count(); ++i)
+            sizes.append(1);
+        split->setSizes(sizes);
+    }
+    refreshPanes();
+}
+
+void MainWindow::closePane() {
+    auto* pane = activePane();
+    const auto panes = visiblePanes();
+    if (panes.size() < 2)
+        return;
+    auto* target = panes.first() == pane ? panes.at(1) : panes.first();
+    while (pane->count()) {
+        QWidget* tab = pane->widget(0);
+        const QString title = pane->tabText(0);
+        const QIcon icon = pane->tabIcon(0);
+        pane->removeTab(0);
+        target->addTab(tab, icon, title);
+    }
+    auto* parent = qobject_cast<QSplitter*>(pane->parentWidget());
+    pane->setParent(m_tabSplitter);
+    pane->hide();
+    // Eliminate redundant splitters while preserving their parent's ratios.
+    while (parent && parent != m_paneRoot && parent->count() <= 1) {
+        auto* grand = qobject_cast<QSplitter*>(parent->parentWidget());
+        const auto sizes = grand->sizes();
+        if (parent->count() == 1) {
+            auto* child = parent->widget(0);
+            child->setParent(m_tabSplitter);
+            grand->replaceWidget(grand->indexOf(parent), child);
+            child->show();
+        }
+        delete parent;
+        grand->setSizes(sizes);
+        parent = grand;
+    }
+    m_activePane = target;
+    m_paneLayoutMode = 3;
+    refreshPanes();
+}
+
+void MainWindow::toggleSidebar() {
+    if (m_sidebarContainer->isHidden() || m_mainSplitter->sizes().value(0) == 0) {
+        m_sidebarContainer->show();
+        m_mainSplitter->setSizes({qMax(100, m_sidebarWidth), qMax(100, m_mainSplitter->width() - m_sidebarWidth)});
+    } else {
+        m_sidebarWidth = m_sidebarContainer->width();
+        m_sidebarContainer->hide();
+    }
+    refreshPanes();
+}
+
+QJsonObject MainWindow::paneTree(QWidget* widget) const {
+    if (auto* pane = qobject_cast<QTabWidget*>(widget))
+        return {{"pane", m_panes.indexOf(pane)}};
+    auto* split = qobject_cast<QSplitter*>(widget);
+    if (!split)
+        return {};
+    QJsonArray children, sizes;
+    for (int i = 0; i < split->count(); ++i) {
+        children.append(paneTree(split->widget(i)));
+        sizes.append(split->sizes().value(i));
+    }
+    return {{"orientation", split->orientation() == Qt::Horizontal ? "horizontal" : "vertical"},
+            {"children", children},
+            {"sizes", sizes}};
+}
+
+bool MainWindow::restorePaneTree(const QJsonObject& tree) {
+    // Validate the entire tree before changing the live workspace.
+    QSet<int> used;
+    std::function<bool(const QJsonObject&, int)> valid = [&](const QJsonObject& node, int depth) {
+        if (depth > 64)
+            return false;
+        if (node.contains("pane")) {
+            const int index = node.value("pane").toInt(-1);
+            if (index < 0 || index > 255 || used.contains(index))
+                return false;
+            used.insert(index);
+            return true;
+        }
+        const auto children = node.value("children").toArray();
+        if (children.isEmpty() || children.size() > 256)
+            return false;
+        const QString orientation = node.value("orientation").toString();
+        if (orientation != "horizontal" && orientation != "vertical")
+            return false;
+        for (const auto& child : children)
+            if (!child.isObject() || !valid(child.toObject(), depth + 1))
+                return false;
+        return true;
+    };
+    if (!tree.contains("children") || !valid(tree, 0))
+        return false;
+    for (int index : used)
+        while (m_panes.size() <= index)
+            createTerminalPane();
+    // Keep sessions reachable if this tree does not use all existing leaves.
+    for (int i = 0; i < m_panes.size(); ++i) {
+        auto* pane = m_panes[i];
+        if (!used.contains(i))
+            while (pane->count()) {
+                auto* tab = pane->widget(0);
+                const QString title = pane->tabText(0);
+                const QIcon icon = pane->tabIcon(0);
+                pane->removeTab(0);
+                m_panes[*used.cbegin()]->addTab(tab, icon, title);
+            }
+        pane->setParent(m_tabSplitter);
+        pane->hide();
+    }
+    delete m_paneRoot;
+    std::function<QWidget*(const QJsonObject&)> build = [&](const QJsonObject& node) -> QWidget* {
+        if (node.contains("pane"))
+            return m_panes[node.value("pane").toInt()];
+        auto* split = new QSplitter(node.value("orientation") == "horizontal" ? Qt::Horizontal : Qt::Vertical);
+        split->setChildrenCollapsible(false);
+        for (const auto& child : node.value("children").toArray()) {
+            auto* widget = build(child.toObject());
+            split->addWidget(widget);
+            widget->show();
+        }
+        QList<int> sizes;
+        for (const auto& size : node.value("sizes").toArray())
+            sizes.append(qMax(1, size.toInt(1)));
+        if (sizes.size() == split->count())
+            split->setSizes(sizes);
+        connect(split, &QSplitter::splitterMoved, this, [this]() { refreshPanes(); });
+        return split;
+    };
+    m_paneRoot = qobject_cast<QSplitter*>(build(tree));
+    m_paneRoot->setObjectName("terminalPaneRoot");
+    m_tabGrid->addWidget(m_paneRoot, 0, 0);
+    m_paneRoot->show();
+    m_paneLayoutMode = 3;
+    m_activePane = visiblePanes().first();
+    refreshPanes();
+    return true;
+}
+
+void MainWindow::configureSynchronization() {
+    if (!m_syncAction->isChecked()) {
+        m_syncTargets.clear();
+        updateSynchronizationUi();
+        return;
+    }
+    chooseSynchronizationTargets();
+}
+
+void MainWindow::chooseSynchronizationTargets() {
+    const bool alreadyActive = m_syncTargets.size() >= 2;
+    QDialog dialog(this);
+    dialog.setObjectName("synchronizePanelsDialog");
+    dialog.setWindowTitle(tr("Synchronize input"));
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* explanation = new QLabel(tr("Select at least two sessions. Typing and pasting in any selected session will "
+                                      "be sent to all selected sessions. Click Synchronize input again to stop."),
+                                   &dialog);
+    explanation->setWordWrap(true);
+    layout->addWidget(explanation);
+    auto* list = new QListWidget(&dialog);
+    QList<QPointer<TerminalTab>> targets;
+    for (auto* pane : visiblePanes())
+        for (int i = 0; i < pane->count(); ++i) {
+            auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
+            if (!tab || !tab->isSessionActive() || tab->isRdpOrVnc() || tab->session().readOnly)
+                continue;
+            targets.append(tab);
+            auto* item =
+                new QListWidgetItem(tr("Pane %1: %2").arg(m_panes.indexOf(pane) + 1).arg(pane->tabText(i)), list);
+            item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+            item->setCheckState((alreadyActive ? m_syncTargets.contains(tab) : tab == pane->currentWidget())
+                                    ? Qt::Checked
+                                    : Qt::Unchecked);
+        }
+    layout->addWidget(list);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    auto update = [list, buttons]() {
+        int count = 0;
+        for (int i = 0; i < list->count(); ++i)
+            count += list->item(i)->checkState() == Qt::Checked;
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(count >= 2);
+    };
+    connect(list, &QListWidget::itemChanged, &dialog, [update]() { update(); });
+    update();
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() == QDialog::Accepted) {
+        QList<QPointer<TerminalTab>> selected;
+        for (int i = 0; i < targets.size(); ++i)
+            if (targets[i] && list->item(i)->checkState() == Qt::Checked)
+                selected.append(targets[i]);
+        if (selected.size() >= 2)
+            m_syncTargets = selected;
+    }
+    updateSynchronizationUi();
+}
+
+QJsonObject MainWindow::workspace() const {
+    QJsonArray tabs;
+    for (int i = 0; i < m_panes.size(); ++i)
+        for (int j = 0; j < m_panes[i]->count(); ++j)
+            if (auto* tab = qobject_cast<TerminalTab*>(m_panes[i]->widget(j)))
+                tabs.append(QJsonObject{{"pane", i}, {"session", tab->session().toJson()}});
+    return {{"tree", paneTree(m_paneRoot)}, {"tabs", tabs}};
+}
+
+void MainWindow::openPanelGroup(const QJsonObject& group, const QString& name) {
+    const QString title = name.isEmpty() ? tr("Panel group") : name;
+    for (int i = 0; i < m_panelGroups.size(); ++i)
+        if (!name.isEmpty() && m_panelGroups[i].savedName == name) {
+            activatePanelGroup(i);
+            return;
+        }
+    const int previous = m_currentPanelGroup;
+    addPanelGroup(title, name);
+    if (!restorePaneTree(group.value("tree").toObject())) {
+        closePanelGroup(m_currentPanelGroup);
+        return;
+    }
+    restoreWorkspaceTabs(group);
+    discardEmptyDefaultGroup(previous);
+}
+
+void MainWindow::managePanelGroups() {
+    QSettings settings;
+    QJsonObject groups = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
+    QDialog dialog(this);
+    dialog.setObjectName("panelGroupsDialog");
+    dialog.setWindowTitle(tr("Panel groups"));
+    dialog.resize(760, 560);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* list = new QListWidget(&dialog);
+    list->setObjectName("panelGroupsList");
+    list->addItems(groups.keys());
+    layout->addWidget(new QLabel(tr("Saved groups"), &dialog));
+    auto* savedRow = new QHBoxLayout;
+    savedRow->addWidget(list, 1);
+    auto* preview = new QListWidget(&dialog);
+    preview->setObjectName("savedPanelGroupSessions");
+    preview->setSelectionMode(QAbstractItemView::NoSelection);
+    preview->setToolTip(tr("Sessions in the saved group"));
+    savedRow->addWidget(preview, 2);
+    layout->addLayout(savedRow);
+    auto* name = new QLineEdit(&dialog);
+    name->setObjectName("panelGroupName");
+    name->setPlaceholderText(tr("Group name"));
+    layout->addWidget(name);
+    layout->addWidget(new QLabel(tr("Choose the open sessions to save with this panel layout:"), &dialog));
+    auto* sessions = new QListWidget(&dialog);
+    sessions->setObjectName("panelGroupSessions");
+    QJsonObject current = workspace();
+    for (const auto& value : current.value("tabs").toArray()) {
+        const auto entry = value.toObject();
+        auto* item = new QListWidgetItem(tr("Pane %1: %2")
+                                             .arg(entry.value("pane").toInt() + 1)
+                                             .arg(entry.value("session").toObject().value("name").toString()),
+                                         sessions);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setCheckState(Qt::Checked);
+    }
+    layout->addWidget(sessions);
+    auto* row = new QHBoxLayout;
+    auto* save = new QPushButton(tr("Save current selection"), &dialog);
+    save->setObjectName("savePanelGroup");
+    auto* open = new QPushButton(tr("Open group"), &dialog);
+    open->setObjectName("openPanelGroup");
+    auto* remove = new QPushButton(tr("Delete group"), &dialog);
+    remove->setObjectName("deletePanelGroup");
+    auto* rename = new QPushButton(tr("Rename group"), &dialog);
+    rename->setObjectName("renamePanelGroup");
+    row->addWidget(save);
+    row->addWidget(open);
+    row->addWidget(rename);
+    row->addWidget(remove);
+    layout->addLayout(row);
+    auto persist = [&]() {
+        settings.setValue("panels/groups", QJsonDocument(groups).toJson(QJsonDocument::Compact));
+        rebuildPanelGroupsMenu();
+    };
+    connect(list, &QListWidget::currentTextChanged, &dialog, [&](const QString& key) {
+        name->setText(key);
+        preview->clear();
+        for (const auto& value : groups.value(key).toObject().value("tabs").toArray()) {
+            const auto profile = value.toObject().value("session").toObject();
+            preview->addItem(profile.value("name").toString());
+        }
+    });
+    connect(rename, &QPushButton::clicked, &dialog, [&]() {
+        if (!list->currentItem() || name->text().trimmed().isEmpty())
+            return;
+        const QString old = list->currentItem()->text();
+        const QString next = name->text().trimmed();
+        if (old == next)
+            return;
+        if (groups.contains(next)) {
+            QMessageBox::information(&dialog, tr("Panel groups"), tr("A saved group with this name already exists."));
+            return;
+        }
+        groups[next] = groups.take(old);
+        for (auto& group : m_panelGroups)
+            if (group.savedName == old) {
+                group.name = next;
+                group.savedName = next;
+            }
+        persist();
+        refreshPanelGroupBar();
+        list->clear();
+        list->addItems(groups.keys());
+    });
+    connect(save, &QPushButton::clicked, &dialog, [&]() {
+        const QString key = name->text().trimmed();
+        if (key.isEmpty())
+            return;
+        QJsonArray selected;
+        const auto tabs = current.value("tabs").toArray();
+        for (int i = 0; i < tabs.size(); ++i)
+            if (sessions->item(i)->checkState() == Qt::Checked)
+                selected.append(tabs[i]);
+        if (selected.isEmpty())
+            return;
+        if (groups.contains(key) &&
+            localizedQuestion(&dialog, tr("Panel groups"), tr("Replace the saved group %1?").arg(key),
+                              QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+            return;
+        auto saved = current;
+        saved["tabs"] = selected;
+        groups[key] = saved;
+        persist();
+        list->clear();
+        list->addItems(groups.keys());
+    });
+    connect(open, &QPushButton::clicked, &dialog, [&]() {
+        if (!list->currentItem())
+            return;
+        const QString key = list->currentItem()->text();
+        const auto group = groups.value(key).toObject();
+        dialog.accept();
+        openPanelGroup(group, key);
+    });
+    connect(remove, &QPushButton::clicked, &dialog, [&]() {
+        if (!list->currentItem())
+            return;
+        const QString key = list->currentItem()->text();
+        groups.remove(key);
+        for (auto& group : m_panelGroups)
+            if (group.savedName == key)
+                group.savedName.clear();
+        delete list->takeItem(list->currentRow());
+        persist();
+    });
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    dialog.exec();
+}
+
+void MainWindow::arrangeGrid() {
+    struct Tab {
+        QWidget* widget;
+        QString title;
+        QIcon icon;
+        QString tooltip;
+    };
+    QWidget* selected = activePane()->currentWidget();
+    QList<Tab> tabs;
+    // Suppress currentChanged while moving tabs: session context is refreshed
+    // once after every live terminal has reached its destination.
+    QList<bool> blocked;
+    for (auto* pane : m_panes) {
+        blocked.append(pane->blockSignals(true));
+        while (pane->count()) {
+            tabs.append({pane->widget(0), pane->tabText(0), pane->tabIcon(0), pane->tabToolTip(0)});
+            pane->removeTab(0);
+        }
+        pane->setParent(m_tabSplitter);
+        pane->hide();
+    }
+    const int count = qMax(1, int(tabs.size()));
+    while (m_panes.size() < count) {
+        auto* pane = createTerminalPane();
+        blocked.append(pane->blockSignals(true));
+    }
+    delete m_paneRoot;
+    m_paneRoot = new QSplitter(Qt::Vertical, m_tabSplitter);
+    m_paneRoot->setObjectName("terminalPaneRoot");
+    m_paneRoot->setChildrenCollapsible(false);
+    m_tabGrid->addWidget(m_paneRoot, 0, 0);
+    int columns = 1;
+    while (columns * columns < count)
+        ++columns;
+    QList<int> rowSizes;
+    for (int first = 0; first < count; first += columns) {
+        auto* row = new QSplitter(Qt::Horizontal, m_paneRoot);
+        row->setChildrenCollapsible(false);
+        QList<int> sizes;
+        for (int i = first; i < qMin(first + columns, count); ++i) {
+            auto* pane = m_panes[i];
+            row->addWidget(pane);
+            if (i < tabs.size()) {
+                const auto& tab = tabs[i];
+                pane->addTab(tab.widget, tab.icon, tab.title);
+                pane->setTabToolTip(0, tab.tooltip);
+                if (tab.widget == selected)
+                    m_activePane = pane;
+            }
+            pane->show();
+            sizes.append(1);
+        }
+        row->setSizes(sizes);
+        rowSizes.append(1);
+    }
+    m_paneRoot->setSizes(rowSizes);
+    for (int i = 0; i < m_panes.size(); ++i)
+        m_panes[i]->blockSignals(blocked[i]);
+    m_paneLayoutMode = 2;
+    if (!selected)
+        m_activePane = m_panes.first();
+    updateWelcomeScreen();
+    refreshPanes();
+}
+
+void MainWindow::setTabDropTarget(QTabWidget* pane) {
+    if (m_tabDropTarget == pane)
+        return;
+    auto* previous = m_tabDropTarget.data();
+    m_tabDropTarget = pane;
+    for (auto* target : {previous, pane}) {
+        if (!target)
+            continue;
+        target->setProperty("tabDropTarget", target == pane);
+        target->style()->unpolish(target);
+        target->style()->polish(target);
+        target->update();
+    }
+}
+
+bool MainWindow::moveTabToPane(QWidget* tab, QTabWidget* source, QTabWidget* target, int position) {
+    if (!tab || !allOpenPanes().contains(source) || !visiblePanes().contains(target))
+        return false;
+    const int index = source->indexOf(tab);
+    if (index < 0)
+        return false;
+    if (source == target) {
+        target->setCurrentWidget(tab);
+        return true;
+    }
+    const QString title = source->tabText(index);
+    const QIcon icon = source->tabIcon(index);
+    const QString tooltip = source->tabToolTip(index);
+    const QVariant data = source->tabBar()->tabData(index);
+    const QColor color = source->tabBar()->tabTextColor(index);
+    {
+        const QSignalBlocker blockSource(source), blockTarget(target);
+        source->removeTab(index);
+        const int destination = target->insertTab(position, tab, icon, title);
+        target->setTabToolTip(destination, tooltip);
+        target->tabBar()->setTabData(destination, data);
+        target->tabBar()->setTabTextColor(destination, color);
+        target->setCurrentIndex(destination);
+    }
+    if (m_currentPanelGroup >= 0)
+        tab->setProperty("panelGroupId", m_panelGroups[m_currentPanelGroup].id);
+    m_activePane = target;
+    onCurrentTabChanged(target, target->currentIndex());
+    if (auto* terminal = qobject_cast<TerminalTab*>(tab))
+        if (auto* display = terminal->getTerminalWidget())
+            display->setFocus(Qt::OtherFocusReason);
+    updateWelcomeScreen();
+    refreshPanes();
+    return true;
+}
+
+void MainWindow::restoreSinglePane() {
+    QWidget* selected = activePane()->currentWidget();
+    reattachDetachedTabs(m_panelGroups[m_currentPanelGroup].id);
+    setPaneLayout(0);
+    m_activePane = m_tabWidget;
+    if (selected && m_tabWidget->indexOf(selected) >= 0)
+        m_tabWidget->setCurrentWidget(selected);
+    onCurrentTabChanged(m_tabWidget, m_tabWidget->currentIndex());
+    refreshPanes();
+}
+
+void MainWindow::updateSynchronizationUi() {
+    if (!m_syncAction)
+        return;
+    m_syncTargets.removeIf([](const auto& tab) {
+        return !tab || !tab->isSessionActive() || tab->isRdpOrVnc() || tab->session().readOnly;
+    });
+    if (m_syncTargets.size() < 2)
+        m_syncTargets.clear();
+    const bool enabled = m_syncTargets.size() >= 2;
+    m_syncAction->setChecked(enabled);
+    m_syncAction->setText(enabled ? tr("Stop synchronization (%1)").arg(m_syncTargets.size())
+                                  : tr("Synchronize input"));
+    for (auto* pane : allOpenPanes()) {
+        for (int i = 0; i < pane->count(); ++i) {
+            auto* tab = qobject_cast<TerminalTab*>(pane->widget(i));
+            QWidget* badge = pane->tabBar()->tabButton(i, QTabBar::LeftSide);
+            const bool selected = enabled && tab && m_syncTargets.contains(tab);
+            if (selected && !badge) {
+                auto* label = new QLabel(QStringLiteral("\u21c4"), pane->tabBar());
+                label->setObjectName("synchronizedTabBadge");
+                label->setToolTip(tr("Input synchronized"));
+                label->setStyleSheet(QStringLiteral("color: #e69c35; font-weight: bold; background: transparent;"));
+                label->setMargin(2);
+                label->setAttribute(Qt::WA_TransparentForMouseEvents);
+                pane->tabBar()->setTabButton(i, QTabBar::LeftSide, label);
+            } else if (!selected && badge && badge->objectName() == "synchronizedTabBadge") {
+                pane->tabBar()->setTabButton(i, QTabBar::LeftSide, nullptr);
+                badge->deleteLater();
+            }
+        }
+    }
+}
+
+QList<QTabWidget*> MainWindow::allOpenPanes() const {
+    QList<QTabWidget*> result = m_panes;
+    for (int i = 0; i < m_panelGroups.size(); ++i)
+        if (i != m_currentPanelGroup)
+            result.append(m_panelGroups[i].panes);
+    return result;
+}
+
+int MainWindow::panelGroupForPane(QTabWidget* pane) const {
+    if (m_panes.contains(pane))
+        return m_currentPanelGroup;
+    for (int i = 0; i < m_panelGroups.size(); ++i)
+        if (i != m_currentPanelGroup && m_panelGroups[i].panes.contains(pane))
+            return i;
+    return -1;
+}
+
+void MainWindow::capturePanelGroup() {
+    if (m_currentPanelGroup < 0 || m_currentPanelGroup >= m_panelGroups.size())
+        return;
+    auto& group = m_panelGroups[m_currentPanelGroup];
+    group.panes = m_panes;
+    group.root = m_paneRoot;
+    group.activePane = activePane();
+    group.layoutMode = m_paneLayoutMode;
+}
+
+void MainWindow::refreshPanelGroupBar() {
+    if (!m_panelGroupTabs)
+        return;
+    const QSignalBlocker blocker(m_panelGroupTabs);
+    for (int i = 0; i < m_panelGroups.size(); ++i) {
+        m_panelGroupTabs->setTabText(i, m_panelGroups[i].name);
+        int count = 0;
+        for (auto* pane : (i == m_currentPanelGroup ? m_panes : m_panelGroups[i].panes))
+            count += pane->count();
+        for (auto* tab : m_detachedTabs.keys())
+            count += tab->property("panelGroupId").toString() == m_panelGroups[i].id;
+        m_panelGroupTabs->setTabToolTip(i, tr("%1 sessions").arg(count));
+    }
+    m_panelGroupTabs->setCurrentIndex(m_currentPanelGroup);
+    m_panelGroupTabs->setVisible(m_panelGroups.size() > 1 ||
+                                 (!m_panelGroups.isEmpty() && !m_panelGroups.first().isDefault));
+}
+
+void MainWindow::activatePanelGroup(int index, bool stopSynchronization) {
+    if (index < 0 || index >= m_panelGroups.size() || index == m_currentPanelGroup)
+        return;
+    capturePanelGroup();
+    setTabDropTarget(nullptr);
+    if (m_paneRoot) {
+        m_tabGrid->removeWidget(m_paneRoot);
+        m_paneRoot->setParent(m_tabSplitter);
+        m_paneRoot->hide();
+    }
+    if (stopSynchronization) {
+        m_syncTargets.clear();
+        updateSynchronizationUi();
+    }
+    m_currentPanelGroup = index;
+    const auto& group = m_panelGroups[index];
+    m_panes = group.panes;
+    m_paneRoot = group.root;
+    m_tabWidget = m_panes.value(0);
+    m_tabWidget2 = m_panes.value(1);
+    m_tabWidget3 = m_panes.value(2);
+    m_tabWidget4 = m_panes.value(3);
+    m_activePane = group.activePane;
+    m_paneLayoutMode = group.layoutMode;
+    m_tabGrid->addWidget(m_paneRoot, 0, 0);
+    refreshPanelGroupBar();
+    onCurrentTabChanged(activePane(), activePane()->currentIndex());
+    updateWelcomeScreen();
+    refreshPanes();
+}
+
+void MainWindow::addPanelGroup(const QString& name, const QString& savedName, bool isDefault) {
+    capturePanelGroup();
+    if (m_paneRoot) {
+        m_tabGrid->removeWidget(m_paneRoot);
+        m_paneRoot->setParent(m_tabSplitter);
+        m_paneRoot->hide();
+    }
+    m_syncTargets.clear();
+    updateSynchronizationUi();
+    PanelGroupState group;
+    group.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    group.name = name;
+    group.savedName = savedName;
+    group.isDefault = isDefault;
+    m_panelGroups.append(group);
+    m_currentPanelGroup = m_panelGroups.size() - 1;
+    m_panes.clear();
+    m_paneRoot = new QSplitter(Qt::Horizontal, m_tabSplitter);
+    m_paneRoot->setObjectName("terminalPaneRoot");
+    m_paneRoot->setChildrenCollapsible(false);
+    m_tabGrid->addWidget(m_paneRoot, 0, 0);
+    m_tabWidget = createTerminalPane();
+    m_tabWidget2 = createTerminalPane();
+    m_tabWidget3 = createTerminalPane();
+    m_tabWidget4 = createTerminalPane();
+    for (auto* pane : m_panes)
+        pane->hide();
+    m_paneRoot->addWidget(m_tabWidget);
+    m_tabWidget->show();
+    m_activePane = m_tabWidget;
+    m_paneLayoutMode = 0;
+    {
+        const QSignalBlocker blocker(m_panelGroupTabs);
+        m_panelGroupTabs->addTab(QIcon(":/icons/folder.svg"), name);
+    }
+    capturePanelGroup();
+    refreshPanelGroupBar();
+    onCurrentTabChanged(m_tabWidget, -1);
+    updateWelcomeScreen();
+}
+
+void MainWindow::rebuildPanelGroupsMenu() {
+    if (!m_savedPanelGroupsMenu)
+        return;
+    m_savedPanelGroupsMenu->clear();
+    const auto groups = QJsonDocument::fromJson(QSettings().value("panels/groups").toByteArray()).object();
+    if (groups.isEmpty()) {
+        auto* empty = m_savedPanelGroupsMenu->addAction(tr("No saved groups"));
+        empty->setEnabled(false);
+    }
+    for (const auto& name : groups.keys()) {
+        auto* action = m_savedPanelGroupsMenu->addAction(QIcon(":/icons/folder.svg"), name);
+        const auto definition = groups[name].toObject();
+        connect(action, &QAction::triggered, this, [this, definition, name]() { openPanelGroup(definition, name); });
+    }
+}
+
+void MainWindow::restoreWorkspaceTabs(const QJsonObject& definition) {
+    QTabWidget* focused = nullptr;
+    int focusedIndex = -1;
+    for (const auto& value : definition.value("tabs").toArray()) {
+        const auto entry = value.toObject();
+        const int pane = entry.value("pane").toInt(-1);
+        const auto profile = entry.value("session").toObject();
+        if (pane < 0 || pane >= m_panes.size() || profile.isEmpty())
+            continue;
+        m_activePane = m_panes[pane];
+        onConnectSession(Session::fromJson(profile));
+        if (entry.value("active").toBool()) {
+            focused = m_activePane;
+            focusedIndex = focused->currentIndex();
+        }
+    }
+    if (focused) {
+        m_activePane = focused;
+        focused->setCurrentIndex(focusedIndex);
+    }
+    capturePanelGroup();
+    updateWelcomeScreen();
+    refreshPanes();
+}
+
+void MainWindow::savePanelWorkspaces(QSettings& settings) {
+    capturePanelGroup();
+    QJsonArray workspaces;
+    for (const auto& group : m_panelGroups) {
+        QJsonArray tabs;
+        for (int i = 0; i < group.panes.size(); ++i) {
+            auto* pane = group.panes[i];
+            for (int j = 0; j < pane->count(); ++j) {
+                auto* tab = qobject_cast<TerminalTab*>(pane->widget(j));
+                if (tab)
+                    tabs.append(QJsonObject{{"pane", i},
+                                            {"session", tab->session().toJson()},
+                                            {"active", pane == group.activePane && j == pane->currentIndex()}});
+            }
+        }
+        // paneTree uses current indices; other live groups have their own index space.
+        std::function<QJsonObject(QWidget*)> tree = [&](QWidget* widget) -> QJsonObject {
+            if (auto* pane = qobject_cast<QTabWidget*>(widget))
+                return {{"pane", group.panes.indexOf(pane)}};
+            auto* splitter = qobject_cast<QSplitter*>(widget);
+            QJsonArray children, sizes;
+            for (int i = 0; splitter && i < splitter->count(); ++i) {
+                children.append(tree(splitter->widget(i)));
+                sizes.append(splitter->sizes().value(i));
+            }
+            return {{"orientation", splitter && splitter->orientation() == Qt::Vertical ? "vertical" : "horizontal"},
+                    {"children", children},
+                    {"sizes", sizes}};
+        };
+        workspaces.append(QJsonObject{{"id", group.id},
+                                      {"name", group.name},
+                                      {"savedName", group.savedName},
+                                      {"default", group.isDefault},
+                                      {"tree", tree(group.root)},
+                                      {"tabs", tabs}});
+    }
+    settings.setValue("window/panelWorkspaces", QJsonDocument(workspaces).toJson(QJsonDocument::Compact));
+    settings.setValue("window/activePanelGroup", m_panelGroups[m_currentPanelGroup].id);
+}
+
+bool MainWindow::restorePanelWorkspaces(const QSettings& settings) {
+    const auto document = QJsonDocument::fromJson(settings.value("window/panelWorkspaces").toByteArray());
+    if (!document.isArray() || document.array().isEmpty())
+        return false;
+    const auto entries = document.array();
+    // Reject malformed trees before opening any saved network sessions.
+    std::function<bool(const QJsonObject&, QSet<int>&, int)> valid = [&](const QJsonObject& node, QSet<int>& used,
+                                                                         int depth) {
+        if (depth > 64)
+            return false;
+        if (node.contains("pane")) {
+            const int index = node.value("pane").toInt(-1);
+            if (index < 0 || index > 255 || used.contains(index))
+                return false;
+            used.insert(index);
+            return true;
+        }
+        const auto children = node.value("children").toArray();
+        if (children.isEmpty() || children.size() > 256)
+            return false;
+        const auto orientation = node.value("orientation").toString();
+        if (orientation != "horizontal" && orientation != "vertical")
+            return false;
+        for (const auto& child : children)
+            if (!valid(child.toObject(), used, depth + 1))
+                return false;
+        return true;
+    };
+    for (const auto& entry : entries) {
+        QSet<int> used;
+        const auto tree = entry.toObject().value("tree").toObject();
+        if (!tree.contains("children") || !valid(tree, used, 0))
+            return false;
+    }
+    int active = 0;
+    for (int i = 0; i < entries.size(); ++i) {
+        const auto entry = entries[i].toObject();
+        if (i > 0)
+            addPanelGroup(entry.value("name").toString(tr("Panel group")), entry.value("savedName").toString());
+        auto& group = m_panelGroups[m_currentPanelGroup];
+        group.id = entry.value("id").toString(QUuid::createUuid().toString(QUuid::WithoutBraces));
+        group.name = entry.value("name").toString(tr("Panel group"));
+        group.savedName = entry.value("savedName").toString();
+        group.isDefault = entry.value("default").toBool();
+        restorePaneTree(entry.value("tree").toObject());
+        restoreWorkspaceTabs(entry);
+        if (group.id == settings.value("window/activePanelGroup").toString())
+            active = i;
+    }
+    activatePanelGroup(active);
+    refreshPanelGroupBar();
+    return true;
+}
+
+void MainWindow::closePanelGroup(int index) {
+    if (index < 0 || index >= m_panelGroups.size())
+        return;
+    const auto panes = index == m_currentPanelGroup ? m_panes : m_panelGroups[index].panes;
+    bool connected = false;
+    for (auto* pane : panes)
+        for (int i = 0; i < pane->count(); ++i)
+            if (auto* tab = qobject_cast<TerminalTab*>(pane->widget(i)))
+                connected = connected || tab->isSessionActive();
+    for (auto* tab : m_detachedTabs.keys())
+        if (tab->property("panelGroupId").toString() == m_panelGroups[index].id)
+            connected = connected || tab->isSessionActive();
+    if (connected &&
+        localizedQuestion(this, tr("Close panel group"),
+                          tr("Disconnect the sessions in group %1 and close it?").arg(m_panelGroups[index].name),
+                          QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+    const int previous = m_currentPanelGroup;
+    activatePanelGroup(index);
+    reattachDetachedTabs(m_panelGroups[index].id);
+    m_sftpSidebar->detachConnection();
+    m_sftpSidebar->stopSession();
+    const auto removed = m_panes;
+    m_panes.clear();
+    for (auto* pane : removed) {
+        for (int i = 0; i < pane->count(); ++i)
+            if (auto* tab = qobject_cast<TerminalTab*>(pane->widget(i))) {
+                disconnect(tab, nullptr, this, nullptr);
+                m_diagnosticLogs.remove(tab);
+            }
+        pane->setParent(m_tabSplitter);
+        delete pane;
+    }
+    m_tabGrid->removeWidget(m_paneRoot);
+    delete m_paneRoot;
+    m_paneRoot = nullptr;
+    m_activePane = nullptr;
+    m_panelGroups.removeAt(index);
+    m_currentPanelGroup = -1;
+    {
+        const QSignalBlocker blocker(m_panelGroupTabs);
+        m_panelGroupTabs->removeTab(index);
+    }
+    if (m_panelGroups.isEmpty())
+        addPanelGroup(tr("Ungrouped"), QString(), true);
+    else
+        activatePanelGroup(previous == index ? qMin(index, int(m_panelGroups.size()) - 1)
+                                             : previous - (previous > index));
+    refreshPanelGroupBar();
+}
+
+void MainWindow::saveActivePanelGroup() {
+    if (m_currentPanelGroup < 0)
+        return;
+    auto& group = m_panelGroups[m_currentPanelGroup];
+    if (group.isDefault) {
+        createPanelGroup();
+        return;
+    }
+    QSettings settings;
+    auto groups = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
+    groups[group.name] = workspace();
+    group.savedName = group.name;
+    settings.setValue("panels/groups", QJsonDocument(groups).toJson(QJsonDocument::Compact));
+    rebuildPanelGroupsMenu();
+}
+
+void MainWindow::renameActivePanelGroup() {
+    if (m_currentPanelGroup < 0)
+        return;
+    bool accepted = false;
+    const QString name = QInputDialog::getText(this, tr("Rename group"), tr("Group name"), QLineEdit::Normal,
+                                               m_panelGroups[m_currentPanelGroup].name, &accepted)
+                             .trimmed();
+    if (!accepted || name.isEmpty())
+        return;
+    QSettings settings;
+    auto groups = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
+    auto& group = m_panelGroups[m_currentPanelGroup];
+    if (name != group.savedName && groups.contains(name)) {
+        QMessageBox::information(this, tr("Panel groups"), tr("A saved group with this name already exists."));
+        return;
+    }
+    if (!group.savedName.isEmpty() && groups.contains(group.savedName)) {
+        const auto definition = groups.take(group.savedName);
+        groups[name] = definition;
+        group.savedName = name;
+        settings.setValue("panels/groups", QJsonDocument(groups).toJson(QJsonDocument::Compact));
+    }
+    group.name = name;
+    group.isDefault = false;
+    refreshPanelGroupBar();
+    rebuildPanelGroupsMenu();
+}
+
+void MainWindow::createPanelGroup() {
+    struct Selection {
+        QPointer<TerminalTab> tab;
+        QPointer<QTabWidget> pane;
+        int index;
+    };
+    QList<Selection> candidates;
+    QDialog dialog(this);
+    dialog.setObjectName("createPanelGroupDialog");
+    dialog.setWindowTitle(tr("New group"));
+    dialog.resize(560, 430);
+    auto* layout = new QVBoxLayout(&dialog);
+    auto* name = new QLineEdit(&dialog);
+    name->setObjectName("newPanelGroupName");
+    name->setPlaceholderText(tr("Group name"));
+    layout->addWidget(name);
+    auto* explanation =
+        new QLabel(tr("Choose the open tabs to move into the new group. Their sessions stay connected."), &dialog);
+    explanation->setWordWrap(true);
+    layout->addWidget(explanation);
+    auto* list = new QListWidget(&dialog);
+    list->setObjectName("newPanelGroupSessions");
+    for (int i = 0; i < m_panes.size(); ++i)
+        for (int j = 0; j < m_panes[i]->count(); ++j)
+            if (auto* tab = qobject_cast<TerminalTab*>(m_panes[i]->widget(j))) {
+                candidates.append({tab, m_panes[i], i});
+                auto* item = new QListWidgetItem(m_panes[i]->tabText(j), list);
+                item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+                item->setCheckState(Qt::Checked);
+            }
+    layout->addWidget(list);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Save)->setObjectName("createPanelGroupSave");
+    layout->addWidget(buttons);
+    auto update = [=]() {
+        int selected = 0;
+        for (int i = 0; i < list->count(); ++i)
+            selected += list->item(i)->checkState() == Qt::Checked;
+        buttons->button(QDialogButtonBox::Save)->setEnabled(selected > 0 && !name->text().trimmed().isEmpty());
+    };
+    connect(name, &QLineEdit::textChanged, &dialog, update);
+    connect(list, &QListWidget::itemChanged, &dialog, [update]() { update(); });
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, [&]() {
+        const QString key = name->text().trimmed();
+        for (const auto& group : m_panelGroups)
+            if (!group.isDefault && group.name == key) {
+                QMessageBox::information(&dialog, tr("Panel groups"),
+                                         tr("An open group with this name already exists."));
+                return;
+            }
+        const auto saved = QJsonDocument::fromJson(QSettings().value("panels/groups").toByteArray()).object();
+        if (saved.contains(key) &&
+            localizedQuestion(&dialog, tr("Panel groups"), tr("Replace the saved group %1?").arg(key),
+                              QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes)
+            return;
+        dialog.accept();
+    });
+    update();
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    QList<Selection> selected;
+    QSet<int> included;
+    for (int i = 0; i < candidates.size(); ++i)
+        if (candidates[i].tab && candidates[i].pane && list->item(i)->checkState() == Qt::Checked) {
+            selected.append(candidates[i]);
+            included.insert(candidates[i].index);
+        }
+    if (selected.isEmpty())
+        return;
+    QMap<int, int> mapping;
+    std::function<QJsonObject(const QJsonObject&)> prune = [&](const QJsonObject& node) -> QJsonObject {
+        if (node.contains("pane")) {
+            const int index = node.value("pane").toInt();
+            if (!included.contains(index))
+                return {};
+            if (!mapping.contains(index))
+                mapping[index] = mapping.size();
+            return {{"pane", mapping[index]}};
+        }
+        QJsonArray children, sizes;
+        const auto original = node.value("children").toArray();
+        const auto weights = node.value("sizes").toArray();
+        for (int i = 0; i < original.size(); ++i) {
+            const auto child = prune(original[i].toObject());
+            if (!child.isEmpty()) {
+                children.append(child);
+                sizes.append(i < weights.size() ? weights[i] : QJsonValue(1));
+            }
+        }
+        if (children.isEmpty())
+            return {};
+        if (children.size() == 1)
+            return children[0].toObject();
+        return {{"orientation", node.value("orientation")}, {"children", children}, {"sizes", sizes}};
+    };
+    auto tree = prune(paneTree(m_paneRoot));
+    if (tree.contains("pane"))
+        tree = {{"orientation", "horizontal"}, {"children", QJsonArray{tree}}, {"sizes", QJsonArray{1}}};
+    const QString key = name->text().trimmed();
+    const int originalGroup = m_currentPanelGroup;
+    QPointer<QWidget> focused = activePane()->currentWidget();
+    addPanelGroup(key, key);
+    restorePaneTree(tree);
+    for (const auto& item : selected)
+        if (item.tab && item.pane)
+            moveTabToPane(item.tab, item.pane, m_panes[mapping.value(item.index)]);
+    if (focused)
+        for (auto* pane : m_panes)
+            if (pane->indexOf(focused) >= 0) {
+                pane->setCurrentWidget(focused);
+                m_activePane = pane;
+                break;
+            }
+    saveActivePanelGroup();
+    capturePanelGroup();
+    discardEmptyDefaultGroup(originalGroup);
+    refreshPanelGroupBar();
+    refreshPanes();
+}
+
+void MainWindow::discardEmptyDefaultGroup(int index) {
+    if (index < 0 || index == m_currentPanelGroup || index >= m_panelGroups.size() || !m_panelGroups[index].isDefault)
+        return;
+    for (auto* pane : m_panelGroups[index].panes)
+        if (pane->count() != 0)
+            return;
+    for (auto* tab : m_detachedTabs.keys())
+        if (tab->property("panelGroupId").toString() == m_panelGroups[index].id)
+            return;
+    closePanelGroup(index);
 }

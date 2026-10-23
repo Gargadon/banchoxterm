@@ -5,8 +5,10 @@
 #include "keyring.h"
 #include "keyboardshortcuts.h"
 #include <qtermwidget.h>
-#ifndef Q_OS_WIN
+#include "../third_party/qtermwidget/lib/TerminalDisplay.h"
+#include "../third_party/qtermwidget/lib/Emulation.h"
 #include "../third_party/qtermwidget/lib/Session.h"
+#ifndef Q_OS_WIN
 #include <Pty.h>
 #endif
 #include <QVBoxLayout>
@@ -146,6 +148,11 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         if (m_session.type != SessionType::SSH)
             connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
         connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
+        if (auto* display = m_terminal->findChild<Konsole::TerminalDisplay*>()) {
+            connect(display, &Konsole::TerminalDisplay::keyPressedSignal, this, &TerminalTab::userKeyInput);
+            connect(display, &Konsole::TerminalDisplay::sendStringToEmu, this,
+                    [this](const char* text) { emit userStringInput(QString::fromUtf8(text)); });
+        }
         connect(m_terminal, &QTermWidget::urlActivated, this, [this](const QUrl& url, bool) {
             if (!QDesktopServices::openUrl(url))
                 feedTerminalData(tr("\r\n[Unable to open link: %1]\r\n").arg(url.toString()).toUtf8());
@@ -394,6 +401,23 @@ void TerminalTab::syncTerminalSize() {
         return;
 
     applyTerminalSize(rows, cols);
+    // A split can expose areas outside the emulator's dirty character region.
+    // Repaint the entire display after its grid and backing image have resized.
+    m_terminal->update();
+    if (auto* display = m_terminal->findChild<Konsole::TerminalDisplay*>()) {
+        display->updateImage();
+        display->update();
+    }
+}
+
+void TerminalTab::receiveSynchronizedKey(QKeyEvent* event, bool fromPaste) {
+    if (!m_isActive || m_session.readOnly || !m_terminal || isRdpOrVnc())
+        return;
+    if (auto* session = m_terminal->findChild<Konsole::Session*>()) {
+        QKeyEvent copy(event->type(), event->key(), event->modifiers(), event->text(), event->isAutoRepeat(),
+                       event->count());
+        session->emulation()->sendKeyEvent(&copy, fromPaste);
+    }
 }
 
 void TerminalTab::applyTerminalSize(int rows, int cols) {

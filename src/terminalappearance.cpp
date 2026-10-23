@@ -17,6 +17,21 @@
 #endif
 
 namespace {
+QRegion glassRegion(QWidget* window) {
+    QRegion region;
+    for (auto* terminal : window->findChildren<QTermWidget*>())
+        if (terminal->window() == window && terminal->isVisible())
+            region += QRect(terminal->mapTo(window, QPoint()), terminal->size());
+    return region;
+}
+
+void clearAncestorBackgrounds(QWidget* widget, QWidget* window) {
+    for (auto* ancestor = widget->parentWidget(); ancestor && ancestor != window; ancestor = ancestor->parentWidget()) {
+        ancestor->setAutoFillBackground(false);
+        ancestor->setAttribute(Qt::WA_OpaquePaintEvent, false);
+    }
+}
+
 class GlassWindowFilter : public QObject {
 public:
     explicit GlassWindowFilter(QMainWindow* window) : QObject(window), m_window(window) {
@@ -27,8 +42,8 @@ protected:
         if (watched != m_window) {
             if (event->type() == QEvent::Show || event->type() == QEvent::Hide || event->type() == QEvent::Move ||
                 event->type() == QEvent::Resize) {
-                auto* terminal = qobject_cast<QTermWidget*>(watched);
-                if (terminal && terminal->window() == m_window)
+                auto* widget = qobject_cast<QTermWidget*>(watched);
+                if (widget && widget->window() == m_window)
                     QTimer::singleShot(0, m_window, [this]() { TerminalAppearance::refreshWindow(m_window); });
             }
             return false;
@@ -42,12 +57,8 @@ protected:
             painter.setCompositionMode(QPainter::CompositionMode_Source);
             painter.fillRect(m_window->rect(), Qt::transparent);
             QRegion opaque(m_window->rect());
-            if (TerminalAppearance::opacityPercent() < 100) {
-                for (auto* terminal : m_window->findChildren<QTermWidget*>()) {
-                    if (terminal->isVisible())
-                        opaque -= QRect(terminal->mapTo(m_window, QPoint()), terminal->size());
-                }
-            }
+            if (TerminalAppearance::opacityPercent() < 100)
+                opaque -= glassRegion(m_window);
             painter.setClipRegion(opaque);
             painter.fillRect(m_window->rect(), m_window->palette().color(QPalette::Window));
             return true;
@@ -97,17 +108,18 @@ bool blurSupported() {
 
 void refreshWindow(QWidget* window) {
     const bool translucent = window->testAttribute(Qt::WA_TranslucentBackground);
-    for (auto* terminal : window->findChildren<QTermWidget*>())
+    for (auto* terminal : window->findChildren<QTermWidget*>()) {
+        if (terminal->window() != window)
+            continue;
         terminal->setTerminalOpacity(translucent ? opacityPercent() / 100.0 : 1.0);
+        if (translucent)
+            clearAncestorBackgrounds(terminal, window);
+    }
     if (!window->property("terminalGlass").toBool())
         return;
 #ifdef BANCHO_HAVE_KWINDOWSYSTEM
     if (auto* handle = window->windowHandle()) {
-        QRegion region;
-        for (auto* terminal : window->findChildren<QTermWidget*>()) {
-            if (terminal->isVisible())
-                region += QRect(terminal->mapTo(window, QPoint()), terminal->size());
-        }
+        const QRegion region = glassRegion(window);
         // KWindowSystem retains the request while Wayland capabilities are
         // announced asynchronously, and applies it when blur becomes available.
         const bool blur = translucent && opacityPercent() < 100 && !region.isEmpty() &&
@@ -123,7 +135,8 @@ void refreshWindow(QWidget* window) {
         // native non-client frame with a Qt layered, frameless window.
         const DWM_BLURBEHIND alpha{DWM_BB_ENABLE, TRUE, nullptr, FALSE};
         DwmEnableBlurBehindWindow(hwnd, &alpha);
-        const bool blur = opacityPercent() < 100 && QSettings().value("terminal/backgroundBlur", false).toBool();
+        const bool blur = translucent && opacityPercent() < 100 && !glassRegion(window).isEmpty() &&
+                          QSettings().value("terminal/backgroundBlur", false).toBool();
         const int backdrop = blur && blurSupported() ? 3 : 1; // DWMSBT_TRANSIENTWINDOW / NONE
         const HRESULT result = DwmSetWindowAttribute(hwnd, 38, &backdrop, sizeof(backdrop));
         window->setProperty("terminalBlurActive", blur && blurSupported() && SUCCEEDED(result));
@@ -182,11 +195,8 @@ void initializeWindow(QMainWindow* window) {
     window->setStyleSheet(QStringLiteral("QTabWidget#terminalTabs::pane { background: transparent; }"));
     window->setAttribute(Qt::WA_TranslucentBackground);
     auto* filter = new GlassWindowFilter(window);
-#ifdef BANCHO_HAVE_KWINDOWSYSTEM
-    // Terminal geometry also changes when switching tabs or resizing splits.
+    // Track terminal geometry on every platform: changing panes
+    // can replace their ancestors without resizing the top-level window.
     qApp->installEventFilter(filter);
-#else
-    window->installEventFilter(filter);
-#endif
 }
 } // namespace TerminalAppearance

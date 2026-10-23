@@ -25,8 +25,8 @@ QList<ShortcutDefinition> KeyboardShortcuts::definitions() {
         {"zoomOut", tr("Zoom out"), keys("Ctrl+Shift+-")},
         {"commandPalette", tr("Command palette"), keys("Ctrl+Shift+P")},
         {"lockApplication", tr("Lock application"), keys("Ctrl+Alt+Shift+L")},
-        {"toggleSplit", tr("Toggle split view"), keys("Ctrl+Shift+O")},
-        {"toggleGrid", tr("Toggle grid view"), keys("Ctrl+Alt+Shift+G")},
+        {"toggleSplit", tr("Split left/right"), keys("Ctrl+Shift+O")},
+        {"toggleGrid", tr("Arrange tabs in a grid"), keys("Ctrl+Alt+Shift+G")},
         {"moveTab", tr("Move tab to other pane"), keys("Ctrl+Alt+Shift+M")},
         {"detachTab", tr("Detach tab"), keys("Ctrl+Alt+Shift+D")},
     };

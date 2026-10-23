@@ -380,8 +380,8 @@ Destino: %2</translation></message>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="435"/>
-        <source>Toggle split view</source>
-        <translation>Alternar visão dividida</translation>
+        <source>Split left/right</source>
+        <translation>Dividir esquerda/direita</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="438"/>
@@ -741,15 +741,11 @@ Comando:
         <source>&amp;View</source>
         <translation>&amp;Exibir</translation>
     </message>
-    <message>
-        <location filename="../src/mainwindow.cpp" line="1960"/>
-        <source>Toggle &amp;Split View</source>
-        <translation>Alternar visual &amp;dividido</translation>
-    </message>
+
     <message>
         <location filename="../src/mainwindow.cpp" line="1964"/>
-        <source>Toggle 2x2 &amp;Grid View</source>
-        <translation>Alternar visualização em &amp;grade 2x2</translation>
+        <source>Arrange Tabs in a &amp;Grid</source>
+        <translation>Organizar abas em uma grade</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="1968"/>
@@ -982,17 +978,12 @@ Deseja continuar?</translation>
         <source>Open Local Terminal</source>
         <translation>Abrir terminal local</translation>
     </message>
-    <message>
-        <location filename="../src/mainwindow.cpp" line="2004"/>
-        <location filename="../src/mainwindow.cpp" line="2022"/>
-        <source>Toggle Split View</source>
-        <translation>Alternar visualização dividida</translation>
-    </message>
+
     <message>
         <location filename="../src/mainwindow.cpp" line="2004"/>
         <location filename="../src/mainwindow.cpp" line="2024"/>
-        <source>Toggle 2x2 Grid View</source>
-        <translation>Alternar visualização em grade 2x2</translation>
+        <source>Arrange Tabs in a Grid</source>
+        <translation>Organizar abas em uma grade</translation>
     </message>
     <message>
         <location filename="../src/mainwindow.cpp" line="2005"/>
@@ -1352,6 +1343,155 @@ Deseja continuar?</translation>
     <message>
         <source>Search all</source>
         <translation>Buscar em todas</translation>
+    </message>
+    <message>
+        <source>Panels</source>
+        <translation>Painéis</translation>
+    </message>
+
+    <message>
+        <source>Split top/bottom</source>
+        <translation>Dividir acima/abaixo</translation>
+    </message>
+    <message>
+        <source>Close pane</source>
+        <translation>Fechar painel</translation>
+    </message>
+    <message>
+        <source>Synchronize input</source>
+        <translation>Sincronizar entrada</translation>
+    </message>
+    <message>
+        <source>Panel groups</source>
+        <translation>Grupos de painéis</translation>
+    </message>
+    <message>
+        <source>Toggle sidebar</source>
+        <translation>Mostrar/ocultar barra lateral</translation>
+    </message>
+    <message>
+        <source>Select at least two sessions. Typing and pasting in any selected session will be sent to all selected sessions. Click Synchronize input again to stop.</source>
+        <translation>Selecione pelo menos duas sessões. O que você digitar ou colar em qualquer uma delas será enviado a todas as selecionadas. Clique em Sincronizar entrada novamente para parar.</translation>
+    </message>
+    <message>
+        <source>Pane %1: %2</source>
+        <translation>Painel %1: %2</translation>
+    </message>
+    <message>
+        <source>Stop synchronization (%1)</source>
+        <translation>Parar sincronização (%1)</translation>
+    </message>
+    <message>
+        <source>Group name</source>
+        <translation>Nome do grupo</translation>
+    </message>
+    <message>
+        <source>Choose the open sessions to save with this panel layout:</source>
+        <translation>Escolha as sessões abertas para salvar com esta disposição de painéis:</translation>
+    </message>
+    <message>
+        <source>Save group</source>
+        <translation>Salvar grupo</translation>
+    </message>
+    <message>
+        <source>Open group</source>
+        <translation>Abrir grupo</translation>
+    </message>
+    <message>
+        <source>Delete group</source>
+        <translation>Excluir grupo</translation>
+    </message>
+    <message>
+        <source>Replace the saved group %1?</source>
+        <translation>Substituir o grupo salvo %1?</translation>
+    </message>
+    <message>
+        <source>Equalize sizes</source>
+        <translation>Igualar tamanhos</translation>
+    </message>
+    <message>
+        <source>Single pane</source>
+        <translation>Painel único</translation>
+    </message>
+    <message>
+        <source>Choose synchronized sessions</source>
+        <translation>Escolher sessões sincronizadas</translation>
+    </message>
+    <message>
+        <source>Input synchronized</source>
+        <translation>Entrada sincronizada</translation>
+    </message>
+    <message>
+        <source>Tabs</source>
+        <translation>Abas</translation>
+    </message>
+    <message>
+        <source>Layout</source>
+        <translation>Disposição</translation>
+    </message>
+    <message>
+        <source>New group</source>
+        <translation>Novo grupo</translation>
+    </message>
+    <message>
+        <source>Manage groups</source>
+        <translation>Gerenciar grupos</translation>
+    </message>
+    <message>
+        <source>Ungrouped</source>
+        <translation>Sem grupo</translation>
+    </message>
+    <message>
+        <source>No saved groups</source>
+        <translation>Nenhum grupo salvo</translation>
+    </message>
+    <message>
+        <source>Panel group</source>
+        <translation>Grupo de painéis</translation>
+    </message>
+    <message>
+        <source>Close panel group</source>
+        <translation>Fechar grupo de painéis</translation>
+    </message>
+    <message>
+        <source>Disconnect the sessions in group %1 and close it?</source>
+        <translation>Desconectar as sessões do grupo %1 e fechá-lo?</translation>
+    </message>
+    <message>
+        <source>Rename group</source>
+        <translation>Renomear grupo</translation>
+    </message>
+    <message>
+        <source>Close group</source>
+        <translation>Fechar grupo</translation>
+    </message>
+    <message>
+        <source>A saved group with this name already exists.</source>
+        <translation>Já existe um grupo salvo com este nome.</translation>
+    </message>
+    <message>
+        <source>An open group with this name already exists.</source>
+        <translation>Já existe um grupo aberto com este nome.</translation>
+    </message>
+    <message>
+        <source>Choose the open tabs to move into the new group. Their sessions stay connected.</source>
+        <translation>Escolha as abas abertas para mover ao novo grupo. Suas sessões continuarão conectadas.</translation>
+    </message>
+    <message>
+        <source>Save current selection</source>
+        <translation>Salvar seleção atual</translation>
+    </message>
+    <message>
+        <source>Saved groups</source>
+        <translation>Grupos salvos</translation>
+    </message>
+    <message>
+        <source>Sessions in the saved group</source>
+        <translation>Sessões do grupo salvo</translation>
+    </message>
+    <message>
+        <source>%1 sessions</source>
+        <translation>%1 sessões</translation>
     </message>
 </context>
 <context>
@@ -4382,12 +4522,12 @@ Versão atual: %2</translation>
         <translation>Bloquear aplicativo</translation>
     </message>
     <message>
-        <source>Toggle split view</source>
-        <translation>Alternar visualização dividida</translation>
+        <source>Split left/right</source>
+        <translation>Dividir esquerda/direita</translation>
     </message>
     <message>
-        <source>Toggle grid view</source>
-        <translation>Alternar visualização em grade</translation>
+        <source>Arrange tabs in a grid</source>
+        <translation>Organizar abas em grade</translation>
     </message>
     <message>
         <source>Move tab to other pane</source>

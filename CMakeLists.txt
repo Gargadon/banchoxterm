@@ -264,6 +264,7 @@ target_link_libraries(banchoxterm
 # the local shells via startShellProgram().
 set(QTQ_LIB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib)
 include(cmake/PatchQTermWidgetSearch.cmake)
+include(cmake/PatchQTermWidgetBackground.cmake)
 
 set(QTQ_SOURCES
     ${QTQ_LIB}/BlockArray.cpp
@@ -284,7 +285,8 @@ set(QTQ_SOURCES
     ${QTQ_LIB}/Session.cpp
     ${QTQ_LIB}/ShellCommand.cpp
     ${QTQ_LIB}/TerminalCharacterDecoder.cpp
-    ${QTQ_LIB}/TerminalDisplay.cpp
+    ${BANCHO_TERMINAL_DISPLAY_SOURCE}
+    ${QTQ_LIB}/TerminalDisplay.h
     ${QTQ_LIB}/tools.cpp
     ${QTQ_LIB}/Vt102Emulation.cpp
 )

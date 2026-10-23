@@ -79,8 +79,8 @@ programs, including nano and readline:
 | Copy / paste | `Ctrl+Shift+C` / `Ctrl+Shift+V` |
 | Zoom in / out | `Ctrl+Shift++` / `Ctrl+Shift+-` |
 | Command palette | `Ctrl+Shift+P` |
-| Toggle split view | `Ctrl+Shift+O` |
-| Toggle grid view | `Ctrl+Alt+Shift+G` |
+| Split left/right | `Ctrl+Shift+O` |
+| Arrange tabs in a grid | `Ctrl+Alt+Shift+G` |
 | Move tab to other pane | `Ctrl+Alt+Shift+M` |
 | Detach tab | `Ctrl+Alt+Shift+D` |
 | Lock application | `Ctrl+Alt+Shift+L` |
@@ -99,6 +99,61 @@ disabled in new sessions. A compact bar provides **Restore shortcuts**, so you c
 turn it off with the mouse; the menu option also toggles it off. Other tabs,
 search fields, dialogs and menus retain their normal behavior. Copy/paste remain
 available through mouse menus. OS-reserved key combinations are outside this mode.
+
+## Panels and saved workspaces
+
+Use **Panels > Split left/right** or **Split top/bottom** to split the active
+pane. Splits can be nested in either direction, including more than four panes.
+Each press splits the active pane again. Repeated splits in the same direction
+can form three or more columns or rows; switching direction nests a split in
+the active pane. An existing background tab moves into the new pane when one
+is available. Otherwise, the new pane starts empty and keeps the existing
+session in place. Open a session there or use **Panels > Tabs > Move** to move a tab.
+Drag the separators to resize panes, or use **Equalize sizes** to reset the
+proportions. Layout and tab-management actions are in **Panels**; **View**
+contains the sidebar and theme controls.
+**Close pane** moves its sessions to another pane without disconnecting them.
+Drag a tab out of its tab bar and drop it onto an empty or occupied pane to
+move the live session there. Moving tabs inside their tab bar still reorders
+them. **Panels > Layout > Single pane** collects all tabs into the original
+layout, including detached sessions, without reconnecting them.
+**Panels > Layout > Grid** arranges every open tab in its own pane, with as many rows and
+columns as needed. Click it again after opening more tabs to rearrange them.
+The Split shortcut adds another left/right division each time.
+The pane layout, separator sizes, and open sessions are restored on startup.
+
+Use the **Toggle sidebar** button at the top left to hide or restore the sidebar
+to its previous width. This button remains visible when the sidebar or Ribbon
+is collapsed. The same action is available in **View**.
+
+**Panels > Synchronize input** lets you select at least two active writable
+terminal sessions. Typing, control keys, and pasted text in a selected session
+are sent to the other selected sessions, including selected background tabs.
+RDP, VNC, read-only, and disconnected sessions are excluded. A persistent status
+button shows when synchronization is enabled and stops it with one click.
+Selected tabs display a synchronization badge. Use **Choose synchronized
+sessions** from the arrow next to **Synchronize input** or the status button's dropdown to change the selection
+while synchronization is active; cancelling keeps the previous selection.
+Synchronization starts disabled each time the app opens.
+
+Use **Panels > New group** to name a group and choose which currently open tabs
+belong to it. The selected live sessions move into the group without
+reconnecting. Session-manager folders remain independent. A group tab row appears
+above the session tabs, so you can switch between groups while their connections
+stay open. Each group keeps its own pane layout and sizes. An empty initial
+ungrouped workspace disappears when all its tabs have been grouped.
+
+**Open group** lists saved groups; selecting an already open group focuses it,
+while opening a closed group reconnects its saved sessions in its own workspace.
+Right-click a group tab to save its current contents and layout, rename it, or
+close it. Closing an active group confirms disconnection and keeps its saved
+definition available. **Manage groups** previews the sessions in each saved
+group and provides open, rename, delete, and save-current-selection actions.
+
+Open groups and the selected group are restored on startup. Synchronization
+stops when switching groups, and **Single pane** collects tabs within the current
+group, including its detached sessions. Layout commands are under **Layout**;
+left/right and top/bottom split controls remain directly accessible in Panels.
 
 ## Sensitive multi-input
 
@@ -155,8 +210,10 @@ In **Configuration > Appearance**, set **Terminal background opacity** (0-100%)
 and optionally enable background blur on Windows 11 (22H2 or later) or a
 supported Linux compositor (such as KWin). Text and
 the cursor remain opaque. Restart once to enable transparency; subsequent
-opacity and blur changes apply to open terminal windows immediately. The native
-window title bar is preserved. Linux transparency requires a compositing desktop.
+opacity and blur changes apply to open terminal windows immediately. Terminal
+panes preserve these settings when switching layouts and redrawing their contents;
+the welcome screen remains opaque. The native window title bar is preserved.
+Linux transparency requires a compositing desktop.
 Linux blur requires the optional KF6WindowSystem development package at build
 time and compositor support at runtime. Settings are global and persist between
 launches. A value of 100% keeps the default opaque appearance.

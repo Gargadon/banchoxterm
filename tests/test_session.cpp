@@ -1,4 +1,5 @@
 #include <QBuffer>
+#include <QLayout>
 #include <QFileDialog>
 #include "sessiontags.h"
 #include <QPlainTextEdit>
@@ -25,6 +26,8 @@
 #include <QThread>
 #include <QScopeGuard>
 #include <QTabWidget>
+#include <QToolButton>
+#include <QMouseEvent>
 #include <QFrame>
 #include <QPushButton>
 #include <QPointer>
@@ -44,6 +47,11 @@
 #include "vtterminalwidget.h"
 #include "terminaltab.h"
 #include "mainwindow.h"
+#include "terminalpane.h"
+#include "../third_party/qtermwidget/lib/Session.h"
+#include "../third_party/qtermwidget/lib/Emulation.h"
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include "ftpclient.h"
 #include "sshconnection.h"
 #include "sessiondialog.h"
@@ -75,6 +83,7 @@
 #ifdef Q_OS_WIN
 #include "conpty.h"
 #include <qt_windows.h>
+#include <dwmapi.h>
 #endif
 #include <qtermwidget.h>
 #include <TerminalDisplay.h>
@@ -126,8 +135,8 @@ private slots:
         const int width = sidebar->width();
         const QString name = QString(400, 'a') + ".zip";
         status->setText("Downloading " + name);
-        QVERIFY(QMetaObject::invokeMethod(sidebar, "onTransferProgress", Qt::DirectConnection,
-                                          Q_ARG(QString, name), Q_ARG(qint64, 524288), Q_ARG(qint64, 1048576)));
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onTransferProgress", Qt::DirectConnection, Q_ARG(QString, name),
+                                          Q_ARG(qint64, 524288), Q_ARG(qint64, 1048576)));
         QCoreApplication::processEvents();
         QCOMPARE(sidebar->width(), width);
         QVERIFY(progress->text().contains("512.0 KB / 1.0 MB"));
@@ -177,9 +186,7 @@ private slots:
         session.type = SessionType::SSH;
         TerminalTab tab(session);
         QSignalSpy changed(&tab, &TerminalTab::remoteDirChanged);
-        auto feed = [&](const QByteArray& bytes) {
-            tab.connection()->shellDataReceived(bytes);
-        };
+        auto feed = [&](const QByteArray& bytes) { tab.connection()->shellDataReceived(bytes); };
         feed("\x1b]7;file://remote.example/srv/my%20");
         feed("project\x1b");
         feed("\\");
@@ -2811,6 +2818,863 @@ private slots:
         QCoreApplication::processEvents();
     }
 
+    void testFlexiblePanelLayout() {
+        QSettings settings;
+        const QStringList keys = {"window/paneTree", "window/openTabs", "window/tabLayoutMode", "window/sidebarHidden"};
+        QMap<QString, QVariant> previous;
+        for (const auto& key : keys) {
+            previous[key] = settings.value(key);
+            settings.remove(key);
+        }
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        const auto restore = qScopeGuard([&]() {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
+                if (it.value().isValid())
+                    settings.setValue(it.key(), it.value());
+                else
+                    settings.remove(it.key());
+        });
+        MainWindow window;
+        window.resize(1400, 900);
+        window.show();
+        auto visible = [&]() {
+            QList<QTabWidget*> result;
+            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
+                if (!pane->isHidden())
+                    result.append(pane);
+            return result;
+        };
+        QCOMPARE(visible().size(), 1);
+        Session session;
+        session.type = SessionType::Local;
+        session.name = "Panel lifecycle";
+#ifdef Q_OS_WIN
+        session.shellPath = "cmd.exe";
+#else
+        session.shellPath = "/bin/sh";
+#endif
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+        QPointer<TerminalTab> tab = window.findChild<TerminalTab*>();
+        QVERIFY(tab);
+        for (int i = 0; i < 5; ++i) {
+            QVERIFY(QMetaObject::invokeMethod(&window, i % 2 ? "splitPaneVertically" : "splitPaneHorizontally"));
+            QCoreApplication::processEvents();
+            QCOMPARE(visible().size(), i + 2);
+            QVERIFY(tab);
+            QVERIFY(tab->isVisible());
+        }
+        // Keep a second session in a dynamically created pane when switching
+        // to a preset; it must migrate into a visible pane, not disappear.
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+        auto* root = window.findChild<QSplitter*>("terminalPaneRoot");
+        QVERIFY(root);
+        auto splits = root->findChildren<QSplitter*>();
+        QVERIFY(splits.size() >= 4);
+        bool horizontal = false, vertical = false;
+        for (auto* split : splits) {
+            horizontal |= split->orientation() == Qt::Horizontal;
+            vertical |= split->orientation() == Qt::Vertical;
+            QVERIFY(!split->childrenCollapsible());
+        }
+        QVERIFY(horizontal && vertical);
+        QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+        QCoreApplication::processEvents();
+        QCOMPARE(visible().size(), 2);
+        int visibleTabs = 0;
+        for (auto* pane : visible())
+            visibleTabs += pane->count();
+        QCOMPARE(visibleTabs, 2);
+        QVERIFY(QMetaObject::invokeMethod(&window, "splitPaneHorizontally"));
+        QCoreApplication::processEvents();
+        QCOMPARE(visible().size(), 3);
+        QVERIFY(QMetaObject::invokeMethod(&window, "closePane"));
+        QCoreApplication::processEvents();
+        QCOMPARE(visible().size(), 2);
+        QVERIFY(tab && tab->isSessionActive());
+        QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+        QCoreApplication::processEvents();
+        QCOMPARE(visible().size(), 2);
+        while (visible().size() > 1) {
+            QVERIFY(QMetaObject::invokeMethod(&window, "closePane"));
+            QCoreApplication::processEvents();
+        }
+        QCOMPARE(visible().size(), 1);
+        QVERIFY(tab);
+        QVERIFY(visible().first()->indexOf(tab) >= 0);
+        auto* sidebar = window.findChild<QFrame*>("sidebarContainer");
+        QVERIFY(sidebar);
+        const int width = sidebar->width();
+        auto* toggle = window.findChild<QToolButton*>("sidebarToggleButton");
+        QVERIFY(toggle);
+        QVERIFY(toggle->isVisible());
+        QVERIFY(!sidebar->isAncestorOf(toggle));
+        QTest::mouseClick(toggle, Qt::LeftButton);
+        QVERIFY(sidebar->isHidden());
+        QVERIFY(toggle->isVisible());
+        QTest::mouseClick(toggle, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QVERIFY(!sidebar->isHidden());
+        QVERIFY(qAbs(sidebar->width() - width) <= 5);
+    }
+
+    void testFreeSplitControlsAndDragging() {
+        QSettings settings;
+        const QStringList keys = {"window/paneTree", "window/openTabs", "window/tabLayoutMode"};
+        QMap<QString, QVariant> previous;
+        for (const auto& key : keys) {
+            previous[key] = settings.value(key);
+            settings.remove(key);
+        }
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        const auto restore = qScopeGuard([&]() {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
+                if (it.value().isValid())
+                    settings.setValue(it.key(), it.value());
+                else
+                    settings.remove(it.key());
+        });
+        MainWindow window;
+        window.resize(1600, 1000);
+        window.show();
+        auto panes = [&]() {
+            QList<QTabWidget*> result;
+            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
+                if (!pane->isHidden())
+                    result.append(pane);
+            return result;
+        };
+        Session session;
+        session.type = SessionType::Local;
+#ifdef Q_OS_WIN
+        session.shellPath = "cmd.exe";
+#else
+        session.shellPath = "/bin/sh";
+#endif
+        for (int i = 0; i < 6; ++i) {
+            session.name = QString("Free split %1").arg(i);
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+        }
+        const auto terminals = window.findChildren<TerminalTab*>();
+        auto* lateral = window.findChild<QAction*>("shortcut_toggleSplit");
+        auto* horizontal = window.findChild<QAction*>("splitPaneVertically");
+        auto* equalize = window.findChild<QAction*>("equalizePaneSizes");
+        QVERIFY(lateral && horizontal && equalize);
+        lateral->trigger();
+        lateral->trigger();
+        QCoreApplication::processEvents();
+        QCOMPARE(panes().size(), 3);
+        auto* root = window.findChild<QSplitter*>("terminalPaneRoot");
+        QCOMPARE(root->count(), 3);
+        QCOMPARE(root->orientation(), Qt::Horizontal);
+        for (auto* pane : panes())
+            QVERIFY(pane->currentWidget());
+        QTest::qWait(50);
+        const int before = root->sizes()[0];
+        auto* handle = root->handle(1);
+        const QPoint center = handle->rect().center();
+        const QPoint global = handle->mapToGlobal(center);
+        QMouseEvent press(QEvent::MouseButtonPress, QPointF(center), QPointF(global), Qt::LeftButton, Qt::LeftButton,
+                          Qt::NoModifier);
+        QApplication::sendEvent(handle, &press);
+        // Send a drag with the left button held explicitly. The offscreen
+        // backend does not synthesize native pointer motion from QCursor.
+        QMouseEvent drag(QEvent::MouseMove, QPointF(center + QPoint(80, 0)), QPointF(global + QPoint(80, 0)),
+                         Qt::NoButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(handle, &drag);
+        QMouseEvent release(QEvent::MouseButtonRelease, QPointF(handle->mapFromGlobal(global + QPoint(80, 0))),
+                            QPointF(global + QPoint(80, 0)), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+        QApplication::sendEvent(handle, &release);
+        QVERIFY(qAbs(root->sizes()[0] - before) > 20);
+        equalize->trigger();
+        QCoreApplication::processEvents();
+        const auto equal = root->sizes();
+        QVERIFY(qAbs(equal[0] - equal[1]) <= 2);
+        QVERIFY(qAbs(equal[1] - equal[2]) <= 2);
+        horizontal->trigger();
+        horizontal->trigger();
+        lateral->trigger();
+        QCoreApplication::processEvents();
+        QCOMPARE(panes().size(), 6);
+        for (auto* pane : panes())
+            QCOMPARE(pane->count(), 1);
+        for (auto* terminal : terminals)
+            QVERIFY(terminal->isVisible());
+        QCOMPARE(window.findChildren<TerminalTab*>().size(), 6);
+        bool vertical = false;
+        for (auto* split : root->findChildren<QSplitter*>())
+            vertical |= split->orientation() == Qt::Vertical && split->count() >= 2;
+        QVERIFY(vertical);
+    }
+
+    void testGridDistributesAllTabsWithTransparency() {
+        QSettings settings;
+        const QStringList keys = {"window/paneTree", "window/openTabs", "window/tabLayoutMode",
+                                  "terminal/backgroundOpacity", "terminal/backgroundBlur"};
+        QMap<QString, QVariant> previous;
+        for (const auto& key : keys) {
+            previous[key] = settings.value(key);
+            settings.remove(key);
+        }
+        const auto restore = qScopeGuard([&]() {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
+                if (it.value().isValid())
+                    settings.setValue(it.key(), it.value());
+                else
+                    settings.remove(it.key());
+        });
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        settings.setValue("terminal/backgroundOpacity", 50);
+        settings.setValue("terminal/backgroundBlur", true);
+        MainWindow window;
+        window.resize(1600, 1000);
+        window.show();
+        QTest::qWait(50);
+        QVERIFY(window.testAttribute(Qt::WA_TranslucentBackground));
+        auto* welcome = window.findChild<QWidget*>("welcomeScreen");
+        QVERIFY(welcome && welcome->isVisible());
+        const auto welcomeImage = window.grab().toImage();
+        const auto welcomePixel = welcomeImage.pixelColor(welcome->mapTo(&window, QPoint(10, 10)));
+        QCOMPARE(welcomePixel.alpha(), 255);
+        Session session;
+        session.type = SessionType::Local;
+#ifdef Q_OS_WIN
+        session.shellPath = "cmd.exe";
+#else
+        session.shellPath = "/bin/sh";
+#endif
+        for (int i = 0; i < 7; ++i) {
+            session.name = QString("Grid session %1").arg(i);
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+        }
+        const auto originalTabs = window.findChildren<TerminalTab*>();
+        QCOMPARE(originalTabs.size(), 7);
+        auto verifyAlpha = [&]() {
+            const auto image = window.grab().toImage();
+            for (auto* tab : originalTabs) {
+                if (!tab->isVisible())
+                    continue;
+                auto* display = tab->getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
+                if (!display || display->height() < 10)
+                    return false;
+                const auto pixel =
+                    image.pixelColor(display->mapTo(&window, QPoint(display->width() / 2, display->height() - 5)));
+                if (pixel.alpha() == 0 || pixel.alpha() == 255)
+                    return false;
+            }
+            return true;
+        };
+        QTest::qWait(50);
+        QVERIFY(verifyAlpha());
+        QVERIFY(QMetaObject::invokeMethod(&window, "splitPaneHorizontally"));
+        QTest::qWait(50);
+        QVERIFY(verifyAlpha());
+        QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+        QTest::qWait(50);
+        int panes = 0;
+        for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
+            if (pane->isHidden())
+                continue;
+            ++panes;
+            QCOMPARE(pane->count(), 1);
+        }
+        QCOMPARE(panes, 7);
+        for (auto* tab : originalTabs)
+            QVERIFY(tab->isVisible());
+        QVERIFY(verifyAlpha());
+        // A second click arranges newly opened tabs too, rather than collapsing the grid.
+        session.name = "Eighth session";
+        QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+        QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+        QTest::qWait(50);
+        panes = 0;
+        for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
+            if (!pane->isHidden()) {
+                ++panes;
+                QCOMPARE(pane->count(), 1);
+            }
+        QCOMPARE(panes, 8);
+        QCOMPARE(window.findChildren<TerminalTab*>().size(), 8);
+        QVERIFY(verifyAlpha());
+        QVERIFY(settings.value("terminal/backgroundBlur").toBool());
+        settings.setValue("terminal/backgroundOpacity", 100);
+        TerminalAppearance::refreshWindow(&window);
+        for (auto* tab : originalTabs)
+            QVERIFY(tab->getTerminalWidget()->findChild<Konsole::TerminalDisplay*>()->testAttribute(
+                Qt::WA_OpaquePaintEvent));
+    }
+
+    void testPanelGroupsAndRestoration() {
+        QSettings settings;
+        const auto previous = settings.value("panels/groups");
+        const auto oldTree = settings.value("window/paneTree");
+        const auto oldWorkspaces = settings.value("window/panelWorkspaces");
+        settings.remove("window/panelWorkspaces");
+        const auto oldMode = settings.value("window/tabLayoutMode");
+        const auto oldTabs = settings.value("window/openTabs");
+        const auto restore = qScopeGuard([&]() {
+            settings.setValue("panels/groups", previous);
+            settings.setValue("window/paneTree", oldTree);
+            settings.setValue("window/panelWorkspaces", oldWorkspaces);
+            settings.setValue("window/tabLayoutMode", oldMode);
+            settings.setValue("window/openTabs", oldTabs);
+        });
+        settings.remove("panels/groups");
+        settings.remove("window/paneTree");
+        settings.setValue("window/tabLayoutMode", 0);
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        {
+            MainWindow window;
+            window.show();
+            Session session;
+            session.type = SessionType::Local;
+            session.name = "Saved group session";
+#ifdef Q_OS_WIN
+            session.shellPath = "cmd.exe";
+#else
+            session.shellPath = "/bin/sh";
+#endif
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+            QVERIFY(QMetaObject::invokeMethod(&window, "splitPaneVertically"));
+            QTimer::singleShot(0, &window, [&]() {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                dialog->findChild<QLineEdit*>("panelGroupName")->setText("Databases");
+                dialog->findChild<QPushButton*>("savePanelGroup")->click();
+                QCOMPARE(dialog->findChild<QListWidget*>("panelGroupsList")->count(), 1);
+                dialog->accept();
+            });
+            QVERIFY(QMetaObject::invokeMethod(&window, "managePanelGroups"));
+            const auto groups = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
+            QCOMPARE(groups.value("Databases").toObject().value("tabs").toArray().size(), 1);
+            QTimer::singleShot(0, &window, [&]() {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                dialog->findChild<QListWidget*>("panelGroupsList")->setCurrentRow(0);
+                dialog->findChild<QPushButton*>("openPanelGroup")->click();
+            });
+            QVERIFY(QMetaObject::invokeMethod(&window, "managePanelGroups"));
+            QCOMPARE(window.findChildren<TerminalTab*>().size(), 2);
+            int leaves = 0;
+            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
+                leaves += pane->isVisible();
+            QCOMPARE(leaves, 2); // Only the selected group is visible.
+            QTimer::singleShot(0, &window, []() {
+                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+                    box->done(QMessageBox::Yes);
+            });
+            QVERIFY(window.close());
+            QVERIFY(!settings.value("window/paneTree").toByteArray().isEmpty());
+        }
+        MainWindow restored;
+        restored.show();
+        QCOMPARE(restored.findChildren<TerminalTab*>().size(), 2);
+        int leaves = 0;
+        for (auto* pane : restored.findChildren<QTabWidget*>("terminalTabs"))
+            leaves += pane->isVisible();
+        QCOMPARE(leaves, 2);
+    }
+
+    void testLivePanelGroups() {
+        QSettings settings;
+        const QStringList keys = {"panels/groups",   "window/panelWorkspaces", "window/activePanelGroup",
+                                  "window/openTabs", "window/paneTree",        "window/tabLayoutMode",
+                                  "theme/mode"};
+        QMap<QString, QVariant> previous;
+        for (const auto& key : keys) {
+            previous[key] = settings.value(key);
+            settings.remove(key);
+        }
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        settings.setValue("theme/mode", "dark");
+        const auto restore = qScopeGuard([&]() {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
+                if (it.value().isValid())
+                    settings.setValue(it.key(), it.value());
+                else
+                    settings.remove(it.key());
+        });
+        {
+            MainWindow window;
+            window.resize(1500, 950);
+            window.show();
+            Session profile;
+            profile.type = SessionType::Local;
+            profile.group = "Saved-session folder";
+#ifdef Q_OS_WIN
+            profile.shellPath = "cmd.exe";
+            profile.fontFamily = "Consolas";
+#else
+            profile.shellPath = "/bin/sh";
+#endif
+            for (int i = 0; i < 3; ++i) {
+                profile.name = QString("Database %1").arg(i + 1);
+                QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, profile)));
+            }
+            const auto original = window.findChildren<TerminalTab*>();
+            QList<QPointer<TerminalTab>> tracked;
+            for (auto* tab : original)
+                tracked.append(tab);
+            QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+            QTimer::singleShot(0, &window, [&]() {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                QCOMPARE(dialog->objectName(), QString("createPanelGroupDialog"));
+                dialog->findChild<QLineEdit*>("newPanelGroupName")->setText("Databases");
+                auto* sessions = dialog->findChild<QListWidget*>("newPanelGroupSessions");
+                QCOMPARE(sessions->count(), 3);
+                sessions->item(2)->setCheckState(Qt::Unchecked);
+                dialog->findChild<QPushButton*>("createPanelGroupSave")->click();
+            });
+            window.findChild<QAction*>("newPanelGroup")->trigger();
+            QCoreApplication::processEvents();
+            auto* groups = window.findChild<QTabBar*>("panelGroupTabBar");
+            QVERIFY(groups);
+            QCOMPARE(groups->count(), 2);
+            QCOMPARE(groups->currentIndex(), 1);
+            QCOMPARE(groups->tabText(1), QString("Databases"));
+            QVERIFY(groups->isVisible());
+            QCOMPARE(window.findChildren<TerminalTab*>().size(), 3);
+            QVERIFY(original[0]->isVisible() && original[1]->isVisible());
+            QVERIFY(!original[2]->isVisible());
+            for (auto* tab : original)
+                QCOMPARE(tab->session().group, profile.group);
+            const auto saved = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
+            QCOMPARE(saved.value("Databases").toObject().value("tabs").toArray().size(), 2);
+            QTimer::singleShot(0, &window, []() {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                QCOMPARE(dialog->findChild<QListWidget*>()->count(), 2);
+                dialog->accept();
+            });
+            auto* synchronize = window.findChild<QAction*>("synchronizePanels");
+            synchronize->trigger();
+            QVERIFY(synchronize->isChecked());
+            groups->setCurrentIndex(0);
+            QCoreApplication::processEvents();
+            QVERIFY(!synchronize->isChecked()); // Hidden groups must not receive synchronized typing.
+            QVERIFY(original[2]->isVisible());
+            QVERIFY(!original[0]->isVisible() && !original[1]->isVisible());
+            auto openSaved = [&]() {
+                auto* menu = window.findChild<QAction*>("openSavedPanelGroup")->menu();
+                for (auto* action : menu->actions())
+                    if (action->text() == "Databases") {
+                        action->trigger();
+                        return true;
+                    }
+                return false;
+            };
+            QVERIFY(openSaved());
+            QCOMPARE(groups->currentIndex(), 1);
+            QCOMPARE(groups->count(), 2);
+            QCOMPARE(window.findChildren<TerminalTab*>().size(), 3); // Reuse the open group, not duplicate connections.
+            profile.name = "Database 4";
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, profile)));
+            QVERIFY(QMetaObject::invokeMethod(&window, "saveActivePanelGroup"));
+            QCOMPARE(QJsonDocument::fromJson(settings.value("panels/groups").toByteArray())
+                         .object()
+                         .value("Databases")
+                         .toObject()
+                         .value("tabs")
+                         .toArray()
+                         .size(),
+                     3);
+            TerminalTab* extra = nullptr;
+            for (auto* tab : window.findChildren<TerminalTab*>())
+                if (tab->session().name == "Database 4")
+                    extra = tab;
+            QVERIFY(extra);
+            const QString owner = extra->property("panelGroupId").toString();
+            auto moveToGroup = [&](int index) {
+                auto* source = qobject_cast<QTabWidget*>(extra->parentWidget()->parentWidget());
+                PaneTabMimeData payload(source, extra);
+                const QPoint point = groups->tabRect(index).center();
+                QDragEnterEvent enter(point, Qt::MoveAction, &payload, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(groups, &enter);
+                QDropEvent drop(QPointF(point), Qt::MoveAction, &payload, Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(groups, &drop);
+                return enter.isAccepted() && drop.isAccepted();
+            };
+            QVERIFY(moveToGroup(0));
+            QVERIFY(extra->property("panelGroupId").toString() != owner);
+            QVERIFY(moveToGroup(1));
+            QCOMPARE(extra->property("panelGroupId").toString(), owner);
+            window.findChild<QTabWidget*>("ribbonTabs")->setCurrentIndex(1);
+            QTest::qWait(100);
+            const QString screenshot = qEnvironmentVariable("BANCHO_PANEL_GROUP_SCREENSHOT");
+            if (!screenshot.isEmpty())
+                QVERIFY(window.grab().save(screenshot));
+            groups->setCurrentIndex(0);
+            QTimer::singleShot(0, &window, []() {
+                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+                    box->done(QMessageBox::Yes);
+            });
+            QVERIFY(QMetaObject::invokeMethod(&window, "closePanelGroup", Q_ARG(int, 1)));
+            QCOMPARE(groups->count(), 1);
+            QVERIFY(!groups->isVisible()); // Only the ungrouped workspace remains.
+            QVERIFY(!tracked[0] && !tracked[1] && tracked[2]);
+            QCOMPARE(window.findChildren<TerminalTab*>().size(), 1);
+            QVERIFY(openSaved());
+            QCOMPARE(groups->count(), 2);
+            QCOMPARE(window.findChildren<TerminalTab*>().size(), 4);
+            QTimer::singleShot(0, &window, []() {
+                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+                    box->done(QMessageBox::Yes);
+            });
+            QVERIFY(window.close());
+        }
+        MainWindow restored;
+        restored.show();
+        auto* groups = restored.findChild<QTabBar*>("panelGroupTabBar");
+        QCOMPARE(groups->count(), 2);
+        QCOMPARE(groups->currentIndex(), 1);
+        QCOMPARE(groups->tabText(1), QString("Databases"));
+        QCOMPARE(restored.findChildren<TerminalTab*>().size(), 4);
+        groups->setCurrentIndex(0);
+        QCoreApplication::processEvents();
+        int visible = 0;
+        for (auto* tab : restored.findChildren<TerminalTab*>())
+            visible += tab->isVisible();
+        QCOMPARE(visible, 1);
+    }
+
+    void testGroupFromAllOpenTabs() {
+        QSettings settings;
+        const QStringList keys = {"panels/groups", "window/panelWorkspaces", "window/openTabs", "window/paneTree",
+                                  "window/tabLayoutMode"};
+        QMap<QString, QVariant> previous;
+        for (const auto& key : keys) {
+            previous[key] = settings.value(key);
+            settings.remove(key);
+        }
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        const auto restore = qScopeGuard([&]() {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
+                if (it.value().isValid())
+                    settings.setValue(it.key(), it.value());
+                else
+                    settings.remove(it.key());
+        });
+        MainWindow window;
+        window.show();
+        Session profile;
+        profile.type = SessionType::Local;
+#ifdef Q_OS_WIN
+        profile.shellPath = "cmd.exe";
+#else
+        profile.shellPath = "/bin/sh";
+#endif
+        for (int i = 0; i < 2; ++i) {
+            profile.name = QString("Home %1").arg(i);
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, profile)));
+        }
+        const auto original = window.findChildren<TerminalTab*>();
+        QTimer::singleShot(0, &window, []() {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->findChild<QLineEdit*>("newPanelGroupName")->setText("Home");
+            dialog->findChild<QPushButton*>("createPanelGroupSave")->click();
+        });
+        window.findChild<QAction*>("newPanelGroup")->trigger();
+        QCoreApplication::processEvents();
+        auto* groups = window.findChild<QTabBar*>("panelGroupTabBar");
+        QCOMPARE(groups->count(), 1);
+        QCOMPARE(groups->tabText(0), QString("Home"));
+        QVERIFY(groups->isVisible());
+        QCOMPARE(window.findChildren<TerminalTab*>().size(), 2);
+        for (auto* tab : original)
+            QVERIFY(window.findChildren<TerminalTab*>().contains(tab));
+        QTimer::singleShot(0, &window, []() {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            auto* list = dialog->findChild<QListWidget*>("panelGroupsList");
+            list->setCurrentRow(0);
+            QCOMPARE(dialog->findChild<QListWidget*>("savedPanelGroupSessions")->count(), 2);
+            dialog->findChild<QLineEdit*>("panelGroupName")->setText("Casa");
+            dialog->findChild<QPushButton*>("renamePanelGroup")->click();
+            dialog->accept();
+        });
+        QVERIFY(QMetaObject::invokeMethod(&window, "managePanelGroups"));
+        QCOMPARE(groups->tabText(0), QString("Casa"));
+        auto saved = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
+        QVERIFY(saved.contains("Casa") && !saved.contains("Home"));
+        QTimer::singleShot(0, &window, []() {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            dialog->findChild<QListWidget*>("panelGroupsList")->setCurrentRow(0);
+            dialog->findChild<QPushButton*>("deletePanelGroup")->click();
+            dialog->accept();
+        });
+        QVERIFY(QMetaObject::invokeMethod(&window, "managePanelGroups"));
+        QVERIFY(QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object().isEmpty());
+        QCOMPARE(window.findChildren<TerminalTab*>().size(), 2); // Deleting a saved definition keeps the live group.
+    }
+
+    void testPaneTabDropsAndSinglePane() {
+        QSettings settings;
+        const auto oldTabs = settings.value("window/openTabs");
+        const auto oldTree = settings.value("window/paneTree");
+        const auto oldMode = settings.value("window/tabLayoutMode");
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        settings.remove("window/paneTree");
+        settings.setValue("window/tabLayoutMode", 0);
+        const auto restore = qScopeGuard([&]() {
+            settings.setValue("window/openTabs", oldTabs);
+            settings.setValue("window/paneTree", oldTree);
+            settings.setValue("window/tabLayoutMode", oldMode);
+        });
+        MainWindow window;
+        window.resize(1400, 900);
+        window.show();
+        Session session;
+        session.type = SessionType::Local;
+#ifdef Q_OS_WIN
+        session.shellPath = "cmd.exe";
+#else
+        session.shellPath = "/bin/sh";
+#endif
+        for (int i = 0; i < 3; ++i) {
+            session.name = QString("Drag session %1").arg(i);
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+        }
+        const auto tabs = window.findChildren<TerminalTab*>();
+        for (int i = 0; i < 3; ++i)
+            QVERIFY(QMetaObject::invokeMethod(&window, "splitPaneHorizontally"));
+        QCoreApplication::processEvents();
+        QTabWidget* empty = nullptr;
+        QTabWidget* source = nullptr;
+        QTabWidget* occupied = nullptr;
+        auto* tab = tabs.first();
+        for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
+            if (pane->isHidden())
+                continue;
+            if (pane->count() == 0)
+                empty = pane;
+            else if (pane->indexOf(tab) >= 0)
+                source = pane;
+            else
+                occupied = pane;
+        }
+        QVERIFY(empty && source && occupied);
+        const QString tooltip = source->tabToolTip(source->indexOf(tab));
+        auto drop = [&](QTabWidget* from, QWidget* target) {
+            PaneTabMimeData payload(from, tab);
+            // Native drag backends can wrap MIME data; the live token must survive that transport.
+            QMimeData transport;
+            transport.setData("application/x-banchoxterm-pane-tab", payload.data("application/x-banchoxterm-pane-tab"));
+            const QPoint point = target->rect().center();
+            QDragEnterEvent enter(point, Qt::MoveAction, &transport, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &enter);
+            if (!enter.isAccepted())
+                return false;
+            QDropEvent event(QPointF(point), Qt::MoveAction, &transport, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &event);
+            return event.isAccepted() && event.dropAction() == Qt::MoveAction;
+        };
+        QVERIFY(drop(source, empty));
+        QCOMPARE(source->count(), 0);
+        QCOMPARE(empty->currentWidget(), tab);
+        QCOMPARE(empty->tabToolTip(0), tooltip);
+        // Dropping over terminal content must also work, not only over a tab bar.
+        auto* content = qobject_cast<TerminalTab*>(occupied->currentWidget());
+        QVERIFY(content);
+        QVERIFY(drop(empty, content->getTerminalWidget()->findChild<Konsole::TerminalDisplay*>()));
+        QCOMPARE(empty->count(), 0);
+        QCOMPARE(occupied->currentWidget(), tab);
+        QCOMPARE(occupied->count(), 2);
+        // A foreign MIME payload cannot impersonate one of our in-process tabs.
+        QMimeData foreign;
+        foreign.setData("application/x-banchoxterm-pane-tab", "1");
+        QDragEnterEvent invalid(QPoint(10, 10), Qt::MoveAction, &foreign, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(empty, &invalid);
+        QVERIFY(!invalid.isAccepted());
+        QVERIFY(QMetaObject::invokeMethod(&window, "detachCurrentTab"));
+        auto* single = window.findChild<QAction*>("restoreSinglePane");
+        QVERIFY(single);
+        single->trigger();
+        QCoreApplication::processEvents();
+        int visible = 0;
+        for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
+            if (!pane->isHidden()) {
+                ++visible;
+                QCOMPARE(pane->count(), 3);
+                for (auto* original : tabs)
+                    QVERIFY(pane->indexOf(original) >= 0);
+            }
+        QCOMPARE(visible, 1);
+        QCOMPARE(window.findChildren<TerminalTab*>().size(), 3);
+    }
+
+    void testRealtimeSynchronizationSelection() {
+        QSettings settings;
+        const auto oldTabs = settings.value("window/openTabs");
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        const auto restore = qScopeGuard([&]() { settings.setValue("window/openTabs", oldTabs); });
+        MainWindow window;
+        window.show();
+        QList<TerminalTab*> tabs;
+        for (int i = 0; i < 4; ++i) {
+            Session session;
+            session.type = SessionType::Local;
+            session.name = QString("RT %1").arg(i);
+            session.readOnly = i == 3;
+#ifdef Q_OS_WIN
+            session.shellPath = "cmd.exe";
+#else
+            session.shellPath = "/bin/sh";
+#endif
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+            for (auto* tab : window.findChildren<TerminalTab*>())
+                if (!tabs.contains(tab))
+                    tabs.append(tab);
+        }
+        QTest::qWait(200);
+        auto* sync = window.findChild<QAction*>("synchronizePanels");
+        auto* choose = window.findChild<QAction*>("chooseSynchronizationTargets");
+        QVERIFY(sync && choose);
+        auto select = [&](int other, bool accept) {
+            QTimer::singleShot(0, &window, [&, other, accept]() {
+                auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+                QVERIFY(dialog);
+                auto* list = dialog->findChild<QListWidget*>();
+                QCOMPARE(list->count(), 3); // Read-only sessions are excluded.
+                for (int i = 0; i < list->count(); ++i)
+                    list->item(i)->setCheckState(i == 0 || i == other ? Qt::Checked : Qt::Unchecked);
+                if (accept)
+                    dialog->accept();
+                else
+                    dialog->reject();
+            });
+        };
+        select(1, true);
+        sync->trigger();
+        QVERIFY(sync->isChecked());
+        QList<QByteArray> writes(4);
+        for (int i = 0; i < tabs.size(); ++i) {
+            auto* session = tabs[i]->getTerminalWidget()->findChild<Konsole::Session*>();
+            QVERIFY(session);
+            connect(session->emulation(), &Konsole::Emulation::sendData, &window,
+                    [&, i](const char* data, int size) { writes[i].append(data, size); });
+        }
+        const auto disconnectWrites = qScopeGuard([&]() {
+            for (auto* tab : tabs)
+                disconnect(tab->getTerminalWidget()->findChild<Konsole::Session*>()->emulation(), nullptr, &window,
+                           nullptr);
+        });
+        auto hasBadge = [](TerminalTab* tab) {
+            auto* pane = qobject_cast<QTabWidget*>(tab->parentWidget()->parentWidget());
+            QWidget* badge = pane->tabBar()->tabButton(pane->indexOf(tab), QTabBar::LeftSide);
+            return badge && badge->objectName() == "synchronizedTabBadge";
+        };
+        QVERIFY(hasBadge(tabs[0]) && hasBadge(tabs[1]));
+        QVERIFY(!hasBadge(tabs[2]) && !hasBadge(tabs[3]));
+        auto* pane = qobject_cast<QTabWidget*>(tabs[0]->parentWidget()->parentWidget());
+        QVERIFY(pane);
+        pane->setCurrentWidget(tabs[0]);
+        auto* display = tabs[0]->getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
+        QTest::keyClicks(display, "xy"); // No Enter: synchronization is per keystroke.
+        QCOMPARE(writes[0], QByteArray("xy"));
+        QCOMPARE(writes[1], QByteArray("xy"));
+        QVERIFY(writes[2].isEmpty() && writes[3].isEmpty());
+        QApplication::clipboard()->setText("pasted");
+        tabs[0]->pasteSelection();
+        QCOMPARE(writes[0], QByteArray("xypasted"));
+        QCOMPARE(writes[1], writes[0]);
+        select(2, false);
+        choose->trigger();
+        QTest::keyClicks(display, "a");
+        QCOMPARE(writes[1], writes[0]); // Cancelling preserves the previous selection.
+        QVERIFY(writes[2].isEmpty());
+        select(2, true);
+        choose->trigger();
+        QVERIFY(hasBadge(tabs[0]) && hasBadge(tabs[2]));
+        QVERIFY(!hasBadge(tabs[1]));
+        // Selection follows live sessions when they are rearranged or merged.
+        QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+        QCoreApplication::processEvents();
+        window.findChild<QAction*>("restoreSinglePane")->trigger();
+        QCoreApplication::processEvents();
+        QVERIFY(hasBadge(tabs[0]) && hasBadge(tabs[2]));
+        QVERIFY(!hasBadge(tabs[1]));
+        for (auto& write : writes)
+            write.clear();
+        QTest::keyClicks(display, "z");
+        QCOMPARE(writes[0], QByteArray("z"));
+        QVERIFY(writes[1].isEmpty());
+        QCOMPARE(writes[2], QByteArray("z"));
+        QVERIFY(writes[3].isEmpty());
+        sync->trigger();
+        for (auto* tab : tabs)
+            QVERIFY(!hasBadge(tab));
+        for (auto& write : writes)
+            write.clear();
+        QTest::keyClicks(display, "q");
+        QCOMPARE(writes[0], QByteArray("q"));
+        QVERIFY(writes[1].isEmpty() && writes[2].isEmpty() && writes[3].isEmpty());
+    }
+
+    void testSynchronizedPanelInput() {
+#ifdef Q_OS_WIN
+        QSKIP("Uses /bin/sh to verify shell input end to end.");
+#else
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        QSettings settings;
+        const auto oldTabs = settings.value("window/openTabs");
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        const auto restore = qScopeGuard([&]() { settings.setValue("window/openTabs", oldTabs); });
+        MainWindow window;
+        window.show();
+        QList<TerminalTab*> tabs;
+        for (int i = 0; i < 3; ++i) {
+            Session session;
+            session.type = SessionType::Local;
+            session.name = QString("Sync %1").arg(i);
+            session.shellPath = "/bin/sh";
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
+            for (auto* tab : window.findChildren<TerminalTab*>())
+                if (!tabs.contains(tab))
+                    tabs.append(tab);
+        }
+        QTRY_VERIFY(tabs[0]->isSessionActive() && tabs[1]->isSessionActive() && tabs[2]->isSessionActive());
+        auto* sync = window.findChild<QAction*>("synchronizePanels");
+        QVERIFY(sync);
+        QTimer::singleShot(0, &window, [&]() {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            auto* list = dialog->findChild<QListWidget*>();
+            QCOMPARE(list->count(), 3);
+            for (int i = 0; i < list->count(); ++i)
+                list->item(i)->setCheckState(i < 2 ? Qt::Checked : Qt::Unchecked);
+            dialog->accept();
+        });
+        sync->trigger();
+        QVERIFY(sync->isChecked());
+        auto* pane = qobject_cast<QTabWidget*>(tabs[0]->parentWidget()->parentWidget());
+        QVERIFY(pane);
+        pane->setCurrentWidget(tabs[0]);
+        auto* display = tabs[0]->getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
+        QVERIFY(display);
+        const QString path = directory.filePath("broadcast.txt");
+        const QString command = QString("printf x >> '%1'").arg(path);
+        QTest::keyClicks(display, command);
+        QTest::keyClick(display, Qt::Key_Return);
+        auto contents = [&]() {
+            QFile file(path);
+            return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+        };
+        QTRY_COMPARE_WITH_TIMEOUT(contents(), QByteArray("xx"), 3000);
+        QApplication::clipboard()->setText(command);
+        tabs[0]->pasteSelection();
+        QTest::keyClick(display, Qt::Key_Return);
+        QTRY_COMPARE_WITH_TIMEOUT(contents(), QByteArray("xxxx"), 3000);
+        sync->trigger();
+        QVERIFY(!sync->isChecked());
+        QTest::keyClicks(display, command);
+        QTest::keyClick(display, Qt::Key_Return);
+        QTRY_COMPARE_WITH_TIMEOUT(contents(), QByteArray("xxxxx"), 3000);
+#endif
+    }
+
     void testMainWindowStartupShutdown() {
         QTemporaryDir configDir;
         QVERIFY(configDir.isValid());
@@ -2854,6 +3718,21 @@ private slots:
         const QString screenshotPath = qEnvironmentVariable("BANCHO_WELCOME_SCREENSHOT");
         if (!screenshotPath.isEmpty())
             QVERIFY(window.grab().save(screenshotPath));
+
+        auto* local = welcome->findChild<QPushButton*>("welcomeSecondaryButton");
+        auto verifyHitTarget = [&]() {
+            QWidget* hit = QApplication::widgetAt(local->mapToGlobal(local->rect().center()));
+            return hit == local || (hit && local->isAncestorOf(hit));
+        };
+        QVERIFY(verifyHitTarget());
+        // Rebuilding an empty layout must not put its splitter over the welcome actions.
+        QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+        QCoreApplication::processEvents();
+        QVERIFY(verifyHitTarget());
+        QTest::mouseClick(window.windowHandle(), Qt::LeftButton, Qt::NoModifier,
+                          local->mapTo(&window, local->rect().center()));
+        QTRY_VERIFY(!welcome->isVisible());
+        QCOMPARE(window.findChildren<TerminalTab*>().size(), 1);
     }
 
     void testWelcomeViewAllSessions() {
@@ -3492,6 +4371,121 @@ private slots:
         QVERIFY(!window.property("terminalBlurActive").toBool());
     }
 
+    void testNativeReorganizedTerminalGlass() {
+#ifdef Q_OS_WIN
+        if (QApplication::platformName() != "windows")
+            QSKIP("Requires the native Windows compositor.");
+        QSettings settings;
+        const QStringList keys = {
+            "window/panelWorkspaces",     "window/openTabs",         "window/paneTree", "window/tabLayoutMode",
+            "terminal/backgroundOpacity", "terminal/backgroundBlur", "theme/mode"};
+        QMap<QString, QVariant> previous;
+        for (const auto& key : keys) {
+            previous[key] = settings.value(key);
+            settings.remove(key);
+        }
+        const auto restore = qScopeGuard([&]() {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
+                if (it.value().isValid())
+                    settings.setValue(it.key(), it.value());
+                else
+                    settings.remove(it.key());
+        });
+        settings.setValue("window/openTabs", QByteArray("[]"));
+        settings.setValue("terminal/backgroundOpacity", 50);
+        settings.setValue("terminal/backgroundBlur", false);
+        settings.setValue("theme/mode", "dark");
+        QWidget background;
+        const QRect available = QApplication::primaryScreen()->availableGeometry();
+        background.setWindowFlag(Qt::WindowStaysOnTopHint);
+        background.setGeometry(available);
+        background.setAutoFillBackground(true);
+        background.show();
+        MainWindow window;
+        window.setWindowFlag(Qt::WindowStaysOnTopHint);
+        window.setGeometry(available.adjusted(20, 50, -20, -20));
+        window.show();
+        window.raise();
+        window.activateWindow();
+        window.findChild<QAction*>("toggleSidebar")->trigger();
+        Session profile;
+        profile.type = SessionType::Local;
+        profile.shellPath = "cmd.exe";
+        profile.fontFamily = "Consolas";
+        for (int i = 0; i < 3; ++i) {
+            profile.name = QString("Glass %1").arg(i);
+            QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, profile)));
+        }
+        auto contrast = [&](const char* stage) {
+            QTest::qWait(300);
+            QList<QRect> areas;
+            for (auto* tab : window.findChildren<TerminalTab*>()) {
+                if (!tab->isVisible())
+                    continue;
+                auto* display = tab->getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
+                const QRect rect(display->mapToGlobal(QPoint()), display->size());
+                const QRect clipped = rect.intersected(available);
+                if (clipped.width() > 80 && clipped.height() > 100)
+                    areas.append(QRect(clipped.topLeft() + QPoint(20, qMin(150, clipped.height() / 2)), QSize(20, 20)));
+            }
+            if (areas.isEmpty())
+                return false;
+            auto capture = [&](const QColor& color) {
+                QPalette palette = background.palette();
+                palette.setColor(QPalette::Window, color);
+                background.setPalette(palette);
+                background.update();
+                QTest::qWait(250);
+                QList<QColor> samples;
+                for (const auto& area : areas) {
+                    const auto image =
+                        window.screen()->grabWindow(0, area.x(), area.y(), area.width(), area.height()).toImage();
+                    if (image.isNull())
+                        return QList<QColor>{};
+                    samples.append(image.pixelColor(image.width() / 2, image.height() / 2));
+                }
+                return samples;
+            };
+            const auto red = capture(Qt::red);
+            const auto blue = capture(Qt::blue);
+            if (red.size() != areas.size() || blue.size() != areas.size())
+                return false;
+            for (int i = 0; i < red.size(); ++i) {
+                qDebug() << stage << i << red[i] << blue[i];
+                if (red[i].red() - blue[i].red() < 20 || blue[i].blue() - red[i].blue() < 20)
+                    return false;
+            }
+            return true;
+        };
+        QVERIFY(contrast("initial"));
+        QVERIFY(QMetaObject::invokeMethod(&window, "splitPaneHorizontally"));
+        for (auto* tab : window.findChildren<TerminalTab*>())
+            tab->getTerminalWidget()->feedData(QByteArrayLiteral("\x1b[48;2;12;12;12m\x1b[2J"));
+        QVERIFY(contrast("split"));
+        QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+        QVERIFY(contrast("grid"));
+        window.findChild<QAction*>("restoreSinglePane")->trigger();
+        QVERIFY(contrast("single"));
+        window.showMaximized();
+        QVERIFY(contrast("maximized"));
+        if (TerminalAppearance::blurSupported()) {
+            settings.setValue("terminal/backgroundBlur", true);
+            TerminalAppearance::refreshWindow(&window);
+            QVERIFY(window.property("terminalBlurActive").toBool());
+            QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
+            QTest::qWait(300);
+            QVERIFY(window.property("terminalBlurActive").toBool());
+            int backdrop = 0;
+            const HRESULT result =
+                DwmGetWindowAttribute(reinterpret_cast<HWND>(window.winId()), 38, &backdrop, sizeof(backdrop));
+            QVERIFY(SUCCEEDED(result));
+            QCOMPARE(backdrop, 3);
+        }
+#else
+        QSKIP("Windows-specific native compositor regression.");
+#endif
+    }
+
     void testNativeTerminalBlur() {
         if (QApplication::platformName() != "windows" || !TerminalAppearance::blurSupported())
             QSKIP("Requires a visible Windows 11 desktop compositor.");
@@ -3598,6 +4592,55 @@ private slots:
         QTRY_VERIFY(!foreground.isMaximized());
     }
 
+    void testDetachedWindowKeepsItsOwnOpacity() {
+        QSettings settings;
+        const auto oldOpacity = settings.value("terminal/backgroundOpacity");
+        const auto restore = qScopeGuard([&]() {
+            if (oldOpacity.isValid())
+                settings.setValue("terminal/backgroundOpacity", oldOpacity);
+            else
+                settings.remove("terminal/backgroundOpacity");
+        });
+        settings.setValue("terminal/backgroundOpacity", 100);
+        QMainWindow owner;
+        TerminalAppearance::initializeWindow(&owner);
+        settings.setValue("terminal/backgroundOpacity", 50);
+        QMainWindow detached(&owner);
+        TerminalAppearance::initializeWindow(&detached);
+        auto* terminal = new QTermWidget(0, &detached);
+        detached.setCentralWidget(terminal);
+        terminal->startExternal();
+        TerminalAppearance::refreshWindow(&detached);
+        auto* display = terminal->findChild<Konsole::TerminalDisplay*>();
+        QVERIFY(display);
+        QVERIFY(!display->testAttribute(Qt::WA_OpaquePaintEvent));
+        TerminalAppearance::refreshWindow(&owner);
+        QVERIFY(!display->testAttribute(Qt::WA_OpaquePaintEvent));
+    }
+
+    void testTerminalResizeRefreshesImage() {
+        QTermWidget terminal(0);
+        terminal.startExternal();
+        terminal.setBlinkingCursor(false);
+        terminal.resize(420, 210);
+        terminal.show();
+        QTest::qWait(50);
+        auto* display = terminal.findChild<Konsole::TerminalDisplay*>();
+        QVERIFY(display);
+        terminal.feedData(QByteArrayLiteral("\x1b[?25l\x1b[48;2;25;60;90m\x1b[2J\x1b[Hresize"));
+        QTest::qWait(50);
+        for (const QSize size : {QSize(790, 460), QSize(310, 170), QSize(655, 335)}) {
+            terminal.resize(size);
+            terminal.layout()->activate();
+            // Capturing paints the widget, but must not be responsible for
+            // synchronizing its cached character image after a grid resize.
+            const QImage resized = display->grab().toImage();
+            display->updateImage();
+            const QImage refreshed = display->grab().toImage();
+            QCOMPARE(resized, refreshed);
+        }
+    }
+
     void testTerminalTransparency() {
         QSettings settings;
         const QVariant previous = settings.value("terminal/backgroundOpacity");
@@ -3615,6 +4658,9 @@ private slots:
         window.setCentralWidget(terminal);
         terminal->startExternal();
         terminal->setBlinkingCursor(false);
+        QFont testFont(QStringLiteral("monospace"), 18, QFont::Bold);
+        testFont.setStyleHint(QFont::TypeWriter);
+        terminal->setTerminalFont(testFont);
         window.resize(640, 320);
         window.show();
         TerminalAppearance::refreshWindow(&window);
@@ -3640,6 +4686,14 @@ private slots:
             }
         QVERIFY(translucentBackground > 100);
         QVERIFY(opaqueText > 0);
+        // Full redraws from ConPTY and terminal programs use explicit cell
+        // backgrounds. These must retain alpha just like the default palette.
+        terminal->feedData(QByteArrayLiteral("\x1b[48;2;12;12;12m\x1b[2J"));
+        window.resize(800, 450);
+        QTest::qWait(50);
+        const QImage redrawn = window.grab().toImage();
+        const int alpha = redrawn.pixelColor(terminal->mapTo(&window, QPoint(120, 80))).alpha();
+        QVERIFY(alpha > 0 && alpha < 255);
         settings.setValue("terminal/backgroundOpacity", 100);
         TerminalAppearance::refreshWindow(&window);
         QVERIFY(display->testAttribute(Qt::WA_OpaquePaintEvent));
