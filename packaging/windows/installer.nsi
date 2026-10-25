@@ -47,12 +47,13 @@ Section "Install"
   File /r "${DIST_DIR}\*"
 
   CreateDirectory "$SMPROGRAMS\BanchoXterm"
-  CreateShortcut "$SMPROGRAMS\BanchoXterm\BanchoXterm.lnk" "$INSTDIR\banchoxterm.exe"
-  CreateShortcut "$DESKTOP\BanchoXterm.lnk" "$INSTDIR\banchoxterm.exe"
+  CreateShortcut "$SMPROGRAMS\BanchoXterm\BanchoXterm.lnk" "$INSTDIR\banchoxterm.exe" "" "$INSTDIR\banchoxterm.exe" 0
+  CreateShortcut "$DESKTOP\BanchoXterm.lnk" "$INSTDIR\banchoxterm.exe" "" "$INSTDIR\banchoxterm.exe" 0
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "DisplayName" "BanchoXterm"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "DisplayIcon" '"$INSTDIR\banchoxterm.exe",0'
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "Publisher" "${PUBLISHER}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BanchoXterm" "UninstallString" '"$INSTDIR\uninstall.exe"'

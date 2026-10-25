@@ -1,6 +1,7 @@
 <!DOCTYPE RCC><RCC version="1.0">
 <qresource>
     <file>icons/logo.svg</file>
+    <file alias="icons/banchoxterm.ico">packaging/windows/banchoxterm.ico</file>
     <file>icons/about.svg</file>
     <file>icons/terminal.svg</file>
     <file>icons/server.svg</file>

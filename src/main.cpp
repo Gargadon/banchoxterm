@@ -33,7 +33,11 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("BanchoXterm");
     app.setApplicationDisplayName("BanchoXterm");
     app.setOrganizationName("BanchoXterm");
+#ifdef Q_OS_WIN
+    app.setWindowIcon(QIcon(":/icons/banchoxterm.ico"));
+#else
     app.setWindowIcon(QIcon(":/icons/logo.svg"));
+#endif
 
     AppPaths::applyPortableSettings();
 
