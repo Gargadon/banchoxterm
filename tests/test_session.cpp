@@ -2302,6 +2302,8 @@ private slots:
         QByteArray sent;
         connect(terminal, &QTermWidget::sendData, &window,
                 [&sent](const char* bytes, int size) { sent.append(bytes, size); });
+        QTest::keyClick(display, Qt::Key_Escape);
+        QCOMPARE(sent, QByteArrayLiteral("\x1b"));
         for (const auto& pair :
              {qMakePair(Qt::Key_W, char(0x17)), qMakePair(Qt::Key_F, char(0x06)), qMakePair(Qt::Key_Q, char(0x11)),
               qMakePair(Qt::Key_K, char(0x0b)), qMakePair(Qt::Key_C, char(0x03)), qMakePair(Qt::Key_D, char(0x04)),
@@ -4158,6 +4160,27 @@ private slots:
             return file.open(QIODevice::ReadOnly) && file.readAll() == expected;
         };
         QTRY_VERIFY_WITH_TIMEOUT(consoleSizeMatches(), 5000);
+#else
+        QSKIP("ConPTY is only available on Windows.");
+#endif
+    }
+
+    void testConPtyEscape() {
+#ifdef Q_OS_WIN
+        ConPty console;
+        QVERIFY(
+            console.start(QDir(QCoreApplication::applicationDirPath()).filePath("conpty_input_probe.exe"), {}, 80, 25));
+        QByteArray output;
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("INPUT_READY"), 5000);
+        QVERIFY(console.write(QByteArrayLiteral("\x1b")));
+        // Escape must arrive without needing another key to finish an ANSI sequence.
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("KEY=27 SHIFT=0 CHAR=27 CTRL=0 ALT=0"), 2000);
+        output.clear();
+        QVERIFY(console.write(QByteArrayLiteral("\x1b")));
+        QVERIFY(console.write(QByteArrayLiteral("\x1b")));
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).count("KEY=27 SHIFT=0 CHAR=27 CTRL=0 ALT=0") == 2, 2000);
+        QVERIFY(console.write(QByteArrayLiteral("\r")));
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("KEY=13 SHIFT=0"), 5000);
 #else
         QSKIP("ConPTY is only available on Windows.");
 #endif

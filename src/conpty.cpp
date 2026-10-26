@@ -204,7 +204,12 @@ bool ConPty::write(const QByteArray& data) {
     int virtualKey = 0;
     int scanCode = 0;
     int character = 0;
-    if (input == QByteArrayLiteral("\x1b[13;2u")) {
+    if (input == QByteArrayLiteral("\x1b")) {
+        // Send a physical Escape key, rather than an ambiguous ANSI prefix.
+        virtualKey = VK_ESCAPE;
+        scanCode = 1;
+        character = 27;
+    } else if (input == QByteArrayLiteral("\x1b[13;2u")) {
         virtualKey = VK_RETURN;
         scanCode = 28;
         character = 13;
@@ -222,7 +227,7 @@ bool ConPty::write(const QByteArray& data) {
         scanCode = 80;
     }
     if (virtualKey) {
-        const int state = SHIFT_PRESSED | (virtualKey == VK_RETURN ? 0 : ENHANCED_KEY);
+        const int state = virtualKey == VK_ESCAPE ? 0 : SHIFT_PRESSED | (virtualKey == VK_RETURN ? 0 : ENHANCED_KEY);
         input = QStringLiteral("\x1b[%1;%2;%3;1;%4;1_\x1b[%1;%2;%3;0;%4;1_")
                     .arg(virtualKey)
                     .arg(scanCode)

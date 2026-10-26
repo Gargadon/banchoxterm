@@ -45,8 +45,11 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        if (key.wVirtualKeyCode == VK_RETURN || key.wVirtualKeyCode == VK_LEFT) {
-            std::printf("KEY=%u SHIFT=%d\n", key.wVirtualKeyCode, (key.dwControlKeyState & SHIFT_PRESSED) != 0);
+        if (key.wVirtualKeyCode == VK_RETURN || key.wVirtualKeyCode == VK_LEFT || key.wVirtualKeyCode == VK_ESCAPE) {
+            std::printf("KEY=%u SHIFT=%d CHAR=%u CTRL=%d ALT=%d\n", key.wVirtualKeyCode,
+                        (key.dwControlKeyState & SHIFT_PRESSED) != 0, key.uChar.UnicodeChar,
+                        (key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0,
+                        (key.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0);
             std::fflush(stdout);
             if (key.wVirtualKeyCode == VK_RETURN)
                 return 0;
