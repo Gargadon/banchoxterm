@@ -61,6 +61,8 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(libssh2)
 # Keep the RFC 4335 adapter beside the application, without modifying fetched sources.
+# Both executables must link this static target: the libssh2 alias can select
+# the shared library, which does not contain these private adapter symbols.
 target_sources(libssh2_static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/sshbreak.c")
 target_include_directories(libssh2_static PRIVATE "${libssh2_SOURCE_DIR}/src")
 
@@ -247,7 +249,7 @@ target_link_libraries(banchoxterm
         Qt6::Gui
         Qt6::Network
         Qt6::SerialPort
-        libssh2
+        libssh2_static
         sodium
 )
 
@@ -529,7 +531,7 @@ target_compile_definitions(banchoxterm_tests PRIVATE SODIUM_STATIC)
 target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_VERSION="${PROJECT_VERSION}")
 target_compile_definitions(banchoxterm_tests PRIVATE BANCHO_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(banchoxterm_tests PRIVATE sodium)
-target_link_libraries(banchoxterm_tests PRIVATE libssh2)
+target_link_libraries(banchoxterm_tests PRIVATE libssh2_static)
 target_link_libraries(banchoxterm_tests PRIVATE qtermwidget6)
 
 if(TARGET KF6::WindowSystem)
