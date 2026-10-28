@@ -9,6 +9,7 @@ SftpTransferWorker::SftpTransferWorker(const Session& session, const SftpTransfe
     // touch SshConnection's atomic transfer flags and can be called directly.
     m_connection = new SshConnection();
     m_connection->setParent(this);
+    m_connection->transferConflict = request.conflict;
 }
 
 SftpTransferWorker::~SftpTransferWorker() {
@@ -36,6 +37,7 @@ void SftpTransferWorker::start() {
 }
 
 void SftpTransferWorker::onConnected() {
+    if (m_cancelRequested.load()) { finish(false, QStringLiteral("Transfer cancelled by user")); return; }
     if (m_finished)
         return;
 
@@ -61,6 +63,7 @@ void SftpTransferWorker::onTransferProgress(const QString& fileName, qint64 byte
 }
 
 void SftpTransferWorker::cancel() {
+    m_cancelRequested.store(true);
     if (m_connection)
         m_connection->cancelTransfer();
 }

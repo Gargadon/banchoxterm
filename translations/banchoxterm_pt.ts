@@ -159,6 +159,10 @@
 </context>
 <context>
     <name>MainWindow</name>
+    <message>
+        <source>Terminal bell: %1</source>
+        <translation>Alerta do terminal: %1</translation>
+    </message>
     <message><source>SSH via bastion</source><translation>SSH via bastião</translation></message>
     <message><source>Bastion: %1
 Destination: %2</source><translation>Bastião: %1
@@ -3728,6 +3732,10 @@ Tem certeza de que deseja continuar conectando e lembrar desta chave?</translati
 </context>
 <context>
     <name>TerminalTab</name>
+    <message>
+        <source>Terminal bell</source>
+        <translation>Alerta do terminal</translation>
+    </message>
     <message><source>&#13;
 [Connecting to %1 via bastion %2...]&#13;
 </source><translation>&#13;
@@ -4538,4 +4546,37 @@ Versão atual: %2</translation>
         <translation>Desanexar aba</translation>
     </message>
 </context>
+
+<context>
+<name>TransferConflict</name>
+<message><source>File already exists</source><translation>O arquivo já existe</translation></message>
+<message><source>The destination already exists:
+%1</source><translation>O destino já existe:
+%1</translation></message>
+<message><source>Overwrite</source><translation>Sobrescrever</translation></message>
+<message><source>Skip this file</source><translation>Ignorar este arquivo</translation></message>
+<message><source>Cancel transfer</source><translation>Cancelar transferência</translation></message>
+<message><source>Apply to all conflicts in this transfer</source><translation>Aplicar a todos os conflitos desta transferência</translation></message>
+<message><source>Remember for future transfers</source><translation>Lembrar para futuras transferências</translation></message>
+</context>
+
+<context>
+<name>SettingsDialog</name>
+<message><source>If the destination file exists:</source><translation>Se o arquivo de destino existir:</translation></message>
+<message><source>Ask every time</source><translation>Perguntar sempre</translation></message>
+<message><source>Overwrite</source><translation>Sobrescrever</translation></message>
+<message><source>Skip</source><translation>Ignorar</translation></message>
+</context>
+
+<context>
+<name>SftpSidebar</name>
+<message><source>File transfers</source><translation>Transferências de arquivos</translation></message>
+<message><source>Minimize</source><translation>Minimizar</translation></message>
+</context>
+
+<context>
+<name>FtpClient</name>
+<message><source>Could not check the destination file: %1</source><translation>Não foi possível verificar o arquivo de destino: %1</translation></message>
+</context>
+<context><name>SftpSidebar</name><message><source>Restore</source><translation>Restaurar</translation></message></context>
 </TS>

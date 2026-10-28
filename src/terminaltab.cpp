@@ -113,6 +113,32 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
     } else {
         m_terminal = new QTermWidget(0, this);
 
+        // QTermWidget uses NotifyBell: the application must supply the effect.
+        // Listen to the parsed event rather than scanning raw bytes (BEL also
+        // terminates OSC titles and directory reports).
+        auto* bellNotice = new QLabel(tr("Terminal bell"), m_terminal);
+        bellNotice->setObjectName("terminalBellNotice");
+        bellNotice->setAutoFillBackground(true);
+        bellNotice->setBackgroundRole(QPalette::ToolTipBase);
+        bellNotice->setForegroundRole(QPalette::ToolTipText);
+        bellNotice->setMargin(8);
+        bellNotice->setAttribute(Qt::WA_TransparentForMouseEvents);
+        bellNotice->move(8, 8);
+        bellNotice->hide();
+        auto* bellTimer = new QTimer(bellNotice);
+        bellTimer->setSingleShot(true);
+        bellTimer->setInterval(1500);
+        connect(bellTimer, &QTimer::timeout, bellNotice, &QWidget::hide);
+        connect(m_terminal, &QTermWidget::bell, this, [this, bellNotice, bellTimer]() {
+            QApplication::beep();
+            QApplication::alert(window(), 3000);
+            bellNotice->adjustSize();
+            bellNotice->show();
+            bellNotice->raise();
+            bellTimer->start();
+            emit bell();
+        });
+
         QTimer::singleShot(0, this, &TerminalTab::updateFontFromSettings);
 
         QStringList schemes = QTermWidget::availableColorSchemes();

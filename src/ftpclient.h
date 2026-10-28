@@ -1,4 +1,5 @@
 #pragma once
+#include "transferconflict.h"
 #include <QObject>
 #include <QList>
 #include <QString>
@@ -17,6 +18,7 @@ class FtpClient : public QObject {
     Q_OBJECT
 public:
     explicit FtpClient(QObject* parent = nullptr);
+    std::shared_ptr<TransferConflict> transferConflict;
     ~FtpClient() override;
 
     bool isConnected() const {
@@ -47,6 +49,7 @@ public slots:
     void renamePath(const QString& oldPath, const QString& newPath);
 
 private:
+    void uploadFileApproved(const QString& localPath, const QString& remotePath);
     struct Reply {
         int code = 0;
         QStringList lines;

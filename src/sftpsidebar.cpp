@@ -468,6 +468,58 @@ SftpSidebar::SftpSidebar(QWidget* parent) : QWidget(parent) {
 
     m_fileWatcher = new QFileSystemWatcher(this);
     connect(m_fileWatcher, &QFileSystemWatcher::fileChanged, this, &SftpSidebar::onWatchedFileChanged);
+    auto* monitor = new QDialog(window(), Qt::Tool | Qt::WindowTitleHint | Qt::WindowMinimizeButtonHint | Qt::WindowCloseButtonHint);
+    monitor->setWindowTitle(tr("File transfers"));
+    monitor->setObjectName("transferMonitor");
+    monitor->setModal(false);
+    auto* monitorLayout = new QVBoxLayout(monitor);
+    auto* summary = new QLabel(monitor);
+    summary->setWordWrap(true);
+    summary->setTextFormat(Qt::PlainText);
+    summary->setMaximumWidth(420);
+    summary->setMinimumWidth(280);
+    auto* progress = new QProgressBar(monitor);
+    auto* actions = new QHBoxLayout();
+    auto* pause = new QPushButton(tr("Pause transfer"), monitor);
+    auto* cancel = new QPushButton(tr("Cancel transfers"), monitor);
+    auto* minimize = new QPushButton(tr("Minimize"), monitor);
+    actions->addWidget(pause); actions->addWidget(cancel); actions->addWidget(minimize);
+    monitorLayout->addWidget(summary); monitorLayout->addWidget(progress); monitorLayout->addLayout(actions);
+    connect(pause, &QPushButton::clicked, this, &SftpSidebar::onToggleTransferPause);
+    connect(cancel, &QPushButton::clicked, this, &SftpSidebar::onCancelQueuedTransfers);
+    minimize->setObjectName("transferMonitorToggle");
+    connect(minimize, &QPushButton::clicked, monitor, [monitor, summary, progress, pause, cancel, minimize] {
+        const bool collapse = !summary->isHidden();
+        summary->setVisible(!collapse); progress->setVisible(!collapse);
+        pause->setVisible(!collapse); cancel->setVisible(!collapse);
+        minimize->setText(collapse ? tr("Restore") : tr("Minimize"));
+        monitor->adjustSize();
+    });
+    // Closing the monitor minimizes it, so the running job remains discoverable.
+    connect(monitor, &QDialog::rejected, monitor, [monitor, summary, minimize] {
+        if (!summary->isHidden()) minimize->click();
+        monitor->show();
+    });
+    auto* monitorTimer = new QTimer(this);
+    connect(monitorTimer, &QTimer::timeout, this, [this, monitor, summary, progress, pause, cancel] {
+        const bool active = hasActiveTransfers();
+        summary->setText(m_currentSession.host + "\n" + m_progressLabel->text() + "\n" + m_statusLabel->text());
+        progress->setRange(m_progressBar->minimum(), m_progressBar->maximum());
+        progress->setValue(m_progressBar->value());
+        pause->setText(m_pauseTransferBtn->text());
+        pause->setEnabled(active && m_pauseTransferBtn->isEnabled());
+        cancel->setEnabled(active);
+        if (active && !isVisible() && !monitor->isVisible()) {
+            monitor->adjustSize();
+            const QRect area = window()->frameGeometry();
+            monitor->move(area.bottomRight() - QPoint(monitor->width() + 24, monitor->height() + 48));
+            monitor->show();
+        } else if (!active && monitor->isVisible()) {
+            monitor->hide();
+        }
+    });
+    monitorTimer->start(250);
+    connect(this, &QObject::destroyed, monitor, &QObject::deleteLater);
 
     connect(m_upBtn, &QPushButton::clicked, this, &SftpSidebar::onParentDirClicked);
     connect(m_refreshBtn, &QPushButton::clicked, this, &SftpSidebar::onRefreshClicked);
@@ -586,6 +638,7 @@ void SftpSidebar::detachFtp() {
 }
 
 void SftpSidebar::startSession(const Session& session) {
+    if (hasActiveTransfers() && m_currentSession.id == session.id) return;
     if (session.type == SessionType::FTP) {
         detachConnection();
         m_currentSession = session;
@@ -896,6 +949,8 @@ void SftpSidebar::onCompareFoldersClicked() {
                                          : tr("Differences in local %1 and remote %2:").arg(localPath, m_currentPath),
                    &dialog);
     summary->setWordWrap(true);
+    summary->setTextFormat(Qt::PlainText);
+    summary->setMaximumWidth(420);
     layout->addWidget(summary);
     auto* list = new QListWidget(&dialog);
     if (differences.isEmpty())
@@ -1080,6 +1135,7 @@ void SftpSidebar::onUploadFolderClicked() {
             return;
         }
         if (m_ftp) {
+            beginTransferBatch();
             m_activeTransfer = {QString(), path, false, true, 0};
             m_transferActive = true;
             setTransferUi(true);
@@ -1578,6 +1634,7 @@ void SftpSidebar::onToggleTransferPause() {
 }
 
 void SftpSidebar::onCancelQueuedTransfers() {
+    m_conflict->cancelled = true;
     if (m_directoryDownloadActive) {
         m_directoryDownloadCancelled = true;
         m_transferQueue.clear();
@@ -1621,6 +1678,19 @@ void SftpSidebar::startParallelTransfers() {
         return startNextTransfer();
 
     while (!m_transferQueue.isEmpty() && m_parallelTransfers.size() < m_maxParallelTransfers) {
+        // Never open the same destination concurrently: the next file must see
+        // the completed destination before deciding whether to overwrite it.
+        const auto& next = m_transferQueue.first();
+        bool destinationBusy = false;
+        for (const auto& active : std::as_const(m_parallelTransfers)) {
+            if (next.isUpload == active.item.isUpload &&
+                (next.isUpload ? next.remotePath == active.item.remotePath : next.localPath == active.item.localPath)) {
+                destinationBusy = true;
+                break;
+            }
+        }
+        if (destinationBusy) break;
+
         if (m_transferQueue.first().isDirDownload) {
             // Directory listings use the browser connection, after existing workers finish.
             if (!m_parallelTransfers.isEmpty())
@@ -1631,6 +1701,7 @@ void SftpSidebar::startParallelTransfers() {
         }
         const TransferItem item = m_transferQueue.takeFirst();
         SftpTransferRequest request;
+        request.conflict = m_conflict;
         request.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
         request.remotePath = item.remotePath.isEmpty() ? m_currentPath : item.remotePath;
         request.localPath = item.localPath;
@@ -1667,7 +1738,7 @@ void SftpSidebar::startParallelTransfers() {
         setTransferUi(false);
         m_progressBar->hide();
         m_progressLabel->hide();
-        m_statusLabel->setText(tr("All transfers finished."));
+        m_statusLabel->setText(m_conflict->cancelled ? tr("Transfer cancelled.") : tr("All transfers finished."));
         emit requestList(m_currentPath);
         return;
     }
@@ -1683,6 +1754,12 @@ void SftpSidebar::startParallelTransfers() {
 }
 
 void SftpSidebar::finishParallelTransfer(const QString& id, bool success, const QString& error) {
+    if (error.startsWith(QStringLiteral("Transfer cancelled")) || m_conflict->cancelled) {
+        m_transferQueue.clear();
+        for (const auto& transfer : std::as_const(m_parallelTransfers))
+            if (transfer.id != id) QMetaObject::invokeMethod(transfer.worker, "cancel", Qt::DirectConnection);
+    }
+
     refreshLocalFiles();
     int index = -1;
     for (int i = 0; i < m_parallelTransfers.size(); ++i) {
@@ -1699,7 +1776,7 @@ void SftpSidebar::finishParallelTransfer(const QString& id, bool success, const 
         m_parallelTransfers.at(index).thread->quit();
     m_parallelTransfers.removeAt(index);
 
-    if (!success && !error.startsWith(QStringLiteral("Transfer cancelled")) && item.attempts < 2 && m_isConnected) {
+    if (!success && !m_conflict->cancelled && !error.startsWith(QStringLiteral("Transfer cancelled")) && item.attempts < 2 && m_isConnected) {
         TransferItem retryItem = item;
         ++retryItem.attempts;
         m_transferQueue.prepend(retryItem);
@@ -1713,6 +1790,7 @@ void SftpSidebar::finishParallelTransfer(const QString& id, bool success, const 
 }
 
 void SftpSidebar::stopParallelTransfers() {
+    m_conflict->cancelled = true;
     m_transferQueue.clear();
     m_directoryDownloadActive = false;
     m_directoryDownloadCancelled = false;
@@ -1726,12 +1804,19 @@ void SftpSidebar::stopParallelTransfers() {
     m_transferActive = false;
 }
 
+void SftpSidebar::beginTransferBatch() {
+    if (!hasActiveTransfers()) m_conflict = std::make_shared<TransferConflict>();
+    if (m_connection) m_connection->transferConflict = m_conflict;
+    if (m_ftp) m_ftp->transferConflict = m_conflict;
+}
+
 void SftpSidebar::enqueueUpload(const QStringList& localPaths) {
     if (!m_isConnected || m_directoryDownloadActive)
         return;
 
     const bool parallel = m_currentSession.type == SessionType::SSH;
 
+    beginTransferBatch();
     for (const QString& localPath : localPaths) {
         QFileInfo info(localPath);
         if (info.isDir()) {
@@ -1749,7 +1834,7 @@ void SftpSidebar::enqueueUpload(const QStringList& localPaths) {
                 m_statusLabel->setText(tr("Uploading folder %1...").arg(info.fileName()));
                 emit requestUploadDir(localPath, m_currentPath);
             } else {
-                m_transferQueue.append({QString(), localPath, false, true});
+                m_transferQueue.append({m_currentPath, localPath, false, true});
                 m_cancelTransferBtn->setEnabled(true);
                 m_cancelTransferBtn->show();
             }
@@ -1793,6 +1878,7 @@ void SftpSidebar::enqueueDownloadTo(const QStringList& remotePaths, const QStrin
 
     const bool parallel = m_currentSession.type == SessionType::SSH;
 
+    beginTransferBatch();
     int added = 0;
     for (const QString& remotePath : remotePaths) {
         QString fileName = QFileInfo(remotePath).fileName();
@@ -1801,27 +1887,6 @@ void SftpSidebar::enqueueDownloadTo(const QStringList& remotePaths, const QStrin
         if (fileName.isEmpty() || fileName == "." || fileName == ".." || fileName.contains('\\'))
             continue;
         QString localPath = QDir(destinationDir).filePath(fileName);
-        int n = 1;
-        auto destinationInUse = [this](const QString& candidate) {
-            if (QFileInfo::exists(candidate) || QFileInfo(candidate).isSymLink())
-                return true;
-            if (m_transferActive && m_activeTransfer.localPath == candidate)
-                return true;
-            for (const TransferItem& item : std::as_const(m_transferQueue))
-                if (item.localPath == candidate)
-                    return true;
-            for (const ParallelTransfer& transfer : std::as_const(m_parallelTransfers))
-                if (transfer.item.localPath == candidate)
-                    return true;
-            return false;
-        };
-        while (destinationInUse(localPath)) {
-            QFileInfo fi(remotePath);
-            const QString suffix = fi.suffix().isEmpty() ? QString() : "." + fi.suffix();
-            localPath = QDir(destinationDir).filePath(fi.completeBaseName() + QString(" (%1)").arg(n) + suffix);
-            ++n;
-        }
-
         bool isDirectory = false;
         for (const SftpFile& file : std::as_const(m_currentRemoteFiles)) {
             if (file.name == fileName) {
@@ -1879,7 +1944,7 @@ void SftpSidebar::startNextTransfer() {
         m_progressLabel->hide();
         m_cancelTransferBtn->setEnabled(false);
         m_cancelTransferBtn->hide();
-        m_statusLabel->setText(tr("All transfers finished."));
+        m_statusLabel->setText(m_conflict->cancelled ? tr("Transfer cancelled.") : tr("All transfers finished."));
         emit requestList(m_currentPath);
         return;
     }

@@ -1,4 +1,5 @@
 #pragma once
+#include "transferconflict.h"
 #include <QObject>
 #include <QByteArray>
 #include <QList>
@@ -28,7 +29,9 @@ struct X11Bridge {
 class SshConnection : public QObject {
     Q_OBJECT
 public:
+    int remoteOverwriteDecision(const QString& path);
     explicit SshConnection();
+    std::shared_ptr<TransferConflict> transferConflict;
     ~SshConnection() override;
 
     bool isConnected() const {

@@ -357,6 +357,15 @@ void FtpClient::listDirectory(const QString& path) {
 }
 
 void FtpClient::downloadFile(const QString& remotePath, const QString& localPath) {
+    if (transferConflict && (QFileInfo::exists(localPath) || QFileInfo(localPath).isSymLink())) {
+        const int choice = transferConflict->resolve(localPath);
+        if (choice != TransferConflict::Overwrite) {
+            emit operationFinished(choice == TransferConflict::Skip,
+                choice == TransferConflict::Skip ? QStringLiteral("File skipped") : QStringLiteral("Transfer cancelled by user"));
+            return;
+        }
+    }
+
     if (!m_connected)
         return;
     m_cancelTransferRequested = false;
@@ -399,6 +408,24 @@ void FtpClient::downloadFile(const QString& remotePath, const QString& localPath
 }
 
 void FtpClient::uploadFile(const QString& localPath, const QString& remotePath) {
+    if (!m_connected) return;
+    if (!transferConflict) { uploadFileApproved(localPath, remotePath); return; }
+    sendCommand("SIZE " + remotePath, [this, localPath, remotePath](const Reply& reply) {
+        if (reply.code == 213 && transferConflict) {
+            const int choice = transferConflict->resolve(remotePath);
+            if (choice != TransferConflict::Overwrite) {
+                reportUploadResult(choice == TransferConflict::Skip, choice == TransferConflict::Skip ? QStringLiteral("File skipped") : QStringLiteral("Transfer cancelled by user"));
+                return;
+            }
+        } else if (reply.code != 213 && reply.code != 550) {
+            reportUploadResult(false, tr("Could not check the destination file: %1").arg(remotePath));
+            return;
+        }
+        uploadFileApproved(localPath, remotePath);
+    });
+}
+
+void FtpClient::uploadFileApproved(const QString& localPath, const QString& remotePath) {
     if (!m_connected)
         return;
     if (!m_directoryUploadActive)

@@ -72,6 +72,7 @@ private:
     QCheckBox* m_loggingCheck = nullptr;
     QLineEdit* m_logDirEdit = nullptr;
     QSpinBox* m_parallelTransfersSpin = nullptr;
+    QComboBox* m_existingFilePolicy = nullptr;
     QCheckBox* m_monitoringCheck = nullptr;
     QSpinBox* m_monitoringIntervalSpin = nullptr;
     QCheckBox* m_masterPasswordCheck = nullptr;

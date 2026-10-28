@@ -81,6 +81,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
+    void bell();
     void userKeyInput(QKeyEvent* event, bool fromPaste);
     void userStringInput(const QString& text);
     void terminalDataReceived(const QByteArray& data);

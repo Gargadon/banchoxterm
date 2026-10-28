@@ -117,6 +117,117 @@ private:
     }
 
 private slots:
+    void testTransferContinuesWhenChangingTabs() {
+        MainWindow window;
+        auto* sidebar = window.findChild<SftpSidebar*>();
+        QVERIFY(sidebar);
+        QTemporaryDir dir;
+        auto* localPath = sidebar->findChild<QLineEdit*>("localPathEdit");
+        localPath->setText(dir.path());
+        QVERIFY(QMetaObject::invokeMethod(localPath, "returnPressed"));
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onConnectionSuccess"));
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onDirectoryListed", Qt::DirectConnection,
+            Q_ARG(QString, "/remote"), Q_ARG(QList<SftpFile>, QList<SftpFile>({{"folder", true}}))));
+        auto* tree = sidebar->findChild<QTreeWidget*>("sftpTree");
+        tree->topLevelItem(2)->setSelected(true);
+        sidebar->findChild<QPushButton*>("localDownloadButton")->click();
+        QVERIFY(sidebar->hasActiveTransfers());
+        auto* pane = window.findChild<QTabWidget*>();
+        QVERIFY(pane);
+        QVERIFY(QMetaObject::invokeMethod(&window, "onCurrentTabChanged", Qt::DirectConnection,
+            Q_ARG(QTabWidget*, pane), Q_ARG(int, -1)));
+        QVERIFY(sidebar->hasActiveTransfers());
+        auto* monitor = window.findChild<QDialog*>("transferMonitor");
+        QVERIFY(monitor);
+        QTRY_VERIFY(monitor->isVisible());
+        monitor->grab().save("build/transfer-monitor-preview.png");
+        auto* toggle = monitor->findChild<QPushButton*>("transferMonitorToggle");
+        QVERIFY(toggle);
+        const int expanded = monitor->height();
+        toggle->click();
+        QVERIFY(monitor->height() < expanded);
+        QVERIFY(sidebar->hasActiveTransfers());
+        toggle->click();
+        QVERIFY(monitor->height() >= expanded);
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onDirectoryListed", Qt::DirectConnection,
+            Q_ARG(QString, "/remote/folder"), Q_ARG(QList<SftpFile>, QList<SftpFile>())));
+        QVERIFY(!sidebar->hasActiveTransfers());
+    }
+
+    void testTransferConflictChoices() {
+        QSettings settings;
+        const QVariant original = settings.value("sftp/existingFilePolicy");
+        auto restore = qScopeGuard([&] {
+            if (original.isValid()) settings.setValue("sftp/existingFilePolicy", original);
+            else settings.remove("sftp/existingFilePolicy");
+        });
+        settings.setValue("sftp/existingFilePolicy", 0);
+        TransferConflict batch;
+        QTimer::singleShot(0, [] {
+            auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            QVERIFY(box);
+            box->checkBox()->setChecked(true);
+            box->grab().save("build/transfer-conflict-preview.png");
+            for (auto* button : box->buttons())
+                if (box->buttonRole(button) == QMessageBox::ActionRole) button->click();
+        });
+        QCOMPARE(batch.resolve("/remote/existing.txt"), int(TransferConflict::Skip));
+        QCOMPARE(batch.resolve("/remote/second.txt"), int(TransferConflict::Skip));
+        QCOMPARE(settings.value("sftp/existingFilePolicy").toInt(), 0);
+        TransferConflict permanent;
+        QTimer::singleShot(0, [] {
+            auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            QVERIFY(box);
+            for (auto* check : box->findChildren<QCheckBox*>()) check->setChecked(true);
+            for (auto* button : box->buttons())
+                if (box->buttonRole(button) == QMessageBox::AcceptRole) button->click();
+        });
+        QCOMPARE(permanent.resolve("existing.txt"), int(TransferConflict::Overwrite));
+        TransferConflict later;
+        QCOMPARE(later.resolve("other.txt"), int(TransferConflict::Overwrite));
+        {
+            SettingsDialog dialog;
+            auto* policy = dialog.findChild<QComboBox*>("existingFilePolicy");
+            QVERIFY(policy);
+            QCOMPARE(policy->currentIndex(), 1);
+            policy->setCurrentIndex(2);
+            QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept", Qt::DirectConnection));
+            QCOMPARE(settings.value("sftp/existingFilePolicy").toInt(), 2);
+            SettingsDialog reopened;
+            QCOMPARE(reopened.findChild<QComboBox*>("existingFilePolicy")->currentIndex(), 2);
+        }
+        settings.setValue("sftp/existingFilePolicy", 0);
+        TransferConflict cancelled;
+        QTimer::singleShot(0, [] {
+            auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            QVERIFY(box);
+            box->reject();
+        });
+        QCOMPARE(cancelled.resolve("existing.txt"), int(TransferConflict::Cancel));
+        QCOMPARE(cancelled.resolve("second.txt"), int(TransferConflict::Cancel));
+    }
+
+    void testTransferSkipPreservesLocalFile() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("existing.txt");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly)); file.write("original"); file.close();
+        auto conflict = std::make_shared<TransferConflict>();
+        conflict->decision = TransferConflict::Skip;
+        SshConnection ssh;
+        ssh.transferConflict = conflict;
+        QSignalSpy sshDone(&ssh, &SshConnection::operationFinished);
+        ssh.downloadFile("remote.txt", path);
+        QCOMPARE(sshDone.count(), 1);
+        QVERIFY(sshDone.first().first().toBool());
+        FtpClient ftp;
+        ftp.transferConflict = conflict;
+        QSignalSpy ftpDone(&ftp, &FtpClient::operationFinished);
+        ftp.downloadFile("remote.txt", path);
+        QCOMPARE(ftpDone.count(), 1);
+        QVERIFY(ftpDone.first().first().toBool());
+        QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), QByteArray("original"));
+    }
     void testSftpLongTransferNamesKeepSidebarWidth() {
         QSplitter splitter;
         auto* sidebar = new SftpSidebar(&splitter);
@@ -415,16 +526,16 @@ private slots:
         else
             download->click();
         QCOMPARE(listings.last().first().toString(), QString("/remote/folder"));
-        QVERIFY(QFileInfo(dir.filePath("folder (1)")).isDir());
+        QVERIFY(QFileInfo(dir.filePath("folder")).isDir());
         QVERIFY(!remoteTree->isEnabled());
         if (cancel)
             QVERIFY(QMetaObject::invokeMethod(&sidebar, "onCancelQueuedTransfers"));
         QVERIFY(list("/remote/folder", {{"nested", true}, {".", true}, {"..", true}}));
         if (cancel) {
-            QVERIFY(!QFileInfo::exists(dir.filePath("folder (1)/nested")));
+            QVERIFY(!QFileInfo::exists(dir.filePath("folder/nested")));
         } else {
             QCOMPARE(listings.last().first().toString(), QString("/remote/folder/nested"));
-            QVERIFY(QFileInfo(dir.filePath("folder (1)/nested")).isDir());
+            QVERIFY(QFileInfo(dir.filePath("folder/nested")).isDir());
             QVERIFY(list("/remote/folder/nested", {}));
         }
         QVERIFY(remoteTree->isEnabled());
@@ -1353,6 +1464,8 @@ private slots:
                         controlSocket->write("230 Logged in\r\n");
                     } else if (upper.startsWith("TYPE")) {
                         controlSocket->write("200 Type set\r\n");
+                    } else if (upper.startsWith("SIZE ")) {
+                        controlSocket->write("213 14\r\n");
                     } else if (upper == "PASV") {
                         completionSent = false;
                         QVERIFY(dataServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))));
@@ -1427,6 +1540,21 @@ private slots:
         client.uploadFile(uploadPath, QStringLiteral("upload.txt"));
         QTRY_COMPARE_WITH_TIMEOUT(operationSpy.count(), 1, 2000);
         QVERIFY(operationSpy.first().at(0).toBool());
+        QCOMPARE(uploadedData, QByteArrayLiteral("upload payload"));
+
+        client.transferConflict = std::make_shared<TransferConflict>();
+        client.transferConflict->decision = TransferConflict::Skip;
+        operationSpy.clear();
+        client.uploadFile(uploadPath, QStringLiteral("upload.txt"));
+        QTRY_COMPARE_WITH_TIMEOUT(operationSpy.count(), 1, 2000);
+        QVERIFY(operationSpy.first().first().toBool());
+        QCOMPARE(uploadedData, QByteArrayLiteral("upload payload"));
+        client.transferConflict->cancelled = true;
+        operationSpy.clear();
+        client.uploadFile(uploadPath, QStringLiteral("upload.txt"));
+        QTRY_COMPARE_WITH_TIMEOUT(operationSpy.count(), 1, 2000);
+        QVERIFY(!operationSpy.first().first().toBool());
+        QVERIFY(operationSpy.first().at(1).toString().startsWith("Transfer cancelled"));
         QCOMPARE(uploadedData, QByteArrayLiteral("upload payload"));
 
         client.disconnectFromHost();
@@ -2239,6 +2367,77 @@ private slots:
         QVERIFY(sshd.waitForFinished(3000));
     }
 
+    void testTerminalShiftTab() {
+        QWidget host;
+        auto* layout = new QVBoxLayout(&host);
+        auto* previous = new QLineEdit(&host);
+        auto* terminal = new QTermWidget(0, &host);
+        layout->addWidget(previous);
+        layout->addWidget(terminal);
+        terminal->startExternal();
+        host.show();
+        auto* display = terminal->focusProxy();
+        QVERIFY(display);
+        display->setFocus();
+        QTRY_VERIFY(display->hasFocus());
+        QByteArray sent;
+        connect(terminal, &QTermWidget::sendData, &host,
+                [&sent](const char* data, int size) { sent.append(data, size); });
+        for (auto key : {Qt::Key_Tab, Qt::Key_Backtab}) {
+            sent.clear();
+            QTest::keyClick(display, key, Qt::ShiftModifier);
+            QCOMPARE(sent, QByteArray("\x1b[Z"));
+            QVERIFY(display->hasFocus());
+        }
+        sent.clear();
+        QTest::keyClick(display, Qt::Key_Tab);
+        QCOMPARE(sent, QByteArray("\t"));
+        QVERIFY(display->hasFocus());
+    }
+
+    void testTerminalUnicodeFileDrop() {
+        QTermWidget terminal(0);
+        terminal.startExternal();
+        terminal.setCodec(QStringLiteral("UTF-8"));
+        terminal.resize(800, 400);
+        terminal.show();
+        auto* display = terminal.focusProxy();
+        QVERIFY(display);
+        QByteArray sent;
+        connect(&terminal, &QTermWidget::sendData, &terminal,
+                [&sent](const char* data, int size) { sent.append(data, size); });
+#ifdef Q_OS_WIN
+        const QString prefix = QStringLiteral("E:/@home/gargadon/");
+#else
+        const QString prefix = QStringLiteral("/home/gargadon/");
+#endif
+        const QString path = prefix + QStringLiteral("V\u00eddeos/Proclama/M\u00fasica \u2014 O'Brien [LETRA].mp4");
+        QMimeData files;
+        files.setUrls({QUrl::fromLocalFile(path), QUrl::fromLocalFile(prefix + QStringLiteral("otro.mp4"))});
+        const auto drop = [&](QMimeData* mime) {
+            QDragEnterEvent enter(QPoint(10, 10), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(display, &enter);
+            QVERIFY(enter.isAccepted());
+            QDropEvent event(QPointF(10, 10), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(display, &event);
+            QVERIFY(event.isAccepted());
+        };
+        QString quoted = path;
+        quoted.replace('\'', QStringLiteral("'\\''"));
+        const QByteArray expected = ("'" + quoted + "' '" + prefix + "otro.mp4' ").toUtf8();
+        drop(&files);
+        QCOMPARE(sent, expected);
+        sent.clear();
+        terminal.feedData(QByteArrayLiteral("\x1b[?2004h"));
+        drop(&files);
+        QCOMPARE(sent, QByteArray("\x1b[200~") + expected + QByteArray("\x1b[201~"));
+        sent.clear();
+        QMimeData text;
+        text.setText(QStringLiteral("V\u00eddeos y M\u00fasica"));
+        drop(&text);
+        QCOMPARE(sent, QByteArray("\x1b[200~") + text.text().toUtf8() + QByteArray("\x1b[201~"));
+    }
+
     void testTerminalSearchApi() {
         QTermWidget terminal(0);
         terminal.startExternal();
@@ -2432,6 +2631,33 @@ private slots:
         SettingsDialog reopened(&window);
         QCOMPARE(reopened.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->keySequence(),
                  QKeySequence("Ctrl+Shift+W"));
+    }
+
+    void testTerminalBellNotification() {
+        Session session;
+        session.type = SessionType::Serial;
+        session.serialPort = "banchoxterm-test-missing-port";
+        TerminalTab tab(session);
+        auto* terminal = tab.getTerminalWidget();
+        QVERIFY(terminal);
+        auto* notice = terminal->findChild<QLabel*>("terminalBellNotice");
+        QVERIFY(notice);
+        QSignalSpy bells(&tab, &TerminalTab::bell);
+        QVERIFY(notice->isHidden());
+        // OSC terminators are not terminal alerts, even across reads.
+        terminal->feedData(QByteArrayLiteral("\x1b]0;title"));
+        terminal->feedData(QByteArrayLiteral("\x07"));
+        QCOMPARE(bells.count(), 0);
+        terminal->feedData(QByteArrayLiteral("\x07"));
+        QCOMPARE(bells.count(), 1);
+        QVERIFY(!notice->isHidden());
+        // The emulation already limits bell storms to one per 500 ms.
+        terminal->feedData(QByteArray(20, '\x07'));
+        QCOMPARE(bells.count(), 1);
+        QTRY_VERIFY_WITH_TIMEOUT(notice->isHidden(), 2500);
+        terminal->feedData(QByteArrayLiteral("\x07"));
+        QCOMPARE(bells.count(), 2);
+        QVERIFY(!notice->isHidden());
     }
 
     void testTerminalShortcutCapture() {
@@ -4194,6 +4420,8 @@ private slots:
         QByteArray output;
         QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("INPUT_READY"), 5000);
         QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("COLORTERM=truecolor"), 5000);
+        QVERIFY(console.write(QByteArrayLiteral("\x1b[Z")));
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("KEY=9 SHIFT=1 CHAR=9 CTRL=0 ALT=0"), 5000);
         QVERIFY(console.write(QByteArrayLiteral("\x1b[1;2D")));
         QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("KEY=37 SHIFT=1"), 5000);
         QVERIFY(console.write(QByteArrayLiteral("\x1b[13;2u")));

@@ -33,6 +33,7 @@ public:
     void startSession(const Session& session);
     void stopSession();
     void saveLayout();
+    bool hasActiveTransfers() const { return m_transferActive || !m_parallelTransfers.isEmpty() || !m_transferQueue.isEmpty(); }
 
 public slots:
     void navigateTo(const QString& path);
@@ -146,6 +147,8 @@ private:
     QPointer<SshConnection> m_connection;
     QPointer<FtpClient> m_ftp;
 
+    std::shared_ptr<TransferConflict> m_conflict = std::make_shared<TransferConflict>();
+    void beginTransferBatch();
     Session m_currentSession;
     QString m_currentPath;
     bool m_isConnected = false;

@@ -159,6 +159,10 @@
 </context>
 <context>
     <name>MainWindow</name>
+    <message>
+        <source>Terminal bell: %1</source>
+        <translation>Alerta de terminal: %1</translation>
+    </message>
     <message><source>SSH via bastion</source><translation>SSH vía bastión</translation></message>
     <message><source>Bastion: %1
 Destination: %2</source><translation>Bastión: %1
@@ -3728,6 +3732,10 @@ Huella de clave %2:
 </context>
 <context>
     <name>TerminalTab</name>
+    <message>
+        <source>Terminal bell</source>
+        <translation>Alerta de terminal</translation>
+    </message>
     <message><source>&#13;
 [Connecting to %1 via bastion %2...]&#13;
 </source><translation>&#13;
@@ -4538,4 +4546,69 @@ Versión actual: %2</translation>
         <translation>Desacoplar pestaña</translation>
     </message>
 </context>
+
+<context>
+<name>TransferConflict</name>
+<message><source>File already exists</source><translation>El archivo ya existe</translation></message>
+<message><source>The destination already exists:
+%1</source><translation>El destino ya existe:
+%1</translation></message>
+<message><source>Overwrite</source><translation>Sobreescribir</translation></message>
+<message><source>Skip this file</source><translation>Omitir este archivo</translation></message>
+<message><source>Cancel transfer</source><translation>Cancelar transferencia</translation></message>
+<message><source>Apply to all conflicts in this transfer</source><translation>Aplicar a todos los conflictos de esta transferencia</translation></message>
+<message><source>Remember for future transfers</source><translation>Recordar para futuras transferencias</translation></message>
+</context>
+
+<context>
+<name>SettingsDialog</name>
+<message><source>If the destination file exists:</source><translation>Si el archivo de destino existe:</translation></message>
+<message><source>Ask every time</source><translation>Preguntar siempre</translation></message>
+<message><source>Overwrite</source><translation>Sobreescribir</translation></message>
+<message><source>Skip</source><translation>Omitir</translation></message>
+</context>
+
+<context>
+<name>SftpSidebar</name>
+<message><source>File transfers</source><translation>Transferencias de archivos</translation></message>
+<message><source>Minimize</source><translation>Minimizar</translation></message>
+</context>
+
+<context>
+<name>FtpClient</name>
+<message><source>Could not check the destination file: %1</source><translation>No se pudo comprobar el archivo de destino: %1</translation></message>
+</context>
+
+<context>
+<name>TransferConflict</name>
+<message><source>File already exists</source><translation>El archivo ya existe</translation></message>
+<message><source>The destination already exists:
+%1</source><translation>El destino ya existe:
+%1</translation></message>
+<message><source>Overwrite</source><translation>Sobreescribir</translation></message>
+<message><source>Skip this file</source><translation>Omitir este archivo</translation></message>
+<message><source>Cancel transfer</source><translation>Cancelar transferencia</translation></message>
+<message><source>Apply to all conflicts in this transfer</source><translation>Aplicar a todos los conflictos de esta transferencia</translation></message>
+<message><source>Remember for future transfers</source><translation>Recordar para futuras transferencias</translation></message>
+</context>
+
+<context>
+<name>SettingsDialog</name>
+<message><source>If the destination file exists:</source><translation>Si el archivo de destino existe:</translation></message>
+<message><source>Ask every time</source><translation>Preguntar siempre</translation></message>
+<message><source>Overwrite</source><translation>Sobreescribir</translation></message>
+<message><source>Skip</source><translation>Omitir</translation></message>
+</context>
+
+<context>
+<name>SftpSidebar</name>
+<message><source>File transfers</source><translation>Transferencias de archivos</translation></message>
+<message><source>Minimize</source><translation>Minimizar</translation></message>
+</context>
+
+<context>
+<name>FtpClient</name>
+<message><source>Could not check the destination file: %1</source><translation>No se pudo comprobar el archivo de destino: %1</translation></message>
+</context>
+<context><name>SftpSidebar</name><message><source>Restore</source><translation>Restaurar</translation></message></context>
 </TS>

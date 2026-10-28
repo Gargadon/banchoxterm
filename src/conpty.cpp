@@ -213,6 +213,10 @@ bool ConPty::write(const QByteArray& data) {
         virtualKey = VK_RETURN;
         scanCode = 28;
         character = 13;
+    } else if (input == QByteArrayLiteral("\x1b[Z")) {
+        virtualKey = VK_TAB;
+        scanCode = 15;
+        character = 9;
     } else if (input == QByteArrayLiteral("\x1b[1;2D")) {
         virtualKey = VK_LEFT;
         scanCode = 75;
@@ -227,7 +231,9 @@ bool ConPty::write(const QByteArray& data) {
         scanCode = 80;
     }
     if (virtualKey) {
-        const int state = virtualKey == VK_ESCAPE ? 0 : SHIFT_PRESSED | (virtualKey == VK_RETURN ? 0 : ENHANCED_KEY);
+        const int state = virtualKey == VK_ESCAPE
+                              ? 0
+                              : SHIFT_PRESSED | ((virtualKey == VK_RETURN || virtualKey == VK_TAB) ? 0 : ENHANCED_KEY);
         input = QStringLiteral("\x1b[%1;%2;%3;1;%4;1_\x1b[%1;%2;%3;0;%4;1_")
                     .arg(virtualKey)
                     .arg(scanCode)

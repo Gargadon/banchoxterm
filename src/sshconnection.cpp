@@ -1380,6 +1380,15 @@ QString SshConnection::listDirectoryImpl(const QString& path) {
 }
 
 void SshConnection::downloadFile(const QString& remotePath, const QString& localPath) {
+    if (transferConflict && (QFileInfo::exists(localPath) || QFileInfo(localPath).isSymLink())) {
+        const int choice = transferConflict->resolve(localPath);
+        if (choice != TransferConflict::Overwrite) {
+            emit operationFinished(choice == TransferConflict::Skip,
+                choice == TransferConflict::Skip ? QStringLiteral("File skipped") : QStringLiteral("Transfer cancelled by user"));
+            return;
+        }
+    }
+
     if (!m_sftp) {
         emit operationFinished(false, "SFTP session not active");
         return;
@@ -1448,6 +1457,17 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
     emit operationFinished(true, "Download finished successfully: " + QFileInfo(remotePath).fileName());
 }
 
+int SshConnection::remoteOverwriteDecision(const QString& path) {
+    if (!transferConflict || !m_sftp) return TransferConflict::Overwrite;
+    LIBSSH2_SFTP_ATTRIBUTES attrs{};
+    const int rc = retry([&] { return libssh2_sftp_lstat(m_sftp, path.toUtf8().constData(), &attrs); });
+    if (rc != 0) {
+        // Only a definite absence permits creation without confirmation.
+        return libssh2_sftp_last_error(m_sftp) == LIBSSH2_FX_NO_SUCH_FILE ? TransferConflict::Overwrite : TransferConflict::Cancel;
+    }
+    return transferConflict->resolve(path);
+}
+
 void SshConnection::uploadFile(const QString& localPath, const QString& remotePath) {
     if (!m_sftp) {
         emit operationFinished(false, "SFTP session not active");
@@ -1456,6 +1476,11 @@ void SshConnection::uploadFile(const QString& localPath, const QString& remotePa
     m_transferCancelRequested.store(false, std::memory_order_relaxed);
     m_transferPaused.store(false, std::memory_order_relaxed);
 
+    const int choice = remoteOverwriteDecision(remotePath);
+    if (choice != TransferConflict::Overwrite) {
+        emit operationFinished(choice == TransferConflict::Skip, choice == TransferConflict::Skip ? QStringLiteral("File skipped") : QStringLiteral("Transfer cancelled by user"));
+        return;
+    }
     QFile localFile(localPath);
     if (!localFile.open(QIODevice::ReadOnly)) {
         emit operationFinished(false, "Failed to open local file: " + localPath);
@@ -1650,6 +1675,10 @@ bool SshConnection::ensureRemoteDirectory(const QString& remotePath, QString& er
 }
 
 bool SshConnection::uploadOneFile(const QString& localPath, const QString& remotePath, QString& error) {
+    const int choice = remoteOverwriteDecision(remotePath);
+    if (choice == TransferConflict::Skip) return true;
+    if (choice == TransferConflict::Cancel) { error = QStringLiteral("Transfer cancelled by user"); return false; }
+
     QFile f(localPath);
     if (!f.open(QIODevice::ReadOnly)) {
         error = tr("Failed to open local file %1: %2").arg(localPath, f.errorString());
@@ -1788,7 +1817,7 @@ void SshConnection::uploadDirectory(const QString& localPath, const QString& rem
     if (uploadDirRecursive(localPath, remoteRoot, error)) {
         emit operationFinished(true, "Folder uploaded successfully");
     } else {
-        emit operationFinished(false, tr("Folder upload failed: %1").arg(error));
+        emit operationFinished(false, error.startsWith(QStringLiteral("Transfer cancelled")) ? error : tr("Folder upload failed: %1").arg(error));
     }
 }
 

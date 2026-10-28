@@ -1231,6 +1231,30 @@ void MainWindow::setupUi() {
     updateSessionContext();
 }
 
+void MainWindow::prepareSftpSidebar(SshConnection* connection) {
+    if (m_sftpSidebar->connection() == connection && connection) return;
+    SftpSidebar* target = nullptr;
+    for (auto* sidebar : std::as_const(m_backgroundSftpSidebars)) {
+        if (connection && sidebar->connection() == connection) { target = sidebar; break; }
+    }
+    if (!target && !m_sftpSidebar->hasActiveTransfers()) return;
+    const bool visible = m_sidebarStacked->currentWidget() == m_sftpSidebar;
+    m_sidebarStacked->removeWidget(m_sftpSidebar);
+    m_sftpSidebar->hide();
+    m_sftpSidebar->setParent(this);
+    m_backgroundSftpSidebars.append(m_sftpSidebar);
+    if (target) m_backgroundSftpSidebars.removeOne(target);
+    else {
+        target = new SftpSidebar(m_sidebarStacked);
+        connect(target, &SftpSidebar::diagnosticMessage, this, [this](const QString& message) {
+            statusBar()->showMessage(message, 5000);
+        });
+    }
+    m_sftpSidebar = target;
+    m_sidebarStacked->insertWidget(1, target);
+    if (visible) m_sidebarStacked->setCurrentWidget(target);
+}
+
 void MainWindow::switchSidebarTab(int index) {
     m_sidebarStacked->setCurrentIndex(index);
     m_sessionsTabBtn->setChecked(index == 0);
@@ -1239,6 +1263,7 @@ void MainWindow::switchSidebarTab(int index) {
 
 void MainWindow::onConnectSession(const Session& session) {
     if (session.type == SessionType::FTP) {
+        prepareSftpSidebar(nullptr);
         m_sftpSidebar->startSession(session);
         m_sftpTabBtn->setEnabled(true);
         switchSidebarTab(1);
@@ -1279,6 +1304,7 @@ void MainWindow::onConnectSession(const Session& session) {
                                   Q_ARG(QString, session.language));
         QMetaObject::invokeMethod(tab->connection(), "setInitialSize", Qt::QueuedConnection,
                                   Q_ARG(int, session.initialRows), Q_ARG(int, session.initialColumns));
+        prepareSftpSidebar(tab->connection());
         m_sftpSidebar->setConnection(tab->connection());
         m_sftpSidebar->startSession(session);
         m_sftpTabBtn->setEnabled(true);
@@ -1353,6 +1379,9 @@ void MainWindow::onConnectSession(const Session& session) {
     });
 
     // Connect title updates
+    connect(tab, &TerminalTab::bell, this, [this, tab]() {
+        statusBar()->showMessage(tr("Terminal bell: %1").arg(tab->session().name), 3000);
+    });
     connect(tab, &TerminalTab::titleChanged, this, [this, tab](const QString& title) {
         QTabWidget* pane = nullptr;
         for (auto* candidate : allOpenPanes())
@@ -1472,6 +1501,7 @@ void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
                 return;
             }
         }
+        prepareSftpSidebar(nullptr);
         m_sftpSidebar->stopSession();
         m_sftpTabBtn->setEnabled(false);
         m_remoteMonitorWidget->setVisible(false);
@@ -1485,10 +1515,12 @@ void MainWindow::onCurrentTabChanged(QTabWidget* pane, int index) {
 
     auto* tab = qobject_cast<TerminalTab*>(pane->widget(index));
     if (tab && tab->isSsh()) {
+        prepareSftpSidebar(tab->connection());
         m_sftpSidebar->setConnection(tab->connection());
         m_sftpSidebar->startSession(tab->getSession());
         m_sftpTabBtn->setEnabled(true);
     } else {
+        prepareSftpSidebar(nullptr);
         m_sftpSidebar->stopSession();
         m_sftpTabBtn->setEnabled(false);
         m_remoteMonitorWidget->setVisible(false);

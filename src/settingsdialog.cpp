@@ -223,6 +223,14 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     transferLayout->addWidget(m_parallelTransfersSpin);
     transferLayout->addStretch();
     appLayout->addLayout(transferLayout);
+    auto* conflictLayout = new QHBoxLayout();
+    conflictLayout->addWidget(new QLabel(tr("If the destination file exists:"), appearanceTab));
+    m_existingFilePolicy = new QComboBox(appearanceTab);
+    m_existingFilePolicy->setObjectName("existingFilePolicy");
+    m_existingFilePolicy->addItems({tr("Ask every time"), tr("Overwrite"), tr("Skip")});
+    m_existingFilePolicy->setCurrentIndex(qBound(0, QSettings().value("sftp/existingFilePolicy", 0).toInt(), 2));
+    conflictLayout->addWidget(m_existingFilePolicy);
+    appLayout->addLayout(conflictLayout);
 
     auto* monitoringGroup = new QGroupBox(tr("SSH resource monitoring"), appearanceTab);
     auto* monitoringLayout = new QVBoxLayout(monitoringGroup);
@@ -480,6 +488,7 @@ void SettingsDialog::saveSettings() {
     settings.setValue("terminal/loggingEnabled", m_loggingEnabled);
     settings.setValue("terminal/logDirectory", m_logDir);
     settings.setValue("sftp/maxParallelTransfers", m_parallelTransfersSpin->value());
+    settings.setValue("sftp/existingFilePolicy", m_existingFilePolicy->currentIndex());
     settings.setValue("ssh/monitoringEnabled", m_monitoringCheck->isChecked());
     settings.setValue("ssh/monitoringIntervalSeconds", m_monitoringIntervalSpin->value());
 

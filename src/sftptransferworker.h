@@ -1,6 +1,8 @@
 #pragma once
+#include "transferconflict.h"
 
 #include <QObject>
+#include <atomic>
 #include <QString>
 
 #include "session.h"
@@ -8,6 +10,7 @@
 class SshConnection;
 
 struct SftpTransferRequest {
+    std::shared_ptr<TransferConflict> conflict;
     QString id;
     QString remotePath;
     QString localPath;
@@ -43,6 +46,7 @@ private:
     Session m_session;
     SftpTransferRequest m_request;
     SshConnection* m_connection = nullptr;
+    std::atomic_bool m_cancelRequested{false};
     bool m_started = false;
     bool m_finished = false;
 };

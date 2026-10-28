@@ -25,6 +25,7 @@ class QSettings;
 class QToolBar;
 class SessionsSidebar;
 class SftpSidebar;
+class SshConnection;
 class TerminalTab;
 class QMainWindow;
 class QEvent;
@@ -127,6 +128,8 @@ private:
     QStackedWidget* m_sidebarStacked;
     SessionsSidebar* m_sessionsSidebar;
     SftpSidebar* m_sftpSidebar;
+    void prepareSftpSidebar(SshConnection* connection);
+    QList<SftpSidebar*> m_backgroundSftpSidebars;
 
     QToolButton* m_sessionsTabBtn;
     QToolButton* m_sftpTabBtn;
