@@ -4579,4 +4579,8 @@ Versão atual: %2</translation>
 <message><source>Could not check the destination file: %1</source><translation>Não foi possível verificar o arquivo de destino: %1</translation></message>
 </context>
 <context><name>SftpSidebar</name><message><source>Restore</source><translation>Restaurar</translation></message></context>
+<context><name>TerminalTab</name><message><source>Break</source><translation>Break</translation></message><message><source>Cisco escape (Ctrl+^)</source><translation>Escape Cisco (Ctrl+^)</translation></message><message><source>Break is available for SSH, Telnet and serial sessions.</source><translation>Break está disponível em sessões SSH, Telnet e serial.</translation></message></context>
+<context><name>MainWindow</name><message><source>Break</source><translation>Break</translation></message><message><source>Cisco escape (Ctrl+^)</source><translation>Escape Cisco (Ctrl+^)</translation></message></context>
+<context><name>SshConnection</name><message><source>Could not send SSH Break (%1).</source><translation>Não foi possível enviar Break por SSH (%1).</translation></message></context>
+<context><name>SessionDialog</name><message><source>Cisco escape sequence (hex):</source><translation>Sequência de escape Cisco (hex):</translation></message><message><source>Cisco escape sequence (Ctrl+^ by default), written as hexadecimal bytes. This is separate from the protocol Break signal.</source><translation>Sequência de escape Cisco (Ctrl+^ por padrão) em bytes hexadecimais. É independente do sinal Break do protocolo.</translation></message></context>
 </TS>

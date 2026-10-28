@@ -6,7 +6,7 @@ if(CMAKE_GENERATOR MATCHES "NMake Makefiles")
     # Use CMake's include scanner instead of parsing the compiler's output.
     set(CMAKE_DEPENDS_USE_COMPILER FALSE)
 endif()
-project(banchoxterm VERSION 1.3.0 LANGUAGES C CXX)
+project(banchoxterm VERSION 1.3.1 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -60,6 +60,9 @@ FetchContent_Declare(
     GIT_TAG        libssh2-1.11.1
 )
 FetchContent_MakeAvailable(libssh2)
+# Keep the RFC 4335 adapter beside the application, without modifying fetched sources.
+target_sources(libssh2_static PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/sshbreak.c")
+target_include_directories(libssh2_static PRIVATE "${libssh2_SOURCE_DIR}/src")
 
 # Standard password-based encryption primitives used by the credential vault.
 # The version is pinned so clean builds remain reproducible.

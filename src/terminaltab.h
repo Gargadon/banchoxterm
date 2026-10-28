@@ -66,6 +66,10 @@ public:
     void sendRaw(const QString& text);
     void reportMacroMessage(const QString& message);
     void sendBreak();
+    void sendCiscoEscape();
+    void sendTelnetEscape();
+    void sendBytes(const QByteArray& bytes);
+    void sendSpecialCharacter(const QByteArray& bytes);
     void sendSerialFile();
     void cancelSerialFile();
     bool searchText(const QString& str, bool next, bool caseSensitive);
@@ -106,6 +110,7 @@ private slots:
     void onSearchPrev();
 
 private:
+    bool m_sendingRawBytes = false;
     void launchExternalClient();
     void setupSshTerminal();
     void setupLocalTerminal();

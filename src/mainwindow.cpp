@@ -2231,7 +2231,8 @@ void MainWindow::setupMenuBar() {
     m_specialCharactersAction = specialMenu->menuAction();
     m_specialCharactersAction->setIcon(QIcon(":/icons/terminal.svg"));
     const QList<QPair<QString, QByteArray>> specialCharacters = {
-        {tr("Break (Cisco)"), QByteArray("\x1e")},
+        {tr("Break"), QByteArray()},
+        {tr("Cisco escape (Ctrl+^)"), QByteArray("\x1e")},
         {tr("Ctrl+C"), QByteArray("\x03")},
         {tr("Ctrl+D"), QByteArray("\x04")},
         {tr("Ctrl+Z"), QByteArray("\x1a")},
@@ -2244,17 +2245,30 @@ void MainWindow::setupMenuBar() {
     for (const auto& special : specialCharacters) {
         auto* action = specialMenu->addAction(special.first);
         action->setData(special.second);
-        action->setProperty("physicalBreak", special.first == tr("Break (Cisco)"));
+        action->setProperty("physicalBreak", special.first == tr("Break"));
+        action->setProperty("ciscoEscape", special.second == QByteArrayLiteral("\x1e"));
+        action->setProperty("telnetEscape", special.second == QByteArrayLiteral("\x1d"));
         connect(action, &QAction::triggered, this, [this, action]() {
             if (auto* tab = currentTerminalTab()) {
                 if (action->property("physicalBreak").toBool())
                     tab->sendBreak();
-                else
-                    tab->sendRaw(QString::fromLatin1(action->data().toByteArray()));
+                else if (action->property("ciscoEscape").toBool()) tab->sendCiscoEscape();
+                else if (action->property("telnetEscape").toBool()) tab->sendTelnetEscape();
+                else tab->sendSpecialCharacter(action->data().toByteArray());
             }
         });
     }
 
+    connect(specialMenu, &QMenu::aboutToShow, this, [this, specialMenu] {
+        auto* tab = currentTerminalTab();
+        for (auto* action : specialMenu->actions()) {
+            if (!action->data().isValid() && !action->property("physicalBreak").isValid()) continue;
+            bool enabled = tab && tab->isSessionActive() && !tab->session().readOnly;
+            if (enabled && action->property("telnetEscape").toBool()) enabled = tab->session().type == SessionType::Telnet;
+            if (enabled && action->property("physicalBreak").toBool()) enabled = tab->isSsh() || tab->session().type == SessionType::Telnet || tab->session().type == SessionType::Serial;
+            action->setEnabled(enabled);
+        }
+    });
     specialMenu->addSeparator();
     auto* customMenu = specialMenu->addMenu(tr("Custom"));
     auto* manageCustomAction = specialMenu->addAction(tr("Manage custom characters..."));
@@ -2270,7 +2284,7 @@ void MainWindow::setupMenuBar() {
             auto* action = customMenu->addAction(names.at(i));
             connect(action, &QAction::triggered, this, [this, bytes]() {
                 if (auto* tab = currentTerminalTab())
-                    tab->sendRaw(QString::fromLatin1(bytes));
+                    tab->sendBytes(bytes);
             });
         }
         if (customMenu->isEmpty())

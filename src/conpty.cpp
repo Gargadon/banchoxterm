@@ -198,13 +198,33 @@ void ConPty::resize(int cols, int rows) {
 bool ConPty::write(const QByteArray& data) {
     if (!m_inputWrite || data.isEmpty())
         return false;
+    // A custom sequence can contain more than one punctuation control key.
+    // Keep their modifier information even when surrounded by ordinary text.
+    if (data.size() > 1) {
+        qsizetype start = 0;
+        for (qsizetype index = 0; index < data.size(); ++index) {
+            const auto character = static_cast<unsigned char>(data[index]);
+            if (character < 0x1c || character > 0x1f) continue;
+            if (index > start && !write(data.mid(start, index - start))) return false;
+            if (!write(data.mid(index, 1))) return false;
+            start = index + 1;
+        }
+        if (start > 0) return start == data.size() || write(data.mid(start));
+    }
     QByteArray input = data;
     // ConPTY reconstructs Windows KEY_EVENT_RECORDs using win32-input-mode,
     // not CSI-u. Native console applications need the actual modifier state.
     int virtualKey = 0;
     int scanCode = 0;
     int character = 0;
-    if (input == QByteArrayLiteral("\x1b")) {
+    bool controlPunctuation = false;
+    if (input.size() == 1 && static_cast<unsigned char>(input[0]) >= 0x1c &&
+        static_cast<unsigned char>(input[0]) <= 0x1f) {
+        character = static_cast<unsigned char>(input[0]);
+        virtualKey = character == 0x1c ? VK_OEM_5 : character == 0x1d ? VK_OEM_6 : character == 0x1e ? '6' : VK_OEM_MINUS;
+        scanCode = MapVirtualKeyW(virtualKey, MAPVK_VK_TO_VSC);
+        controlPunctuation = true;
+    } else if (input == QByteArrayLiteral("\x1b")) {
         // Send a physical Escape key, rather than an ambiguous ANSI prefix.
         virtualKey = VK_ESCAPE;
         scanCode = 1;
@@ -231,7 +251,7 @@ bool ConPty::write(const QByteArray& data) {
         scanCode = 80;
     }
     if (virtualKey) {
-        const int state = virtualKey == VK_ESCAPE
+        const int state = controlPunctuation ? LEFT_CTRL_PRESSED | (character >= 0x1e ? SHIFT_PRESSED : 0) : virtualKey == VK_ESCAPE
                               ? 0
                               : SHIFT_PRESSED | ((virtualKey == VK_RETURN || virtualKey == VK_TAB) ? 0 : ENHANCED_KEY);
         input = QStringLiteral("\x1b[%1;%2;%3;1;%4;1_\x1b[%1;%2;%3;0;%4;1_")

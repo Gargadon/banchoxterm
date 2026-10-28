@@ -54,6 +54,7 @@
 #include <QDropEvent>
 #include "ftpclient.h"
 #include "sshconnection.h"
+#include "sshbreak.h"
 #include "sessiondialog.h"
 #include <QComboBox>
 #include <QAbstractItemView>
@@ -4326,6 +4327,71 @@ private slots:
         QVERIFY(widget.findText("test", true, true));
         QVERIFY(!widget.findText("ERROR", true, true));
         QVERIFY(widget.findText("ERROR", true, false));
+    }
+
+    void testSpecialCharacterBytes() {
+        Session session;
+        session.type = SessionType::SSH;
+        session.ciscoBreakSequence = "1E80FF00";
+        session.enterSequence = "\r\n";
+        session.backspaceSequence = "\b";
+        TerminalTab tab(session);
+        auto* emulator = tab.getTerminalWidget()->findChild<Konsole::Session*>()->emulation();
+        QByteArray received;
+        connect(emulator, &Konsole::Emulation::sendData, this,
+                [&](const char* bytes, int size) { received.append(bytes, size); });
+        const QByteArray controls = QByteArray::fromHex("03041A1B0D097F1D1E0080FF");
+        tab.sendBytes(controls);
+        QCOMPARE(received, controls);
+        received.clear();
+        tab.sendTelnetEscape(); // Never send a Telnet client command to an SSH shell.
+        QVERIFY(received.isEmpty());
+        tab.sendBreak(); // A protocol request must not turn into Ctrl+^ shell input.
+        QVERIFY(received.isEmpty());
+        tab.sendCiscoEscape();
+        QCOMPARE(received, QByteArray::fromHex("1E80FF00"));
+        received.clear();
+        tab.sendSpecialCharacter("\r");
+        tab.sendSpecialCharacter(QByteArrayLiteral("\x7f"));
+        QCOMPARE(received, QByteArrayLiteral("\r\n\b"));
+        session.readOnly = true;
+        TerminalTab locked(session);
+        QByteArray blocked;
+        connect(locked.getTerminalWidget()->findChild<Konsole::Session*>()->emulation(), &Konsole::Emulation::sendData,
+                this, [&](const char* bytes, int size) { blocked.append(bytes, size); });
+        locked.sendBytes(controls);
+        locked.sendCiscoEscape();
+        locked.sendBreak();
+        QVERIFY(blocked.isEmpty());
+    }
+
+    void testSshBreakPacket() {
+        unsigned char packet[19];
+        bancho_encode_ssh_break(packet, 0x12345678, 500);
+        QCOMPARE(QByteArray(reinterpret_cast<const char*>(packet), 19),
+                 QByteArray::fromHex("621234567800000005627265616B00000001F4"));
+        QCOMPARE(bancho_ssh_channel_break(nullptr, 500), LIBSSH2_ERROR_BAD_USE);
+    }
+
+    void testConPtyControlPunctuation() {
+#ifdef Q_OS_WIN
+        ConPty console;
+        QVERIFY(console.start(QDir(QCoreApplication::applicationDirPath()).filePath("conpty_input_probe.exe"), {}, 80, 25));
+        QByteArray output;
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("INPUT_READY"), 5000);
+        for (int character = 0x1c; character <= 0x1f; ++character) {
+            output.clear();
+            QVERIFY(console.write(QByteArray(1, char(character))));
+            const QByteArray expected = "CHAR=" + QByteArray::number(character) + " CTRL=1 ALT=0";
+            QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains(expected), 2000);
+        }
+        output.clear();
+        QVERIFY(console.write(QByteArrayLiteral("a\x1d\x1e")));
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("CHAR=29 CTRL=1 ALT=0") && output.contains("CHAR=30 CTRL=1 ALT=0"), 2000);
+        QVERIFY(console.write("\r"));
+#else
+        QSKIP("ConPTY is only available on Windows.");
+#endif
     }
 
     void testVtTerminalSpecialKeys() {

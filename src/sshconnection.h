@@ -54,6 +54,7 @@ public slots:
     void setInitialSize(int rows, int cols);
     void disconnectFromHost();
     void sendToShell(const QByteArray& data);
+    void sendBreak();
     void resizePty(int rows, int cols);
     void listDirectory(const QString& path);
     void navigateDirectory(const QString& path);

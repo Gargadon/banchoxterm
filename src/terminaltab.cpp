@@ -690,8 +690,8 @@ void TerminalTab::onSendData(const char* data, int size) {
     if (m_session.type == SessionType::SSH && input == QByteArrayLiteral("\x1b[13;2u"))
         input = QByteArrayLiteral("\n");
     recordTypedInput(input);
-    if (m_session.type == SessionType::SSH || m_session.type == SessionType::Telnet ||
-        m_session.type == SessionType::Serial) {
+    if (!m_sendingRawBytes && (m_session.type == SessionType::SSH || m_session.type == SessionType::Telnet ||
+        m_session.type == SessionType::Serial)) {
         input.replace(QByteArrayLiteral("\x7f"), m_session.backspaceSequence.toUtf8());
         if (input.contains(QByteArrayLiteral("\r\n")))
             input.replace(QByteArrayLiteral("\r\n"), QByteArrayLiteral("\r"));
@@ -758,7 +758,8 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
 
     auto* specialMenu = menu.addMenu(tr("Special Characters"));
     const QList<QPair<QString, QByteArray>> specialCharacters = {
-        {tr("Break (Cisco)"), QByteArray("\x1e")},
+        {tr("Break"), QByteArray()},
+        {tr("Cisco escape (Ctrl+^)"), QByteArray("\x1e")},
         {tr("Ctrl+C"), QByteArray("\x03")},
         {tr("Ctrl+D"), QByteArray("\x04")},
         {tr("Ctrl+Z"), QByteArray("\x1a")},
@@ -771,7 +772,12 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
     for (const auto& special : specialCharacters) {
         auto* action = specialMenu->addAction(special.first);
         action->setData(special.second);
-        action->setProperty("physicalBreak", special.first == tr("Break (Cisco)"));
+        action->setProperty("physicalBreak", special.first == tr("Break"));
+        action->setProperty("ciscoEscape", special.second == QByteArrayLiteral("\x1e"));
+        action->setProperty("telnetEscape", special.second == QByteArrayLiteral("\x1d"));
+        action->setEnabled(m_isActive && !m_session.readOnly &&
+            (!action->property("telnetEscape").toBool() || m_session.type == SessionType::Telnet) &&
+            (!action->property("physicalBreak").toBool() || isSsh() || m_session.type == SessionType::Telnet || m_session.type == SessionType::Serial));
     }
 
     auto* clearAct = menu.addAction(tr("Clear Scrollback"));
@@ -810,8 +816,9 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
     } else if (selected && selected->parent() == specialMenu) {
         if (selected->property("physicalBreak").toBool())
             sendBreak();
-        else
-            sendRaw(QString::fromLatin1(selected->data().toByteArray()));
+        else if (selected->property("ciscoEscape").toBool()) sendCiscoEscape();
+        else if (selected->property("telnetEscape").toBool()) sendTelnetEscape();
+        else sendSpecialCharacter(selected->data().toByteArray());
     } else if (selected == clearAct) {
         doClear();
     } else if (selected == serialSendAct) {
@@ -1393,9 +1400,42 @@ void TerminalTab::sendRaw(const QString& text) {
     doSendText(text);
 }
 
+void TerminalTab::sendBytes(const QByteArray& bytes) {
+    if (m_session.readOnly || !m_isActive || bytes.isEmpty()) return;
+    const QScopedValueRollback<bool> rawInput(m_sendingRawBytes, true);
+    if (auto* session = m_terminal ? m_terminal->findChild<Konsole::Session*>() : nullptr)
+        session->emulation()->sendData(bytes.constData(), bytes.size());
+}
+
+void TerminalTab::sendSpecialCharacter(const QByteArray& bytes) {
+    if (bytes == QByteArrayLiteral("\r")) sendBytes(m_session.enterSequence.toUtf8());
+    else if (bytes == QByteArrayLiteral("\x7f")) sendBytes(m_session.backspaceSequence.toUtf8());
+    else sendBytes(bytes);
+}
+
+void TerminalTab::sendTelnetEscape() {
+    if (m_session.type == SessionType::Telnet) sendBytes(QByteArrayLiteral("\x1d"));
+}
+
+void TerminalTab::sendCiscoEscape() {
+    QByteArray sequence = QByteArray::fromHex(m_session.ciscoBreakSequence.toLatin1());
+    if (sequence.isEmpty()) sequence = QByteArrayLiteral("\x1e");
+    sendBytes(sequence);
+}
+
 void TerminalTab::sendBreak() {
     if (m_session.readOnly) {
         reportMacroMessage(tr("Session is read-only; Break was blocked."));
+        return;
+    }
+    if (!m_isActive) return;
+    if (m_session.type == SessionType::SSH && m_connection) {
+        QMetaObject::invokeMethod(m_connection, "sendBreak", Qt::QueuedConnection);
+        return;
+    }
+    if (m_session.type == SessionType::Telnet) {
+        sendTelnetEscape();
+        QTimer::singleShot(150, this, [this] { if (m_isActive) sendBytes(QByteArrayLiteral("send brk\r")); });
         return;
     }
     if (m_serialPort && m_serialPort->isOpen() && m_session.type == SessionType::Serial) {
@@ -1406,10 +1446,7 @@ void TerminalTab::sendBreak() {
         });
         return;
     }
-    QByteArray sequence = QByteArray::fromHex(m_session.ciscoBreakSequence.toLatin1());
-    if (sequence.isEmpty())
-        sequence = QByteArrayLiteral("\x1e");
-    sendRaw(QString::fromLatin1(sequence));
+    reportMacroMessage(tr("Break is available for SSH, Telnet and serial sessions."));
 }
 
 void TerminalTab::sendSerialFile() {

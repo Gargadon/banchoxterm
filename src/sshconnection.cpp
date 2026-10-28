@@ -1,4 +1,5 @@
 #include "sshconnection.h"
+#include "sshbreak.h"
 #include "apppaths.h"
 #include "keyring.h"
 #include <QFile>
@@ -1252,6 +1253,12 @@ void SshConnection::onKeepAlive() {
     // armed from onSocketActivity()).
     libssh2_keepalive_send(m_session, nullptr);
     armNotifiers();
+}
+
+void SshConnection::sendBreak() {
+    if (!m_channel) return;
+    const int result = retry([this] { return bancho_ssh_channel_break(m_channel, 500); });
+    if (result != 0) emit tunnelStatus(tr("Could not send SSH Break (%1).").arg(result), false);
 }
 
 void SshConnection::sendToShell(const QByteArray& data) {
