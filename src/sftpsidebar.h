@@ -33,7 +33,9 @@ public:
     void startSession(const Session& session);
     void stopSession();
     void saveLayout();
-    bool hasActiveTransfers() const { return m_transferActive || !m_parallelTransfers.isEmpty() || !m_transferQueue.isEmpty(); }
+    bool hasActiveTransfers() const {
+        return m_transferActive || !m_parallelTransfers.isEmpty() || !m_transferQueue.isEmpty();
+    }
 
 public slots:
     void navigateTo(const QString& path);

@@ -21,20 +21,28 @@ struct TransferConflict {
         std::unique_lock<std::mutex> lock(mutex);
         int result = Cancel;
         auto prompt = [&] {
-            if (cancelled) return;
+            if (cancelled)
+                return;
             result = decision == Ask ? QSettings().value("sftp/existingFilePolicy", Ask).toInt() : decision;
             if (result != Overwrite && result != Skip) {
-                QMessageBox box(QMessageBox::Question, QApplication::translate("TransferConflict", "File already exists"),
-                    QApplication::translate("TransferConflict", "The destination already exists:\n%1").arg(path), QMessageBox::NoButton, QApplication::activeWindow());
-                auto* overwrite = box.addButton(QApplication::translate("TransferConflict", "Overwrite"), QMessageBox::AcceptRole);
-                auto* skip = box.addButton(QApplication::translate("TransferConflict", "Skip this file"), QMessageBox::ActionRole);
-                auto* cancel = box.addButton(QApplication::translate("TransferConflict", "Cancel transfer"), QMessageBox::RejectRole);
+                QMessageBox box(
+                    QMessageBox::Question, QApplication::translate("TransferConflict", "File already exists"),
+                    QApplication::translate("TransferConflict", "The destination already exists:\n%1").arg(path),
+                    QMessageBox::NoButton, QApplication::activeWindow());
+                auto* overwrite =
+                    box.addButton(QApplication::translate("TransferConflict", "Overwrite"), QMessageBox::AcceptRole);
+                auto* skip = box.addButton(QApplication::translate("TransferConflict", "Skip this file"),
+                                           QMessageBox::ActionRole);
+                auto* cancel = box.addButton(QApplication::translate("TransferConflict", "Cancel transfer"),
+                                             QMessageBox::RejectRole);
                 box.setTextFormat(Qt::PlainText);
                 box.setDefaultButton(cancel);
-                auto* batch = new QCheckBox(QApplication::translate("TransferConflict", "Apply to all conflicts in this transfer"), &box);
+                auto* batch = new QCheckBox(
+                    QApplication::translate("TransferConflict", "Apply to all conflicts in this transfer"), &box);
                 box.setCheckBox(batch);
                 // A second checkbox belongs to the dialog layout, independently of the batch choice.
-                auto* always = new QCheckBox(QApplication::translate("TransferConflict", "Remember for future transfers"), &box);
+                auto* always =
+                    new QCheckBox(QApplication::translate("TransferConflict", "Remember for future transfers"), &box);
                 auto* grid = qobject_cast<QGridLayout*>(box.layout());
                 auto* buttons = box.findChild<QDialogButtonBox*>();
                 int row, column, rows, columns;
@@ -45,14 +53,19 @@ struct TransferConflict {
                 box.exec();
                 result = box.clickedButton() == overwrite ? Overwrite : box.clickedButton() == skip ? Skip : Cancel;
                 if (result != Cancel) {
-                    if (batch->isChecked()) decision = result;
-                    if (always->isChecked()) QSettings().setValue("sftp/existingFilePolicy", result);
+                    if (batch->isChecked())
+                        decision = result;
+                    if (always->isChecked())
+                        QSettings().setValue("sftp/existingFilePolicy", result);
                 }
             }
-            if (result == Cancel) cancelled = true;
+            if (result == Cancel)
+                cancelled = true;
         };
-        if (QThread::currentThread() == qApp->thread()) prompt();
-        else QMetaObject::invokeMethod(qApp, prompt, Qt::BlockingQueuedConnection);
+        if (QThread::currentThread() == qApp->thread())
+            prompt();
+        else
+            QMetaObject::invokeMethod(qApp, prompt, Qt::BlockingQueuedConnection);
         return result;
     }
 };

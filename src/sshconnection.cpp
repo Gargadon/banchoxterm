@@ -1256,9 +1256,11 @@ void SshConnection::onKeepAlive() {
 }
 
 void SshConnection::sendBreak() {
-    if (!m_channel) return;
+    if (!m_channel)
+        return;
     const int result = retry([this] { return bancho_ssh_channel_break(m_channel, 500); });
-    if (result != 0) emit tunnelStatus(tr("Could not send SSH Break (%1).").arg(result), false);
+    if (result != 0)
+        emit tunnelStatus(tr("Could not send SSH Break (%1).").arg(result), false);
 }
 
 void SshConnection::sendToShell(const QByteArray& data) {
@@ -1391,7 +1393,8 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
         const int choice = transferConflict->resolve(localPath);
         if (choice != TransferConflict::Overwrite) {
             emit operationFinished(choice == TransferConflict::Skip,
-                choice == TransferConflict::Skip ? QStringLiteral("File skipped") : QStringLiteral("Transfer cancelled by user"));
+                                   choice == TransferConflict::Skip ? QStringLiteral("File skipped")
+                                                                    : QStringLiteral("Transfer cancelled by user"));
             return;
         }
     }
@@ -1465,12 +1468,14 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
 }
 
 int SshConnection::remoteOverwriteDecision(const QString& path) {
-    if (!transferConflict || !m_sftp) return TransferConflict::Overwrite;
+    if (!transferConflict || !m_sftp)
+        return TransferConflict::Overwrite;
     LIBSSH2_SFTP_ATTRIBUTES attrs{};
     const int rc = retry([&] { return libssh2_sftp_lstat(m_sftp, path.toUtf8().constData(), &attrs); });
     if (rc != 0) {
         // Only a definite absence permits creation without confirmation.
-        return libssh2_sftp_last_error(m_sftp) == LIBSSH2_FX_NO_SUCH_FILE ? TransferConflict::Overwrite : TransferConflict::Cancel;
+        return libssh2_sftp_last_error(m_sftp) == LIBSSH2_FX_NO_SUCH_FILE ? TransferConflict::Overwrite
+                                                                          : TransferConflict::Cancel;
     }
     return transferConflict->resolve(path);
 }
@@ -1485,7 +1490,9 @@ void SshConnection::uploadFile(const QString& localPath, const QString& remotePa
 
     const int choice = remoteOverwriteDecision(remotePath);
     if (choice != TransferConflict::Overwrite) {
-        emit operationFinished(choice == TransferConflict::Skip, choice == TransferConflict::Skip ? QStringLiteral("File skipped") : QStringLiteral("Transfer cancelled by user"));
+        emit operationFinished(choice == TransferConflict::Skip, choice == TransferConflict::Skip
+                                                                     ? QStringLiteral("File skipped")
+                                                                     : QStringLiteral("Transfer cancelled by user"));
         return;
     }
     QFile localFile(localPath);
@@ -1683,8 +1690,12 @@ bool SshConnection::ensureRemoteDirectory(const QString& remotePath, QString& er
 
 bool SshConnection::uploadOneFile(const QString& localPath, const QString& remotePath, QString& error) {
     const int choice = remoteOverwriteDecision(remotePath);
-    if (choice == TransferConflict::Skip) return true;
-    if (choice == TransferConflict::Cancel) { error = QStringLiteral("Transfer cancelled by user"); return false; }
+    if (choice == TransferConflict::Skip)
+        return true;
+    if (choice == TransferConflict::Cancel) {
+        error = QStringLiteral("Transfer cancelled by user");
+        return false;
+    }
 
     QFile f(localPath);
     if (!f.open(QIODevice::ReadOnly)) {
@@ -1824,7 +1835,9 @@ void SshConnection::uploadDirectory(const QString& localPath, const QString& rem
     if (uploadDirRecursive(localPath, remoteRoot, error)) {
         emit operationFinished(true, "Folder uploaded successfully");
     } else {
-        emit operationFinished(false, error.startsWith(QStringLiteral("Transfer cancelled")) ? error : tr("Folder upload failed: %1").arg(error));
+        emit operationFinished(false, error.startsWith(QStringLiteral("Transfer cancelled"))
+                                          ? error
+                                          : tr("Folder upload failed: %1").arg(error));
     }
 }
 

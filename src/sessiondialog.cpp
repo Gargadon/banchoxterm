@@ -746,7 +746,8 @@ void SessionDialog::setupUi() {
     m_ciscoBreakEdit = new QLineEdit(m_terminalSettingsWidget);
     m_ciscoBreakEdit->setText(QStringLiteral("1E"));
     m_ciscoBreakEdit->setPlaceholderText(tr("Hex bytes, e.g. 1E"));
-    m_ciscoBreakEdit->setToolTip(tr("Cisco escape sequence (Ctrl+^ by default), written as hexadecimal bytes. This is separate from the protocol Break signal."));
+    m_ciscoBreakEdit->setToolTip(tr("Cisco escape sequence (Ctrl+^ by default), written as hexadecimal bytes. This is "
+                                    "separate from the protocol Break signal."));
     termForm->addRow(tr("Cisco escape sequence (hex):"), m_ciscoBreakEdit);
 
     m_manufacturerCombo = new QComboBox(m_terminalSettingsWidget);

@@ -46,8 +46,7 @@ int main(int argc, char** argv) {
             }
         }
         if (key.wVirtualKeyCode == VK_RETURN || key.wVirtualKeyCode == VK_LEFT || key.wVirtualKeyCode == VK_ESCAPE ||
-            key.wVirtualKeyCode == VK_TAB ||
-            (key.uChar.UnicodeChar >= 0x1c && key.uChar.UnicodeChar <= 0x1f)) {
+            key.wVirtualKeyCode == VK_TAB || (key.uChar.UnicodeChar >= 0x1c && key.uChar.UnicodeChar <= 0x1f)) {
             std::printf("KEY=%u SHIFT=%d CHAR=%u CTRL=%d ALT=%d\n", key.wVirtualKeyCode,
                         (key.dwControlKeyState & SHIFT_PRESSED) != 0, key.uChar.UnicodeChar,
                         (key.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0,

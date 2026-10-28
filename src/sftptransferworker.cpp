@@ -37,7 +37,10 @@ void SftpTransferWorker::start() {
 }
 
 void SftpTransferWorker::onConnected() {
-    if (m_cancelRequested.load()) { finish(false, QStringLiteral("Transfer cancelled by user")); return; }
+    if (m_cancelRequested.load()) {
+        finish(false, QStringLiteral("Transfer cancelled by user"));
+        return;
+    }
     if (m_finished)
         return;
 

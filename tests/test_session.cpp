@@ -127,8 +127,8 @@ private slots:
         localPath->setText(dir.path());
         QVERIFY(QMetaObject::invokeMethod(localPath, "returnPressed"));
         QVERIFY(QMetaObject::invokeMethod(sidebar, "onConnectionSuccess"));
-        QVERIFY(QMetaObject::invokeMethod(sidebar, "onDirectoryListed", Qt::DirectConnection,
-            Q_ARG(QString, "/remote"), Q_ARG(QList<SftpFile>, QList<SftpFile>({{"folder", true}}))));
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onDirectoryListed", Qt::DirectConnection, Q_ARG(QString, "/remote"),
+                                          Q_ARG(QList<SftpFile>, QList<SftpFile>({{"folder", true}}))));
         auto* tree = sidebar->findChild<QTreeWidget*>("sftpTree");
         tree->topLevelItem(2)->setSelected(true);
         sidebar->findChild<QPushButton*>("localDownloadButton")->click();
@@ -136,7 +136,7 @@ private slots:
         auto* pane = window.findChild<QTabWidget*>();
         QVERIFY(pane);
         QVERIFY(QMetaObject::invokeMethod(&window, "onCurrentTabChanged", Qt::DirectConnection,
-            Q_ARG(QTabWidget*, pane), Q_ARG(int, -1)));
+                                          Q_ARG(QTabWidget*, pane), Q_ARG(int, -1)));
         QVERIFY(sidebar->hasActiveTransfers());
         auto* monitor = window.findChild<QDialog*>("transferMonitor");
         QVERIFY(monitor);
@@ -151,7 +151,7 @@ private slots:
         toggle->click();
         QVERIFY(monitor->height() >= expanded);
         QVERIFY(QMetaObject::invokeMethod(sidebar, "onDirectoryListed", Qt::DirectConnection,
-            Q_ARG(QString, "/remote/folder"), Q_ARG(QList<SftpFile>, QList<SftpFile>())));
+                                          Q_ARG(QString, "/remote/folder"), Q_ARG(QList<SftpFile>, QList<SftpFile>())));
         QVERIFY(!sidebar->hasActiveTransfers());
     }
 
@@ -159,8 +159,10 @@ private slots:
         QSettings settings;
         const QVariant original = settings.value("sftp/existingFilePolicy");
         auto restore = qScopeGuard([&] {
-            if (original.isValid()) settings.setValue("sftp/existingFilePolicy", original);
-            else settings.remove("sftp/existingFilePolicy");
+            if (original.isValid())
+                settings.setValue("sftp/existingFilePolicy", original);
+            else
+                settings.remove("sftp/existingFilePolicy");
         });
         settings.setValue("sftp/existingFilePolicy", 0);
         TransferConflict batch;
@@ -170,7 +172,8 @@ private slots:
             box->checkBox()->setChecked(true);
             box->grab().save("build/transfer-conflict-preview.png");
             for (auto* button : box->buttons())
-                if (box->buttonRole(button) == QMessageBox::ActionRole) button->click();
+                if (box->buttonRole(button) == QMessageBox::ActionRole)
+                    button->click();
         });
         QCOMPARE(batch.resolve("/remote/existing.txt"), int(TransferConflict::Skip));
         QCOMPARE(batch.resolve("/remote/second.txt"), int(TransferConflict::Skip));
@@ -179,9 +182,11 @@ private slots:
         QTimer::singleShot(0, [] {
             auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
             QVERIFY(box);
-            for (auto* check : box->findChildren<QCheckBox*>()) check->setChecked(true);
+            for (auto* check : box->findChildren<QCheckBox*>())
+                check->setChecked(true);
             for (auto* button : box->buttons())
-                if (box->buttonRole(button) == QMessageBox::AcceptRole) button->click();
+                if (box->buttonRole(button) == QMessageBox::AcceptRole)
+                    button->click();
         });
         QCOMPARE(permanent.resolve("existing.txt"), int(TransferConflict::Overwrite));
         TransferConflict later;
@@ -212,7 +217,9 @@ private slots:
         QTemporaryDir dir;
         const QString path = dir.filePath("existing.txt");
         QFile file(path);
-        QVERIFY(file.open(QIODevice::WriteOnly)); file.write("original"); file.close();
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("original");
+        file.close();
         auto conflict = std::make_shared<TransferConflict>();
         conflict->decision = TransferConflict::Skip;
         SshConnection ssh;
@@ -227,7 +234,8 @@ private slots:
         ftp.downloadFile("remote.txt", path);
         QCOMPARE(ftpDone.count(), 1);
         QVERIFY(ftpDone.first().first().toBool());
-        QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), QByteArray("original"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), QByteArray("original"));
     }
     void testSftpLongTransferNamesKeepSidebarWidth() {
         QSplitter splitter;
@@ -4376,7 +4384,8 @@ private slots:
     void testConPtyControlPunctuation() {
 #ifdef Q_OS_WIN
         ConPty console;
-        QVERIFY(console.start(QDir(QCoreApplication::applicationDirPath()).filePath("conpty_input_probe.exe"), {}, 80, 25));
+        QVERIFY(
+            console.start(QDir(QCoreApplication::applicationDirPath()).filePath("conpty_input_probe.exe"), {}, 80, 25));
         QByteArray output;
         QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("INPUT_READY"), 5000);
         for (int character = 0x1c; character <= 0x1f; ++character) {
@@ -4387,7 +4396,9 @@ private slots:
         }
         output.clear();
         QVERIFY(console.write(QByteArrayLiteral("a\x1d\x1e")));
-        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("CHAR=29 CTRL=1 ALT=0") && output.contains("CHAR=30 CTRL=1 ALT=0"), 2000);
+        QTRY_VERIFY_WITH_TIMEOUT((output += console.read()).contains("CHAR=29 CTRL=1 ALT=0") &&
+                                     output.contains("CHAR=30 CTRL=1 ALT=0"),
+                                 2000);
         QVERIFY(console.write("\r"));
 #else
         QSKIP("ConPTY is only available on Windows.");

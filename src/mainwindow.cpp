@@ -1232,27 +1232,33 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::prepareSftpSidebar(SshConnection* connection) {
-    if (m_sftpSidebar->connection() == connection && connection) return;
+    if (m_sftpSidebar->connection() == connection && connection)
+        return;
     SftpSidebar* target = nullptr;
     for (auto* sidebar : std::as_const(m_backgroundSftpSidebars)) {
-        if (connection && sidebar->connection() == connection) { target = sidebar; break; }
+        if (connection && sidebar->connection() == connection) {
+            target = sidebar;
+            break;
+        }
     }
-    if (!target && !m_sftpSidebar->hasActiveTransfers()) return;
+    if (!target && !m_sftpSidebar->hasActiveTransfers())
+        return;
     const bool visible = m_sidebarStacked->currentWidget() == m_sftpSidebar;
     m_sidebarStacked->removeWidget(m_sftpSidebar);
     m_sftpSidebar->hide();
     m_sftpSidebar->setParent(this);
     m_backgroundSftpSidebars.append(m_sftpSidebar);
-    if (target) m_backgroundSftpSidebars.removeOne(target);
+    if (target)
+        m_backgroundSftpSidebars.removeOne(target);
     else {
         target = new SftpSidebar(m_sidebarStacked);
-        connect(target, &SftpSidebar::diagnosticMessage, this, [this](const QString& message) {
-            statusBar()->showMessage(message, 5000);
-        });
+        connect(target, &SftpSidebar::diagnosticMessage, this,
+                [this](const QString& message) { statusBar()->showMessage(message, 5000); });
     }
     m_sftpSidebar = target;
     m_sidebarStacked->insertWidget(1, target);
-    if (visible) m_sidebarStacked->setCurrentWidget(target);
+    if (visible)
+        m_sidebarStacked->setCurrentWidget(target);
 }
 
 void MainWindow::switchSidebarTab(int index) {
@@ -1379,9 +1385,8 @@ void MainWindow::onConnectSession(const Session& session) {
     });
 
     // Connect title updates
-    connect(tab, &TerminalTab::bell, this, [this, tab]() {
-        statusBar()->showMessage(tr("Terminal bell: %1").arg(tab->session().name), 3000);
-    });
+    connect(tab, &TerminalTab::bell, this,
+            [this, tab]() { statusBar()->showMessage(tr("Terminal bell: %1").arg(tab->session().name), 3000); });
     connect(tab, &TerminalTab::titleChanged, this, [this, tab](const QString& title) {
         QTabWidget* pane = nullptr;
         for (auto* candidate : allOpenPanes())
@@ -2231,16 +2236,11 @@ void MainWindow::setupMenuBar() {
     m_specialCharactersAction = specialMenu->menuAction();
     m_specialCharactersAction->setIcon(QIcon(":/icons/terminal.svg"));
     const QList<QPair<QString, QByteArray>> specialCharacters = {
-        {tr("Break"), QByteArray()},
-        {tr("Cisco escape (Ctrl+^)"), QByteArray("\x1e")},
-        {tr("Ctrl+C"), QByteArray("\x03")},
-        {tr("Ctrl+D"), QByteArray("\x04")},
-        {tr("Ctrl+Z"), QByteArray("\x1a")},
-        {tr("Escape"), QByteArray("\x1b")},
-        {tr("Enter"), QByteArray("\r")},
-        {tr("Tab"), QByteArray("\t")},
-        {tr("Backspace"), QByteArray("\x7f")},
-        {tr("Telnet escape (Ctrl+])"), QByteArray("\x1d")},
+        {tr("Break"), QByteArray()},           {tr("Cisco escape (Ctrl+^)"), QByteArray("\x1e")},
+        {tr("Ctrl+C"), QByteArray("\x03")},    {tr("Ctrl+D"), QByteArray("\x04")},
+        {tr("Ctrl+Z"), QByteArray("\x1a")},    {tr("Escape"), QByteArray("\x1b")},
+        {tr("Enter"), QByteArray("\r")},       {tr("Tab"), QByteArray("\t")},
+        {tr("Backspace"), QByteArray("\x7f")}, {tr("Telnet escape (Ctrl+])"), QByteArray("\x1d")},
     };
     for (const auto& special : specialCharacters) {
         auto* action = specialMenu->addAction(special.first);
@@ -2252,9 +2252,12 @@ void MainWindow::setupMenuBar() {
             if (auto* tab = currentTerminalTab()) {
                 if (action->property("physicalBreak").toBool())
                     tab->sendBreak();
-                else if (action->property("ciscoEscape").toBool()) tab->sendCiscoEscape();
-                else if (action->property("telnetEscape").toBool()) tab->sendTelnetEscape();
-                else tab->sendSpecialCharacter(action->data().toByteArray());
+                else if (action->property("ciscoEscape").toBool())
+                    tab->sendCiscoEscape();
+                else if (action->property("telnetEscape").toBool())
+                    tab->sendTelnetEscape();
+                else
+                    tab->sendSpecialCharacter(action->data().toByteArray());
             }
         });
     }
@@ -2262,10 +2265,14 @@ void MainWindow::setupMenuBar() {
     connect(specialMenu, &QMenu::aboutToShow, this, [this, specialMenu] {
         auto* tab = currentTerminalTab();
         for (auto* action : specialMenu->actions()) {
-            if (!action->data().isValid() && !action->property("physicalBreak").isValid()) continue;
+            if (!action->data().isValid() && !action->property("physicalBreak").isValid())
+                continue;
             bool enabled = tab && tab->isSessionActive() && !tab->session().readOnly;
-            if (enabled && action->property("telnetEscape").toBool()) enabled = tab->session().type == SessionType::Telnet;
-            if (enabled && action->property("physicalBreak").toBool()) enabled = tab->isSsh() || tab->session().type == SessionType::Telnet || tab->session().type == SessionType::Serial;
+            if (enabled && action->property("telnetEscape").toBool())
+                enabled = tab->session().type == SessionType::Telnet;
+            if (enabled && action->property("physicalBreak").toBool())
+                enabled = tab->isSsh() || tab->session().type == SessionType::Telnet ||
+                          tab->session().type == SessionType::Serial;
             action->setEnabled(enabled);
         }
     });
