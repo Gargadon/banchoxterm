@@ -124,7 +124,13 @@ void refreshWindow(QWidget* window) {
         // announced asynchronously, and applies it when blur becomes available.
         const bool blur = translucent && opacityPercent() < 100 && !region.isEmpty() &&
                           QSettings().value("terminal/backgroundBlur", false).toBool();
-        KWindowEffects::enableBlurBehind(handle, blur, region);
+        // Request the whole client surface on GNOME Wayland to avoid a
+        // visible unblurred strip at the bottom of terminal panels. Opaque
+        // widgets still conceal the effect above them.
+        const auto desktops = qEnvironmentVariable("XDG_CURRENT_DESKTOP").split(QLatin1Char(':'));
+        const bool gnomeWayland = QApplication::platformName().startsWith(QLatin1String("wayland")) &&
+                                  desktops.contains(QLatin1String("GNOME"), Qt::CaseInsensitive);
+        KWindowEffects::enableBlurBehind(handle, blur, gnomeWayland ? QRegion() : region);
         window->setProperty("terminalBlurActive", blur);
     }
 #endif
