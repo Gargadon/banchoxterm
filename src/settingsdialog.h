@@ -2,6 +2,7 @@
 #include <QDialog>
 #include <QFont>
 #include <QMap>
+#include <QJsonArray>
 
 class QComboBox;
 class QLineEdit;
@@ -10,6 +11,7 @@ class QRadioButton;
 class QCheckBox;
 class QSpinBox;
 class QKeySequenceEdit;
+class QTableWidget;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
@@ -49,6 +51,7 @@ private:
     void saveSettings();
     bool validateShortcuts();
     void updateFontLabel();
+    QJsonArray highlightRules() const;
 
     QFont m_font;
     QString m_themeMode = "system";
@@ -78,4 +81,9 @@ private:
     QCheckBox* m_masterPasswordCheck = nullptr;
     QSpinBox* m_backgroundOpacitySpin = nullptr;
     QCheckBox* m_backgroundBlurCheck = nullptr;
+    QCheckBox* m_highlightingCheck = nullptr;
+    QTableWidget* m_highlightTable = nullptr;
+    QCheckBox* m_reviewPasteCheck = nullptr;
+    QCheckBox* m_rdpClipboardCheck = nullptr;
+    QCheckBox* m_rdpResizeCheck = nullptr;
 };

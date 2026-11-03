@@ -1,4 +1,10 @@
 #include "settingsdialog.h"
+#include "terminalhighlighter.h"
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QColorDialog>
+#include <QJsonObject>
+#include <QJsonDocument>
 #include "terminalappearance.h"
 #include "keyboardshortcuts.h"
 #include "apppaths.h"
@@ -46,6 +52,94 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     mainLayout->setSpacing(12);
 
     auto* tabWidget = new QTabWidget(this);
+
+    auto* highlightTab = new QWidget(tabWidget);
+    auto* highlightLayout = new QVBoxLayout(highlightTab);
+    m_highlightingCheck = new QCheckBox(tr("Highlight terminal text"), highlightTab);
+    m_highlightingCheck->setObjectName("highlightingEnabled");
+    m_highlightingCheck->setChecked(QSettings().value("terminal/highlightingEnabled", false).toBool());
+    highlightLayout->addWidget(m_highlightingCheck);
+    auto* highlightHelp = new QLabel(tr("Mark matching text with translucent colors. Rules apply to all terminal "
+                                        "sessions and leave copied text and logs unchanged."),
+                                     highlightTab);
+    highlightHelp->setWordWrap(true);
+    highlightLayout->addWidget(highlightHelp);
+    m_highlightTable = new QTableWidget(0, 5, highlightTab);
+    m_highlightTable->setObjectName("highlightRules");
+    m_highlightTable->setHorizontalHeaderLabels(
+        {tr("Enabled"), tr("Pattern"), tr("Regex"), tr("Match case"), tr("Color")});
+    m_highlightTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    m_highlightTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_highlightTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_highlightTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    auto addRule = [this](const QJsonObject& rule) {
+        int row = m_highlightTable->rowCount();
+        m_highlightTable->insertRow(row);
+        for (int column : {0, 2, 3}) {
+            auto* item = new QTableWidgetItem;
+            item->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable);
+            const char* key = column == 0 ? "enabled" : column == 2 ? "regex" : "caseSensitive";
+            item->setCheckState(rule.value(key).toBool(column == 0) ? Qt::Checked : Qt::Unchecked);
+            m_highlightTable->setItem(row, column, item);
+        }
+        m_highlightTable->setItem(row, 1, new QTableWidgetItem(rule.value("pattern").toString()));
+        auto* color = new QTableWidgetItem(rule.value("color").toString());
+        color->setBackground(QColor(color->text()));
+        color->setForeground(QColor(color->text()).lightness() > 128 ? Qt::black : Qt::white);
+        color->setToolTip(tr("Double-click to choose a color, or enter a color such as #fbbf24."));
+        m_highlightTable->setItem(row, 4, color);
+        m_highlightTable->setCurrentCell(row, 1);
+    };
+    for (const auto& rule : TerminalHighlighting::load())
+        addRule(rule.toObject());
+    highlightLayout->addWidget(m_highlightTable, 1);
+    auto* ruleButtons = new QHBoxLayout;
+    auto* addHighlight = new QPushButton(tr("Add rule"), highlightTab);
+    addHighlight->setObjectName("addHighlightRule");
+    auto* removeHighlight = new QPushButton(tr("Remove rule"), highlightTab);
+    removeHighlight->setObjectName("removeHighlightRule");
+    auto* resetHighlight = new QPushButton(tr("Restore example rules"), highlightTab);
+    ruleButtons->addWidget(addHighlight);
+    ruleButtons->addWidget(removeHighlight);
+    ruleButtons->addStretch();
+    ruleButtons->addWidget(resetHighlight);
+    highlightLayout->addLayout(ruleButtons);
+    connect(addHighlight, &QPushButton::clicked, this, [this, addRule] {
+        if (m_highlightTable->rowCount() < 32)
+            addRule(QJsonObject{{"pattern", tr("keyword")}, {"color", "#fbbf24"}});
+    });
+    connect(removeHighlight, &QPushButton::clicked, this, [this] {
+        if (m_highlightTable->currentRow() >= 0)
+            m_highlightTable->removeRow(m_highlightTable->currentRow());
+    });
+    connect(resetHighlight, &QPushButton::clicked, this, [this, addRule] {
+        m_highlightTable->setRowCount(0);
+        for (const auto& rule : TerminalHighlighting::defaults())
+            addRule(rule.toObject());
+    });
+    connect(m_highlightTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int column) {
+        if (column != 4)
+            return;
+        auto* item = m_highlightTable->item(row, column);
+        const QColor color = QColorDialog::getColor(QColor(item->text()), this, tr("Highlight color"));
+        if (color.isValid())
+            item->setText(color.name());
+    });
+    connect(m_highlightTable, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
+        if (item->column() != 4)
+            return;
+        const QColor color(item->text());
+        if (!color.isValid())
+            return;
+        const QSignalBlocker blocker(m_highlightTable);
+        item->setBackground(color);
+        item->setForeground(color.lightness() > 128 ? Qt::black : Qt::white);
+    });
+    auto* highlightNote = new QLabel(tr("Up to 32 rules, 256 characters per pattern. Matching continues across wrapped "
+                                        "lines; double-size terminal lines are excluded."),
+                                     highlightTab);
+    highlightNote->setWordWrap(true);
+    highlightLayout->addWidget(highlightNote);
 
     // 1. Appearance Tab
     auto* appearanceScroll = new QScrollArea(tabWidget);
@@ -182,6 +276,32 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_shellIntegrationCheck->setChecked(m_enableShellIntegration);
     appLayout->addWidget(m_shellIntegrationCheck);
 
+    m_reviewPasteCheck = new QCheckBox(tr("Review multiline paste before sending"), appearanceTab);
+    m_reviewPasteCheck->setObjectName("reviewMultilinePaste");
+    m_reviewPasteCheck->setChecked(QSettings().value("terminal/reviewMultilinePaste", true).toBool());
+    m_reviewPasteCheck->setToolTip(tr(
+        "Also review text containing control characters. Paste with review remains available in the terminal menu."));
+    appLayout->addWidget(m_reviewPasteCheck);
+#if defined(BANCHO_HAVE_FREERDP) || defined(Q_OS_WIN)
+    auto* rdpGroup = new QGroupBox(tr("RDP"), appearanceTab);
+    auto* rdpLayout = new QVBoxLayout(rdpGroup);
+    m_rdpClipboardCheck = new QCheckBox(tr("Share clipboard"), rdpGroup);
+    m_rdpClipboardCheck->setObjectName("rdpClipboardEnabled");
+    m_rdpClipboardCheck->setToolTip(tr("Available clipboard formats depend on the RDP client and server."));
+    m_rdpClipboardCheck->setChecked(QSettings().value("rdp/clipboardEnabled", true).toBool());
+    rdpLayout->addWidget(m_rdpClipboardCheck);
+    m_rdpResizeCheck = new QCheckBox(tr("Adapt remote resolution to the tab size"), rdpGroup);
+    m_rdpResizeCheck->setObjectName("rdpDynamicResolution");
+    m_rdpResizeCheck->setChecked(QSettings().value("rdp/dynamicResolution", true).toBool());
+    rdpLayout->addWidget(m_rdpResizeCheck);
+    auto* rdpNote = new QLabel(
+        tr("Applies to new connections. If the server does not support resizing, the desktop is scaled to fit."),
+        rdpGroup);
+    rdpNote->setWordWrap(true);
+    rdpLayout->addWidget(rdpNote);
+    appLayout->addWidget(rdpGroup);
+#endif
+
     m_loggingCheck = new QCheckBox(tr("Log session output to file"), appearanceTab);
     m_loggingCheck->setChecked(m_loggingEnabled);
     appLayout->addWidget(m_loggingCheck);
@@ -253,6 +373,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 
     appLayout->addStretch();
     tabWidget->addTab(appearanceScroll, tr("Appearance"));
+    tabWidget->addTab(highlightTab, tr("Highlighting"));
 
     // 2. Editor Tab
     auto* editorTab = new QWidget(tabWidget);
@@ -484,6 +605,13 @@ void SettingsDialog::saveSettings() {
     settings.setValue("terminal/colorScheme", m_colorScheme);
     settings.setValue("terminal/backgroundOpacity", m_backgroundOpacitySpin->value());
     settings.setValue("terminal/backgroundBlur", m_backgroundBlurCheck->isChecked());
+    settings.setValue("terminal/highlightingEnabled", m_highlightingCheck->isChecked());
+    settings.setValue("terminal/highlightRules", QJsonDocument(highlightRules()).toJson(QJsonDocument::Compact));
+    settings.setValue("terminal/reviewMultilinePaste", m_reviewPasteCheck->isChecked());
+    if (m_rdpClipboardCheck)
+        settings.setValue("rdp/clipboardEnabled", m_rdpClipboardCheck->isChecked());
+    if (m_rdpResizeCheck)
+        settings.setValue("rdp/dynamicResolution", m_rdpResizeCheck->isChecked());
     settings.setValue("terminal/shellIntegration", m_enableShellIntegration);
     settings.setValue("terminal/loggingEnabled", m_loggingEnabled);
     settings.setValue("terminal/logDirectory", m_logDir);
@@ -543,7 +671,24 @@ bool SettingsDialog::validateShortcuts() {
     return true;
 }
 
+QJsonArray SettingsDialog::highlightRules() const {
+    QJsonArray rules;
+    for (int row = 0; row < m_highlightTable->rowCount(); ++row) {
+        rules.append(QJsonObject{{"enabled", m_highlightTable->item(row, 0)->checkState() == Qt::Checked},
+                                 {"pattern", m_highlightTable->item(row, 1)->text()},
+                                 {"regex", m_highlightTable->item(row, 2)->checkState() == Qt::Checked},
+                                 {"caseSensitive", m_highlightTable->item(row, 3)->checkState() == Qt::Checked},
+                                 {"color", m_highlightTable->item(row, 4)->text()}});
+    }
+    return rules;
+}
+
 void SettingsDialog::onAccept() {
+    const QString error = TerminalHighlighting::validate(highlightRules());
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("Invalid highlighting rule"), error);
+        return;
+    }
     if (!validateShortcuts())
         return;
     saveSettings();

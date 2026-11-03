@@ -60,7 +60,7 @@ jobs:
           "$QT_ROOT_DIR/bin/qmake" -query QT_VERSION
           test "$("$QT_ROOT_DIR/bin/qmake" -query QT_VERSION)" = "$BANCHO_QT_VERSION"
       - name: Check FreeRDP development libraries
-        run: pkg-config --print-errors --exists 'freerdp3 >= 3.0' 'winpr3 >= 3.0'
+        run: pkg-config --print-errors --exists 'freerdp3 >= 3.0' 'freerdp-client3 >= 3.0' 'winpr3 >= 3.0'
       - name: Configure
         run: >-
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

@@ -1570,6 +1570,30 @@ Do you want to continue?</source>
         <source>Mode: %1</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>%1: %2</source>
+        <translation>%1: %2</translation>
+    </message>
+    <message>
+        <source>Skipped an invalid bookmark.</source>
+        <translation>Se omitió un marcador inválido.</translation>
+    </message>
+    <message>
+        <source>Skipped unsupported protocol %1.</source>
+        <translation>Se omitió el protocolo no compatible %1.</translation>
+    </message>
+    <message>
+        <source>Skipped an empty host or invalid port.</source>
+        <translation>Se omitió un servidor vacío o un puerto inválido.</translation>
+    </message>
+    <message>
+        <source>Imported connection details and folder. Advanced options and credentials were not imported.</source>
+        <translation>Se importaron los datos de conexión y la carpeta. No se importaron las opciones avanzadas ni las credenciales.</translation>
+    </message>
+    <message>
+        <source>Skipped an unsupported or invalid session.</source>
+        <translation>Se omitió una sesión inválida o no compatible.</translation>
+    </message>
 </context>
 <context>
     <name>RemoteEditorDialog</name>
@@ -2668,6 +2692,42 @@ App:OtraApp</translation>
         <source>Enter one key:value pair per line.</source>
         <translation>Introduce un par clave:valor por línea.</translation>
     </message>
+    <message>
+        <source>Review imported sessions</source>
+        <translation>Revisar sesiones importadas</translation>
+    </message>
+    <message>
+        <source>%1 session(s) ready to import.</source>
+        <translation>%1 sesión(es) listas para importar.</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>Nombre</translation>
+    </message>
+    <message>
+        <source>Protocol</source>
+        <translation>Protocolo</translation>
+    </message>
+    <message>
+        <source>Host</source>
+        <translation>Servidor</translation>
+    </message>
+    <message>
+        <source>Port</source>
+        <translation>Puerto</translation>
+    </message>
+    <message>
+        <source>Folder</source>
+        <translation>Carpeta</translation>
+    </message>
+    <message>
+        <source>Import notes</source>
+        <translation>Notas de importación</translation>
+    </message>
+    <message>
+        <source>Import sessions</source>
+        <translation>Importar sesiones</translation>
+    </message>
 </context>
 <context>
     <name>SettingsDialog</name>
@@ -3010,6 +3070,106 @@ App:OtraApp</translation>
     <message>
         <source>Update interval:</source>
         <translation>Intervalo de actualización:</translation>
+    </message>
+    <message>
+        <source>Highlight terminal text</source>
+        <translation>Resaltar texto del terminal</translation>
+    </message>
+    <message>
+        <source>Mark matching text with translucent colors. Rules apply to all terminal sessions and leave copied text and logs unchanged.</source>
+        <translation>Marca las coincidencias con colores translúcidos. Las reglas se aplican a todas las sesiones de terminal y conservan el texto copiado y los registros.</translation>
+    </message>
+    <message>
+        <source>Enabled</source>
+        <translation>Activada</translation>
+    </message>
+    <message>
+        <source>Pattern</source>
+        <translation>Patrón</translation>
+    </message>
+    <message>
+        <source>Regex</source>
+        <translation>Regex</translation>
+    </message>
+    <message>
+        <source>Match case</source>
+        <translation>Distinguir mayúsculas</translation>
+    </message>
+    <message>
+        <source>Color</source>
+        <translation>Color</translation>
+    </message>
+    <message>
+        <source>Double-click to choose a color, or enter a color such as #fbbf24.</source>
+        <translation>Haz doble clic para elegir un color o escribe uno como #fbbf24.</translation>
+    </message>
+    <message>
+        <source>Add rule</source>
+        <translation>Añadir regla</translation>
+    </message>
+    <message>
+        <source>Remove rule</source>
+        <translation>Eliminar regla</translation>
+    </message>
+    <message>
+        <source>Restore example rules</source>
+        <translation>Restaurar reglas de ejemplo</translation>
+    </message>
+    <message>
+        <source>keyword</source>
+        <translation>palabra</translation>
+    </message>
+    <message>
+        <source>Highlight color</source>
+        <translation>Color de resaltado</translation>
+    </message>
+    <message>
+        <source>Up to 32 rules, 256 characters per pattern. Matching continues across wrapped lines; double-size terminal lines are excluded.</source>
+        <translation>Hasta 32 reglas y 256 caracteres por patrón. La búsqueda continúa en las líneas ajustadas al ancho; se excluyen las líneas de tamaño doble.</translation>
+    </message>
+    <message>
+        <source>Review multiline paste before sending</source>
+        <translation>Revisar el pegado de varias líneas antes de enviarlo</translation>
+    </message>
+    <message>
+        <source>Also review text containing control characters. Paste with review remains available in the terminal menu.</source>
+        <translation>También revisa el texto con caracteres de control. Puedes usar Pegar con revisión desde el menú del terminal.</translation>
+    </message>
+    <message>
+        <source>RDP on Linux</source>
+        <translation>RDP en Linux</translation>
+    </message>
+    <message>
+        <source>Share text clipboard</source>
+        <translation>Compartir el portapapeles de texto</translation>
+    </message>
+    <message>
+        <source>Adapt remote resolution to the tab size</source>
+        <translation>Adaptar la resolución remota al tamaño de la pestaña</translation>
+    </message>
+    <message>
+        <source>Applies to new connections. If the server does not support resizing, the desktop is scaled to fit.</source>
+        <translation>Se aplica a las conexiones nuevas. Si el servidor no admite cambiar la resolución, se escala el escritorio para ajustarlo.</translation>
+    </message>
+    <message>
+        <source>Highlighting</source>
+        <translation>Resaltado</translation>
+    </message>
+    <message>
+        <source>Invalid highlighting rule</source>
+        <translation>Regla de resaltado inválida</translation>
+    </message>
+    <message>
+        <source>RDP</source>
+        <translation>RDP</translation>
+    </message>
+    <message>
+        <source>Share clipboard</source>
+        <translation>Compartir portapapeles</translation>
+    </message>
+    <message>
+        <source>Available clipboard formats depend on the RDP client and server.</source>
+        <translation>Los formatos del portapapeles disponibles dependen del cliente y del servidor RDP.</translation>
     </message>
 </context>
 <context>
@@ -4239,6 +4399,26 @@ Cierra esta pestaña cuando termines.</translation>
         <source>Find...</source>
         <translation>Buscar...</translation>
     </message>
+    <message>
+        <source>Paste with review...</source>
+        <translation>Pegar con revisión...</translation>
+    </message>
+    <message>
+        <source>Review paste</source>
+        <translation>Revisar pegado</translation>
+    </message>
+    <message>
+        <source>Review or edit the text before sending it to this terminal. A trailing line break may execute a command.</source>
+        <translation>Revisa o edita el texto antes de enviarlo a este terminal. Un salto de línea al final puede ejecutar un comando.</translation>
+    </message>
+    <message>
+        <source>Text to paste</source>
+        <translation>Texto para pegar</translation>
+    </message>
+    <message>
+        <source>Review or edit the text before pasting. Synchronized terminals also receive this text. A trailing line break may execute a command.</source>
+        <translation>Revisa o edita el texto antes de pegarlo. Los terminales sincronizados también reciben este texto. Un salto de línea al final puede ejecutar un comando.</translation>
+    </message>
 </context>
 <context>
     <name>TunnelEditDialog</name>
@@ -4615,4 +4795,23 @@ Versión actual: %2</translation>
 <context><name>MainWindow</name><message><source>Break</source><translation>Break</translation></message><message><source>Cisco escape (Ctrl+^)</source><translation>Escape de Cisco (Ctrl+^)</translation></message></context>
 <context><name>SshConnection</name><message><source>Could not send SSH Break (%1).</source><translation>No se pudo enviar Break por SSH (%1).</translation></message></context>
 <context><name>SessionDialog</name><message><source>Cisco escape sequence (hex):</source><translation>Secuencia de escape de Cisco (hex):</translation></message><message><source>Cisco escape sequence (Ctrl+^ by default), written as hexadecimal bytes. This is separate from the protocol Break signal.</source><translation>Secuencia de escape de Cisco (Ctrl+^ por defecto) en bytes hexadecimales. Es independiente de la señal Break del protocolo.</translation></message></context>
+<context>
+    <name>TerminalHighlighting</name>
+    <message>
+        <source>Use at most 32 highlighting rules.</source>
+        <translation>Usa un máximo de 32 reglas de resaltado.</translation>
+    </message>
+    <message>
+        <source>Enter a pattern of 1–256 characters.</source>
+        <translation>Introduce un patrón de 1 a 256 caracteres.</translation>
+    </message>
+    <message>
+        <source>Choose a valid color.</source>
+        <translation>Elige un color válido.</translation>
+    </message>
+    <message>
+        <source>Rule %1: %2</source>
+        <translation>Regla %1: %2</translation>
+    </message>
+</context>
 </TS>

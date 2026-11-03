@@ -1,10 +1,17 @@
 #include "terminaltab.h"
+#include <algorithm>
+#include "terminalhighlighter.h"
+#include <QPlainTextEdit>
+#include <QDialogButtonBox>
+#include <QClipboard>
+#include <QMouseEvent>
 #include "terminalappearance.h"
 #include "xservermanager.h"
 #include "sshconnection.h"
 #include "keyring.h"
 #include "keyboardshortcuts.h"
 #include <qtermwidget.h>
+#include <ScreenWindow.h>
 #include "../third_party/qtermwidget/lib/TerminalDisplay.h"
 #include "../third_party/qtermwidget/lib/Emulation.h"
 #include "../third_party/qtermwidget/lib/Session.h"
@@ -175,6 +182,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
         connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
         if (auto* display = m_terminal->findChild<Konsole::TerminalDisplay*>()) {
+            m_highlighter = new TerminalHighlighter(display);
             connect(display, &Konsole::TerminalDisplay::keyPressedSignal, this, &TerminalTab::userKeyInput);
             connect(display, &Konsole::TerminalDisplay::sendStringToEmu, this,
                     [this](const char* text) { emit userStringInput(QString::fromUtf8(text)); });
@@ -243,6 +251,11 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                 if (error == QSerialPort::NoError)
                     return;
                 feedTerminalData(tr("\r\n[Serial error: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
+                // PTYs and some USB adapters cannot drive modem-control lines.
+                // An unsupported DTR/RTS operation does not close the data link;
+                // a timeout also leaves the port available for subsequent I/O.
+                if (error == QSerialPort::UnsupportedOperationError || error == QSerialPort::TimeoutError)
+                    return;
                 m_isActive = false;
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
                 showStoppedPrompt();
@@ -256,7 +269,8 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             } else {
                 if (!m_serialPort->setDataTerminalReady(m_session.serialDtr))
                     feedTerminalData(tr("\r\n[Unable to set DTR: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
-                if (!m_serialPort->setRequestToSend(m_session.serialRts))
+                if (m_serialPort->flowControl() != QSerialPort::HardwareControl &&
+                    !m_serialPort->setRequestToSend(m_session.serialRts))
                     feedTerminalData(tr("\r\n[Unable to set RTS: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
             }
         } else {
@@ -404,7 +418,7 @@ void TerminalTab::resizeEvent(QResizeEvent* event) {
     // Wait for the child layouts to receive their new geometry. DesktopWidth
     // and DesktopHeight only set the initial resolution, before Connect().
     QTimer::singleShot(0, this, [this]() {
-        if (!m_rdpWidget || !m_isActive || m_rdpWidget->property("Connected").toInt() != 1)
+        if (!m_rdpDynamicResolution || !m_rdpWidget || !m_isActive || m_rdpWidget->property("Connected").toInt() != 1)
             return;
         const int w = qBound(200, m_rdpWidget->width(), 8192);
         const int h = qBound(200, m_rdpWidget->height(), 8192);
@@ -750,6 +764,9 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
 
     auto* pasteAct = menu.addAction(tr("&Paste"));
     pasteAct->setShortcut(KeyboardShortcuts::sequence("paste"));
+    auto* reviewPasteAct = menu.addAction(tr("Paste with review..."));
+    reviewPasteAct->setObjectName("reviewPasteAction");
+    reviewPasteAct->setEnabled(!m_session.readOnly);
 
     menu.addSeparator();
     auto* findAct = menu.addAction(tr("Find..."));
@@ -805,6 +822,8 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
         setCaptureApplicationShortcuts(captureAct->isChecked());
     } else if (selected == copyAct) {
         doCopy();
+    } else if (selected == reviewPasteAct) {
+        doPaste(true);
     } else if (selected == pasteAct) {
         doPaste();
     } else if (selected == findAct) {
@@ -866,6 +885,8 @@ void TerminalTab::updateFontFromSettings() {
                                     : m_session.colorScheme;
 
     if (m_terminal) {
+        if (m_highlighter)
+            m_highlighter->reload();
         m_terminal->setTerminalFont(font);
         const bool translucent = window()->testAttribute(Qt::WA_TranslucentBackground);
         m_terminal->setTerminalOpacity(translucent ? TerminalAppearance::opacityPercent() / 100.0 : 1.0);
@@ -1006,10 +1027,14 @@ void TerminalTab::setupWindowsRdpActiveX() {
         return;
     }
 
+    const QSettings preferences;
+    m_rdpDynamicResolution = preferences.value("rdp/dynamicResolution", true).toBool();
     m_rdpWidget->setProperty("Server", m_session.host);
     if (auto* settings = m_rdpWidget->querySubObject("AdvancedSettings7")) {
         settings->setProperty("RDPPort", m_session.port);
         settings->setProperty("EnableCredSspSupport", true);
+        // RedirectClipboard is inherited from IMsRdpClientAdvancedSettings5.
+        settings->setProperty("RedirectClipboard", preferences.value("rdp/clipboardEnabled", true).toBool());
         settings->setProperty("SmartSizing", true);
         delete settings;
     }
@@ -1349,6 +1374,27 @@ bool TerminalTab::eventFilter(QObject* watched, QEvent* event) {
             // Let the terminal's keyboard translator encode the original key,
             // bypassing our clipboard/search handling without losing modifiers.
             return QWidget::eventFilter(watched, event);
+        }
+    }
+    if (m_terminal && watched == m_terminal->focusProxy()) {
+        if (event->type() == QEvent::KeyPress && !m_captureApplicationShortcuts) {
+            auto* key = static_cast<QKeyEvent*>(event);
+            // Plain Ctrl+V belongs to readline/nano (quoted insert). The
+            // configurable application shortcut is handled by its QAction.
+            if (key->key() == Qt::Key_Insert && key->modifiers() == Qt::ShiftModifier) {
+                doPaste();
+                return true;
+            }
+        }
+        if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease) {
+            auto* mouse = static_cast<QMouseEvent*>(event);
+            auto* display = m_terminal->findChild<Konsole::TerminalDisplay*>();
+            if (mouse->button() == Qt::MiddleButton && display &&
+                (display->usesMouse() || (mouse->modifiers() & Qt::ShiftModifier))) {
+                if (event->type() == QEvent::MouseButtonPress)
+                    doPaste(false, true);
+                return true;
+            }
         }
     }
     if (m_terminal && m_session.readOnly && event->type() == QEvent::KeyPress) {
@@ -1903,13 +1949,65 @@ void TerminalTab::doCopy() {
         m_terminal->copyClipboard();
 }
 
-void TerminalTab::doPaste() {
+void TerminalTab::doPaste(bool forceReview, bool primarySelection) {
     if (m_session.readOnly) {
         reportMacroMessage(tr("Session is read-only; paste was blocked."));
         return;
     }
-    if (m_terminal)
-        m_terminal->pasteClipboard();
+    if (!m_terminal)
+        return;
+    auto* display = m_terminal->findChild<Konsole::TerminalDisplay*>();
+    if (!display)
+        return;
+    QString text = QApplication::clipboard()->text(primarySelection ? QClipboard::Selection : QClipboard::Clipboard);
+    if (text.isEmpty())
+        return;
+    text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    text.replace('\r', '\n');
+    const bool activeBeforeReview = m_isActive;
+    const bool hasControls = std::any_of(text.cbegin(), text.cend(), [](QChar c) {
+        return c.category() == QChar::Other_Control && c != '\n' && c != '\t';
+    });
+    if (forceReview ||
+        (QSettings().value("terminal/reviewMultilinePaste", true).toBool() && (text.contains('\n') || hasControls))) {
+        QDialog dialog(this);
+        dialog.setObjectName("pasteReviewDialog");
+        dialog.setWindowTitle(tr("Review paste"));
+        dialog.resize(640, 400);
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* label = new QLabel(tr("Review or edit the text before pasting. Synchronized terminals also receive this "
+                                    "text. A trailing line break may execute a command."),
+                                 &dialog);
+        label->setWordWrap(true);
+        layout->addWidget(label);
+        auto* edit = new QPlainTextEdit(text, &dialog);
+        edit->setObjectName("pasteReviewText");
+        edit->setAccessibleName(tr("Text to paste"));
+        edit->setFont(m_terminal->getTerminalFont());
+        edit->setTabChangesFocus(true);
+        layout->addWidget(edit, 1);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+        buttons->button(QDialogButtonBox::Ok)->setText(tr("Paste"));
+        buttons->button(QDialogButtonBox::Ok)->setDefault(false);
+        buttons->button(QDialogButtonBox::Cancel)->setDefault(true);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        layout->addWidget(buttons);
+        edit->setFocus();
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        text = edit->toPlainText();
+    }
+    if (text.isEmpty() || m_closing || (activeBeforeReview && !m_isActive) || m_session.readOnly)
+        return;
+    text.replace('\n', '\r');
+    // Use the emulator's normal paste path, including bracketed-paste mode,
+    // key encoding and the existing synchronized-input signal. No extra Enter.
+    m_terminal->bracketText(text);
+    QKeyEvent event(QEvent::KeyPress, 0, Qt::NoModifier, text);
+    emit display->keyPressedSignal(&event, true);
+    display->screenWindow()->clearSelection();
+    display->scrollToEnd();
 }
 
 void TerminalTab::doClear() {

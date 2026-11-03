@@ -109,10 +109,12 @@ public:
     static bool exportOpenSshConfig(const QList<Session>& sessions, const QString& path);
     static QList<Session> importSessions(const QString& path, bool* ok = nullptr,
                                          QStringList* importedMacroNames = nullptr,
-                                         QStringList* importedMacroTexts = nullptr);
+                                         QStringList* importedMacroTexts = nullptr,
+                                         QStringList* importWarnings = nullptr);
     static QList<Session> importOpenSshConfig(const QString& path, bool* ok = nullptr);
     static QList<Session> importPuTTYRegistry(const QString& path, bool* ok = nullptr);
-    static QList<Session> importMobaXtermSessions(const QString& path, bool* ok = nullptr);
+    static QList<Session> importMobaXtermSessions(const QString& path, bool* ok = nullptr,
+                                                  QStringList* warnings = nullptr);
     static QList<Session> importSecureCrtSession(const QString& path, bool* ok = nullptr);
     static QList<Session> importRoyalTsDocument(const QString& path, bool* ok = nullptr);
     static QString getFilePath();

@@ -72,6 +72,16 @@
 #include <QMenu>
 #include <QClipboard>
 #include "terminalappearance.h"
+#include "terminalhighlighter.h"
+#include <ScreenWindow.h>
+#include <QTableWidget>
+#include <QTranslator>
+#include <QSerialPort>
+#ifdef Q_OS_LINUX
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdlib>
+#endif
 #include "settingsdialog.h"
 #include "keyboardshortcuts.h"
 #include <QKeySequenceEdit>
@@ -1271,6 +1281,92 @@ private slots:
         QCOMPARE(restored.host, QString("192.168.1.1"));
     }
 
+    void testSerialConnectionThroughVirtualPort_data() {
+        QTest::addColumn<int>("baud");
+        QTest::addColumn<int>("flow");
+        QTest::newRow("9600-8N1") << 9600 << int(QSerialPort::NoFlowControl);
+        QTest::newRow("115200-8N1") << 115200 << int(QSerialPort::NoFlowControl);
+        QTest::newRow("driver-controls-RTS") << 115200 << int(QSerialPort::HardwareControl);
+    }
+
+    void testSerialConnectionThroughVirtualPort() {
+#ifndef Q_OS_LINUX
+        QSKIP("This integration test uses a Linux PTY; Windows needs a virtual COM pair or hardware.");
+#else
+        QFETCH(int, baud);
+        QFETCH(int, flow);
+        int peer = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);
+        QVERIFY2(peer >= 0, "Could not create a virtual serial port");
+        const auto closePeer = qScopeGuard([&] {
+            if (peer >= 0)
+                ::close(peer);
+        });
+        QVERIFY(grantpt(peer) == 0);
+        QVERIFY(unlockpt(peer) == 0);
+        const char* slave = ptsname(peer);
+        QVERIFY(slave);
+        Session profile;
+        profile.type = SessionType::Serial;
+        profile.name = "Virtual serial integration";
+        profile.serialPort = QString::fromLocal8Bit(slave);
+        profile.baudRate = baud;
+        profile.serialFlowControl = flow;
+        profile.enterSequence = "\r\n";
+        profile.backspaceSequence = QString(QChar(0x08));
+        TerminalTab tab(profile);
+        tab.resize(640, 320);
+        tab.show();
+        auto* port = tab.findChild<QSerialPort*>();
+        QVERIFY(port);
+        QVERIFY2(port->isOpen(), qPrintable(port->errorString()));
+        QVERIFY2(tab.isSessionActive(), "Non-fatal modem-line errors must not stop serial I/O");
+        QCOMPARE(port->baudRate(), baud);
+        QCOMPARE(port->dataBits(), QSerialPort::Data8);
+        QCOMPARE(port->parity(), QSerialPort::NoParity);
+        QCOMPARE(port->stopBits(), QSerialPort::OneStop);
+        QCOMPARE(port->flowControl(), static_cast<QSerialPort::FlowControl>(flow));
+        auto readPeer = [&] {
+            QByteArray bytes;
+            char buffer[4096];
+            ssize_t count;
+            while ((count = ::read(peer, buffer, sizeof(buffer))) > 0)
+                bytes.append(buffer, count);
+            return bytes;
+        };
+        auto* display = tab.getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
+        QVERIFY(display);
+        QTest::keyClicks(display, "show");
+        QTest::keyClick(display, Qt::Key_Backspace);
+        QTest::keyClick(display, Qt::Key_Return);
+        QByteArray wire;
+        QTRY_COMPARE((wire += readPeer()), QByteArray("show\b\r\n"));
+        // Raw binary data must bypass newline/backspace translation and survive buffering.
+        QByteArray binary;
+        for (int i = 0; i < 65536; ++i)
+            binary.append(char(i & 0xff));
+        tab.sendBytes(binary);
+        wire.clear();
+        QTRY_COMPARE_WITH_TIMEOUT((wire += readPeer()), binary, 3000);
+        QByteArray received;
+        connect(&tab, &TerminalTab::terminalDataReceived, &tab, [&](const QByteArray& bytes) { received += bytes; });
+        const QByteArray reply = QString::fromUtf8("device: conexión correcta 界\r\n").toUtf8();
+        const qsizetype split = reply.indexOf(char(0xc3)) + 1;
+        QVERIFY(split > 0);
+        QCOMPARE(::write(peer, reply.constData(), split), ssize_t(split));
+        QTRY_VERIFY(!received.isEmpty());
+        QCOMPARE(::write(peer, reply.constData() + split, reply.size() - split), ssize_t(reply.size() - split));
+        QTRY_COMPARE(received, reply);
+        // The emulator must render the incoming stream, not just acknowledge bytes.
+        auto* screen = display->screenWindow();
+        screen->setSelectionStart(0, 0, false);
+        screen->setSelectionEnd(screen->windowColumns() - 1, screen->windowLines() - 1);
+        QVERIFY(screen->selectedText(false).contains(QString::fromUtf8("device: conexión correcta 界")));
+        ::close(peer);
+        peer = -1;
+        QTRY_VERIFY(!tab.isSessionActive());
+#endif
+    }
+
     void testSerialSessionRoundtrip() {
         Session original;
         original.id = "test-id-serial";
@@ -1879,6 +1975,12 @@ private slots:
         portProbe.close();
 
         QProcess sshd;
+        const auto stopSshd = qScopeGuard([&] {
+            if (sshd.state() != QProcess::NotRunning) {
+                sshd.terminate();
+                sshd.waitForFinished(3000);
+            }
+        });
         sshd.setProcessChannelMode(QProcess::MergedChannels);
         sshd.start(QStringLiteral("sshd"), {QStringLiteral("-D"), QStringLiteral("-e"), QStringLiteral("-f"),
                                             sshdConfig, QStringLiteral("-p"), QString::number(port)});
@@ -1927,7 +2029,11 @@ private slots:
         const QList<TunnelConfig> tunnels = {localTunnel, remoteTunnel, socksTunnel};
         portReservations.clear();
 
+        QByteArray readinessOutput;
         SshConnection connection;
+        // This protocol test has no terminal emulator to answer startup device
+        // queries from the user's login shell (for example, fish).
+        connection.setTerminalType(QStringLiteral("dumb"));
         QSettings monitoringSettings;
         const QVariant previousMonitoring = monitoringSettings.value("ssh/monitoringEnabled");
         const QVariant previousInterval = monitoringSettings.value("ssh/monitoringIntervalSeconds");
@@ -1952,6 +2058,8 @@ private slots:
         QSignalSpy tunnelStatusSpy(&connection, &SshConnection::tunnelStatus);
         QSignalSpy directorySpy(&connection, &SshConnection::directoryListed);
         QSignalSpy workingDirectorySpy(&connection, &SshConnection::remoteDirectoryChanged);
+        connect(&connection, &SshConnection::shellDataReceived, this,
+                [&](const QByteArray& bytes) { readinessOutput += bytes; });
         connection.connectToHost(QStringLiteral("127.0.0.1"), port, user, clientKey, QString(), tunnels);
         QTRY_VERIFY_WITH_TIMEOUT(connectedSpy.count() == 1 || failureSpy.count() > 0, 5000);
         if (connectedSpy.isEmpty()) {
@@ -1964,7 +2072,12 @@ private slots:
 
         // Plain Bash emits no OSC 7. Track the real PTY process even with
         // monitoring disabled, preserving spaces, percent signs and UTF-8.
-        connection.sendToShell("exec /bin/bash --noprofile --norc\r");
+        // Wait for the replacement shell's prompt: shells such as fish may
+        // consume input buffered behind exec while they are still starting.
+        // Adjacent quoted fragments keep the marker out of the command echo.
+        connection.sendToShell("exec env 'PS1=__BANCHO_SSH_READ''Y__ ' /bin/bash --noprofile --norc\r");
+        QTRY_VERIFY2_WITH_TIMEOUT(readinessOutput.contains("__BANCHO_SSH_READY__ "),
+                                  qPrintable(QString::fromUtf8(readinessOutput)), 20000);
         const QString trackedPath = serverDir.filePath(QString::fromUtf8("cwd with spaces % ñ"));
         QVERIFY(QDir().mkpath(trackedPath));
         connection.sendToShell(("cd -- '" + trackedPath + "'\r").toUtf8());
@@ -2010,10 +2123,13 @@ private slots:
                 text += output.first().toByteArray();
             return text;
         };
-        connection.sendToShell("exec /bin/dash\r");
+        const QByteArray secondShell = QFile::exists("/bin/dash") ? QByteArray("/bin/dash") : QByteArray("/bin/sh");
+        connection.sendToShell("unset PS1; exec " + secondShell + '\r');
         // Wait for the new prompt: interactive shell startup may flush input
-        // queued before its terminal modes have been initialized.
-        QTRY_VERIFY_WITH_TIMEOUT(shellText().contains("exec /bin/dash") && shellText().endsWith("$ "), 3000);
+        // queued before its terminal modes have been initialized. Distros
+        // without dash can still exercise the shell switch using /bin/sh.
+        QTRY_VERIFY2_WITH_TIMEOUT(shellText().contains("exec " + secondShell) && shellText().endsWith("$ "),
+                                  shellText().constData(), 3000);
         connection.sendToShell(("cd -- '" + serverDir.path() + "'\r").toUtf8());
         QTRY_COMPARE_WITH_TIMEOUT(workingDirectorySpy.last().first().toString(), serverDir.path(), 5000);
 
@@ -2515,7 +2631,7 @@ private slots:
         for (const auto& pair :
              {qMakePair(Qt::Key_W, char(0x17)), qMakePair(Qt::Key_F, char(0x06)), qMakePair(Qt::Key_Q, char(0x11)),
               qMakePair(Qt::Key_K, char(0x0b)), qMakePair(Qt::Key_C, char(0x03)), qMakePair(Qt::Key_D, char(0x04)),
-              qMakePair(Qt::Key_Z, char(0x1a))}) {
+              qMakePair(Qt::Key_Z, char(0x1a)), qMakePair(Qt::Key_V, char(0x16))}) {
             sent.clear();
             QTest::keyClick(display, pair.first, Qt::ControlModifier);
             QCOMPARE(sent, QByteArray(1, pair.second));
@@ -3813,8 +3929,10 @@ private slots:
         QCOMPARE(writes[1], QByteArray("xy"));
         QVERIFY(writes[2].isEmpty() && writes[3].isEmpty());
         QApplication::clipboard()->setText("pasted");
+        QString pasteText = "pasted";
+        tabs[0]->getTerminalWidget()->bracketText(pasteText);
         tabs[0]->pasteSelection();
-        QCOMPARE(writes[0], QByteArray("xypasted"));
+        QCOMPARE(writes[0], QByteArray("xy") + pasteText.toUtf8());
         QCOMPARE(writes[1], writes[0]);
         select(2, false);
         choose->trigger();
@@ -4193,6 +4311,214 @@ private slots:
 
         QVERIFY(mpm.disableMasterPassword("SuperSecure123!"));
         QVERIFY(!mpm.isEnabled());
+    }
+
+    void testMobaCompactBookmarksAndIni() {
+        QTemporaryDir dir;
+        const QByteArray data = QByteArray::fromHex("efbbbf") +
+                                "[Misc]\nIgnored=true\n[Bookmarks]\nImgNum=41\n"
+                                "Router=#109#0%router.example%2222%admin%%-1%-1%%%22%%0%-1\n"
+                                "Desktop=#91#4%desktop.example%3389%DOMAIN\\user%0%-1\n"
+                                "Console=#98#1%console.example%23%%%0%%22%%%0\n"
+                                "Bad=#109#0%bad.example%99999%user\n"
+                                "Unsupported=#99#99%other.example%22%user\n"
+                                "Broken=not-a-bookmark\nSubRep=Production\\Servers\n"
+                                "[Bookmarks_1]\nIPv6=#109#0%2001:db8::1%%root\nSubRep=Otros\n";
+        QByteArray utf16 = QByteArray::fromHex("fffe");
+        QString utf8Text = QString::fromUtf8(data);
+        utf8Text.remove(QChar(0xfeff));
+        for (const QChar c : utf8Text) {
+            utf16.append(char(c.unicode() & 0xff));
+            utf16.append(char(c.unicode() >> 8));
+        }
+        for (const auto& exportBytes : {data, utf16})
+            for (const QString& suffix : {QString("mxtsessions"), QString("ini")}) {
+                const auto path = dir.filePath("MobaXterm." + suffix);
+                QFile file(path);
+                QVERIFY(file.open(QIODevice::WriteOnly));
+                file.write(exportBytes);
+                file.close();
+                bool ok = false;
+                QStringList warnings;
+                const auto imported = SessionManager::importSessions(path, &ok, nullptr, nullptr, &warnings);
+                QVERIFY(ok);
+                QCOMPARE(imported.size(), 4);
+                QCOMPARE(imported[0].name, QString("Router"));
+                QCOMPARE(imported[0].group, QString("Production/Servers"));
+                QCOMPARE(imported[0].type, SessionType::SSH);
+                QCOMPARE(imported[0].host, QString("router.example"));
+                QCOMPARE(imported[0].port, 2222);
+                QCOMPARE(imported[0].user, QString("admin"));
+                QCOMPARE(imported[1].type, SessionType::RDP);
+                QCOMPARE(imported[1].user, QString("DOMAIN\\user"));
+                QCOMPARE(imported[2].type, SessionType::Telnet);
+                QCOMPARE(imported[3].host, QString("2001:db8::1"));
+                QCOMPARE(imported[3].port, 22);
+                QCOMPARE(warnings.size(), 7); // four limited imports, three rejected records
+                QSet<QString> ids;
+                for (const auto& session : imported) {
+                    QVERIFY(!session.id.isEmpty());
+                    QVERIFY(!ids.contains(session.id));
+                    ids.insert(session.id);
+                }
+            }
+    }
+
+    void testHighlightRulesAndRenderedOutput() {
+        const auto oldEnabled = QSettings().value("terminal/highlightingEnabled");
+        const auto oldRules = QSettings().value("terminal/highlightRules");
+        const auto restore = qScopeGuard([&] {
+            if (oldEnabled.isValid())
+                QSettings().setValue("terminal/highlightingEnabled", oldEnabled);
+            else
+                QSettings().remove("terminal/highlightingEnabled");
+            if (oldRules.isValid())
+                QSettings().setValue("terminal/highlightRules", oldRules);
+            else
+                QSettings().remove("terminal/highlightRules");
+        });
+        QJsonArray rules{QJsonObject{{"pattern", "error"}, {"color", "#ff0000"}}};
+        QVERIFY(TerminalHighlighting::validate(rules).isEmpty());
+        auto parsed = TerminalHighlighting::rules(rules);
+        QVERIFY(parsed[0].expression().match("ERROR").hasMatch());
+        rules[0] = QJsonObject{{"pattern", "["}, {"regex", true}, {"color", "#ff0000"}};
+        QVERIFY(!TerminalHighlighting::validate(rules).isEmpty());
+        rules[0] = QJsonObject{{"pattern", "a.b"}, {"color", "#ff0000"}, {"caseSensitive", true}};
+        parsed = TerminalHighlighting::rules(rules);
+        QVERIFY(parsed[0].expression().match("a.b").hasMatch());
+        QVERIFY(!parsed[0].expression().match("axb A.B").hasMatch());
+        TerminalHighlightRule pathological{QStringLiteral("(a+)+$"), Qt::red, true};
+        QElapsedTimer matchingTimer;
+        matchingTimer.start();
+        QVERIFY(!pathological.expression().match(QString(8192, 'a') + '!').hasMatch());
+        QVERIFY(matchingTimer.elapsed() < 1000);
+        rules = TerminalHighlighting::defaults();
+        QVERIFY(TerminalHighlighting::validate(rules).isEmpty());
+        QSettings().setValue("terminal/highlightRules", QJsonDocument(rules).toJson(QJsonDocument::Compact));
+        QSettings().setValue("terminal/highlightingEnabled", true);
+        QTermWidget terminal(0);
+        terminal.resize(640, 240);
+        terminal.setBlinkingCursor(false);
+        auto* display = terminal.findChild<Konsole::TerminalDisplay*>();
+        QVERIFY(display);
+        auto* overlay = new TerminalHighlighter(display);
+        terminal.show();
+        auto* session = terminal.findChild<Konsole::Session*>();
+        const QByteArray output = QString::fromUtf8("界 😀 é ERROR ok warning\r\n").toUtf8();
+        session->emulation()->receiveData(output.constData(), output.size());
+        QTest::qWait(60);
+        const QImage highlighted = display->grab().toImage();
+        highlighted.save("/tmp/banchoxterm-highlighted-test.png");
+        QSettings().setValue("terminal/highlightingEnabled", false);
+        overlay->reload();
+        QCoreApplication::processEvents();
+        const QImage plain = display->grab().toImage();
+        QVERIFY(highlighted != plain);
+        // Display-only markers must not leak into text extraction.
+        display->screenWindow()->setSelectionStart(0, 0, false);
+        display->screenWindow()->setSelectionEnd(40, 0);
+        const QString selected = display->screenWindow()->selectedText(false);
+        QVERIFY(selected.contains(QString::fromUtf8("界 😀 é ERROR ok warning")));
+    }
+
+    void testPasteReviewCancelEditAndBracketedPaste() {
+        const auto old = QSettings().value("terminal/reviewMultilinePaste");
+        const auto restore = qScopeGuard([&] {
+            if (old.isValid())
+                QSettings().setValue("terminal/reviewMultilinePaste", old);
+            else
+                QSettings().remove("terminal/reviewMultilinePaste");
+        });
+        QSettings().setValue("terminal/reviewMultilinePaste", true);
+        Session profile;
+        profile.type = SessionType::Local;
+#ifndef Q_OS_WIN
+        profile.shellPath = "/bin/cat";
+#endif
+        TerminalTab tab(profile);
+        tab.resize(640, 240);
+        tab.show();
+        auto* display = tab.getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
+        auto* emulation = tab.getTerminalWidget()->findChild<Konsole::Session*>()->emulation();
+        QByteArray writes;
+        connect(emulation, &Konsole::Emulation::sendData, &tab,
+                [&](const char* data, int size) { writes.append(data, size); });
+        QApplication::clipboard()->setText("first\nsecond\n");
+        QTimer::singleShot(0, &tab, [&] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            QCOMPARE(dialog->objectName(), QString("pasteReviewDialog"));
+            dialog->reject();
+        });
+        tab.pasteSelection();
+        QVERIFY(writes.isEmpty());
+        const QByteArray enableBrackets("\033[?2004h");
+        emulation->receiveData(enableBrackets.constData(), enableBrackets.size());
+        QTimer::singleShot(0, &tab, [&] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            auto* edit = dialog->findChild<QPlainTextEdit*>("pasteReviewText");
+            QVERIFY(edit);
+            edit->setPlainText("edited\ncommand");
+            dialog->grab().save("/tmp/banchoxterm-paste-review-test.png");
+            dialog->accept();
+        });
+        tab.pasteSelection();
+        QCOMPARE(writes, QByteArray("\033[200~edited\rcommand\033[201~"));
+        QCOMPARE(QApplication::clipboard()->text(), QString("first\nsecond\n"));
+        writes.clear();
+        // Shift+Insert must use the same review, rather than QTermWidget's built-in paste.
+        QTimer::singleShot(0, &tab, [&] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            QCOMPARE(dialog->objectName(), QString("pasteReviewDialog"));
+            dialog->reject();
+        });
+        QTest::keyClick(display, Qt::Key_Insert, Qt::ShiftModifier);
+        QVERIFY(writes.isEmpty());
+    }
+
+    void testHighlightSettingsSaveAndCancel() {
+        QTranslator spanish;
+        QVERIFY(spanish.load(":/translations/banchoxterm_es.qm"));
+        qApp->installTranslator(&spanish);
+        const auto removeTranslator = qScopeGuard([&] { qApp->removeTranslator(&spanish); });
+        const auto oldEnabled = QSettings().value("terminal/highlightingEnabled");
+        const auto oldRules = QSettings().value("terminal/highlightRules");
+        const auto restore = qScopeGuard([&] {
+            if (oldEnabled.isValid())
+                QSettings().setValue("terminal/highlightingEnabled", oldEnabled);
+            else
+                QSettings().remove("terminal/highlightingEnabled");
+            if (oldRules.isValid())
+                QSettings().setValue("terminal/highlightRules", oldRules);
+            else
+                QSettings().remove("terminal/highlightRules");
+        });
+        QSettings().setValue("terminal/highlightingEnabled", false);
+        QSettings().setValue("terminal/highlightRules", QJsonDocument(TerminalHighlighting::defaults()).toJson());
+        {
+            SettingsDialog dialog;
+            dialog.findChild<QCheckBox*>("highlightingEnabled")->setChecked(true);
+            dialog.reject();
+            QVERIFY(!QSettings().value("terminal/highlightingEnabled").toBool());
+        }
+        SettingsDialog dialog;
+        dialog.findChild<QCheckBox*>("highlightingEnabled")->setChecked(true);
+        auto* table = dialog.findChild<QTableWidget*>("highlightRules");
+        QVERIFY(table);
+        table->item(0, 1)->setText("CUSTOM_ERROR");
+        auto* tabs = dialog.findChild<QTabWidget*>();
+        for (int i = 0; i < tabs->count(); ++i)
+            if (tabs->widget(i)->isAncestorOf(table))
+                tabs->setCurrentIndex(i);
+        dialog.show();
+        QTest::qWait(20);
+        dialog.grab().save("/tmp/banchoxterm-highlight-settings-test.png");
+        QVERIFY(QMetaObject::invokeMethod(&dialog, "onAccept"));
+        QCOMPARE(dialog.result(), int(QDialog::Accepted));
+        QVERIFY(QSettings().value("terminal/highlightingEnabled").toBool());
+        QCOMPARE(TerminalHighlighting::load()[0].toObject()["pattern"].toString(), QString("CUSTOM_ERROR"));
     }
 
     void testMobaXtermImport() {

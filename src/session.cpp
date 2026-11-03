@@ -13,8 +13,24 @@
 #include <QSettings>
 #include <QFileInfo>
 #include <QXmlStreamReader>
+#include <QStringDecoder>
 
 namespace {
+QString decodeSessionText(const QByteArray& bytes) {
+    if (bytes.startsWith(QByteArray::fromHex("fffe")))
+        return QStringDecoder(QStringDecoder::Utf16LE)(bytes);
+    if (bytes.startsWith(QByteArray::fromHex("feff")))
+        return QStringDecoder(QStringDecoder::Utf16BE)(bytes);
+    QStringDecoder decoder(QStringDecoder::Utf8);
+    const QString text = decoder(bytes);
+    // Older exports can use the Windows ANSI code page. Preserve UTF-8 first;
+    // use Qt's named decoder when available, and Latin-1 as a bounded fallback.
+    if (decoder.hasError()) {
+        QStringDecoder windows("Windows-1252");
+        return windows.isValid() ? QString(windows(bytes)) : QString::fromLatin1(bytes);
+    }
+    return text;
+}
 bool setPrivateFilePermissions(const QString& path) {
     return QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 }
@@ -414,7 +430,9 @@ bool SessionManager::exportOpenSshConfig(const QList<Session>& sessions, const Q
 }
 
 QList<Session> SessionManager::importSessions(const QString& path, bool* ok, QStringList* importedMacroNames,
-                                              QStringList* importedMacroTexts) {
+                                              QStringList* importedMacroTexts, QStringList* importWarnings) {
+    if (importWarnings)
+        importWarnings->clear();
     QList<Session> sessions;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
@@ -438,9 +456,13 @@ QList<Session> SessionManager::importSessions(const QString& path, bool* ok, QSt
         if (path.endsWith(".reg", Qt::CaseInsensitive))
             return importPuTTYRegistry(path, ok);
         if (path.endsWith(".mxtsessions", Qt::CaseInsensitive))
-            return importMobaXtermSessions(path, ok);
-        if (path.endsWith(".ini", Qt::CaseInsensitive))
+            return importMobaXtermSessions(path, ok, importWarnings);
+        if (path.endsWith(".ini", Qt::CaseInsensitive)) {
+            if (decodeSessionText(data).contains(
+                    QRegularExpression(QStringLiteral(R"((?im)^\[Bookmarks(?:_\d+|\\[^\]]*)?\]\s*$)"))))
+                return importMobaXtermSessions(path, ok, importWarnings);
             return importSecureCrtSession(path, ok);
+        }
         if (path.endsWith(".rtsx", Qt::CaseInsensitive) || path.endsWith(".rts", Qt::CaseInsensitive))
             return importRoyalTsDocument(path, ok);
         return importOpenSshConfig(path, ok);
@@ -655,63 +677,126 @@ QList<Session> SessionManager::importPuTTYRegistry(const QString& path, bool* ok
     return sessions;
 }
 
-QList<Session> SessionManager::importMobaXtermSessions(const QString& path, bool* ok) {
+QList<Session> SessionManager::importMobaXtermSessions(const QString& path, bool* ok, QStringList* warnings) {
     QList<Session> sessions;
+    if (ok)
+        *ok = false;
+    if (warnings)
+        warnings->clear();
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (ok)
-            *ok = false;
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return sessions;
-    }
 
-    Session current;
-    bool inBookmark = false;
-    const auto finish = [&]() {
-        if (!inBookmark || current.host.trimmed().isEmpty())
-            return;
-        current.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        if (current.name.trimmed().isEmpty())
-            current.name = current.host;
-        if (current.port <= 0)
-            current.port = 22;
-        current.type = SessionType::SSH;
-        sessions.append(current);
+    // Parse sections first: SubRep may appear after the bookmarks it describes.
+    struct Section {
+        QString name;
+        QList<QPair<QString, QString>> entries;
     };
-
-    for (QString line : QString::fromUtf8(file.readAll()).split('\n')) {
+    QList<Section> sections;
+    const QString text = decodeSessionText(file.readAll());
+    for (QString line : text.split('\n')) {
         line = line.trimmed();
         if (line.startsWith('[') && line.endsWith(']')) {
-            finish();
-            current = Session();
-            const QString section = line.mid(1, line.size() - 2);
-            inBookmark = section.startsWith(QStringLiteral("Bookmarks\\"), Qt::CaseInsensitive) ||
-                         section.startsWith(QStringLiteral("Sessions\\"), Qt::CaseInsensitive);
-            if (inBookmark)
-                current.name = section.mid(section.indexOf('\\') + 1).replace('\\', '/');
-            continue;
+            sections.append({line.mid(1, line.size() - 2), {}});
+        } else if (!sections.isEmpty() && !line.isEmpty() && !line.startsWith(';') && !line.startsWith('#')) {
+            const int separator = line.indexOf('=');
+            if (separator > 0)
+                sections.last().entries.append({line.left(separator).trimmed(), line.mid(separator + 1).trimmed()});
         }
-        if (!inBookmark || line.isEmpty() || line.startsWith(';') || line.startsWith('#'))
-            continue;
-        const int separator = line.indexOf('=');
-        if (separator < 0)
-            continue;
-        const QString key = line.left(separator).trimmed().toLower();
-        const QString value = line.mid(separator + 1).trimmed();
-        if (key == QStringLiteral("hostname") || key == QStringLiteral("host"))
-            current.host = value;
-        else if (key == QStringLiteral("username") || key == QStringLiteral("user"))
-            current.user = value;
-        else if (key == QStringLiteral("port")) {
-            bool valid = false;
-            const int port = value.toInt(&valid);
-            if (valid && port > 0 && port <= 65535)
-                current.port = port;
-        } else if (key == QStringLiteral("name"))
-            current.name = value;
-        else if (key == QStringLiteral("protocol") && value.compare(QStringLiteral("ssh"), Qt::CaseInsensitive) != 0)
-            inBookmark = false;
     }
-    finish();
+    auto warn = [warnings](const QString& name, const QString& reason) {
+        if (warnings)
+            warnings->append(QObject::tr("%1: %2").arg(name, reason));
+    };
+    auto add = [&sessions](Session session) {
+        session.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        if (session.name.isEmpty())
+            session.name = session.host;
+        sessions.append(session);
+    };
+    const QRegularExpression compactSection(QStringLiteral("^Bookmarks(?:_[0-9]+)?$"),
+                                            QRegularExpression::CaseInsensitiveOption);
+    for (const auto& section : sections) {
+        if (compactSection.match(section.name).hasMatch()) {
+            QString group;
+            for (const auto& entry : section.entries) {
+                if (entry.first.compare("SubRep", Qt::CaseInsensitive) == 0) {
+                    group = entry.second;
+                    group.replace('\\', '/');
+                    group = group.split('/', Qt::SkipEmptyParts).join('/');
+                }
+            }
+            for (const auto& entry : section.entries) {
+                if (entry.first.compare("SubRep", Qt::CaseInsensitive) == 0 ||
+                    entry.first.compare("ImgNum", Qt::CaseInsensitive) == 0)
+                    continue;
+                // Shipped MobaXterm generator: name=#icon#protocol%host%port%user%...
+                const auto match = QRegularExpression(QStringLiteral("^#[0-9]+#([0-9]+)%(.*)$")).match(entry.second);
+                if (!match.hasMatch()) {
+                    warn(entry.first, QObject::tr("Skipped an invalid bookmark."));
+                    continue;
+                }
+                const auto fields = match.captured(2).split('%', Qt::KeepEmptyParts);
+                bool validProtocol = false;
+                const int protocol = match.captured(1).toInt(&validProtocol);
+                Session session;
+                session.name = entry.first;
+                session.group = group;
+                int defaultPort = 22;
+                if (validProtocol && protocol == 0)
+                    session.type = SessionType::SSH;
+                else if (validProtocol && protocol == 1) {
+                    session.type = SessionType::Telnet;
+                    defaultPort = 23;
+                } else if (validProtocol && protocol == 4) {
+                    session.type = SessionType::RDP;
+                    defaultPort = 3389;
+                } else {
+                    warn(entry.first, QObject::tr("Skipped unsupported protocol %1.").arg(match.captured(1)));
+                    continue;
+                }
+                session.host = fields.value(0).trimmed();
+                bool validPort = true;
+                session.port = fields.value(1).isEmpty() ? defaultPort : fields.value(1).toInt(&validPort);
+                session.user = fields.value(2);
+                if (session.host.isEmpty() || !validPort || session.port < 1 || session.port > 65535) {
+                    warn(entry.first, QObject::tr("Skipped an empty host or invalid port."));
+                    continue;
+                }
+                add(session);
+                // Do not guess version-dependent advanced positions or import secrets.
+                warn(
+                    entry.first,
+                    QObject::tr(
+                        "Imported connection details and folder. Advanced options and credentials were not imported."));
+            }
+        } else if (section.name.startsWith(QStringLiteral("Bookmarks\\"), Qt::CaseInsensitive) ||
+                   section.name.startsWith(QStringLiteral("Sessions\\"), Qt::CaseInsensitive)) {
+            // Retain compatibility with the previously accepted expanded format.
+            Session session;
+            session.type = SessionType::SSH;
+            session.name = section.name.mid(section.name.indexOf('\\') + 1).replace('\\', '/');
+            bool supported = true;
+            bool validPort = true;
+            for (const auto& entry : section.entries) {
+                const QString key = entry.first.toLower();
+                if (key == "hostname" || key == "host")
+                    session.host = entry.second;
+                else if (key == "username" || key == "user")
+                    session.user = entry.second;
+                else if (key == "port")
+                    session.port = entry.second.toInt(&validPort);
+                else if (key == "name")
+                    session.name = entry.second;
+                else if (key == "protocol")
+                    supported = entry.second.compare("ssh", Qt::CaseInsensitive) == 0;
+            }
+            if (supported && validPort && !session.host.isEmpty() && session.port > 0 && session.port <= 65535)
+                add(session);
+            else
+                warn(session.name, QObject::tr("Skipped an unsupported or invalid session."));
+        }
+    }
     if (ok)
         *ok = !sessions.isEmpty();
     return sessions;

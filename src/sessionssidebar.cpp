@@ -27,6 +27,9 @@
 #include <QAbstractItemModel>
 #include <QLineEdit>
 #include <QCompleter>
+#include <QDialogButtonBox>
+#include <QTableWidget>
+#include <QPlainTextEdit>
 #include <QSettings>
 
 namespace {
@@ -455,10 +458,57 @@ void SessionsSidebar::onImportSessions() {
     bool ok = false;
     QStringList importedMacroNames;
     QStringList importedMacroTexts;
-    QList<Session> imported = SessionManager::importSessions(path, &ok, &importedMacroNames, &importedMacroTexts);
+    QStringList importWarnings;
+    QList<Session> imported =
+        SessionManager::importSessions(path, &ok, &importedMacroNames, &importedMacroTexts, &importWarnings);
     if (!ok) {
-        QMessageBox::critical(this, tr("Import Failed"), tr("Could not read sessions from the selected file."));
+        QString reason = tr("Could not read sessions from the selected file.");
+        if (!importWarnings.isEmpty())
+            reason += QStringLiteral("\n\n") + importWarnings.mid(0, 20).join('\n');
+        QMessageBox::critical(this, tr("Import Failed"), reason);
         return;
+    }
+
+    if (path.endsWith(".mxtsessions", Qt::CaseInsensitive) || !importWarnings.isEmpty()) {
+        // Review imported endpoints before adding them to the saved session list.
+        QDialog preview(this);
+        preview.setWindowTitle(tr("Review imported sessions"));
+        preview.resize(760, 480);
+        auto* previewLayout = new QVBoxLayout(&preview);
+        auto* summary = new QLabel(tr("%1 session(s) ready to import.").arg(imported.size()), &preview);
+        summary->setWordWrap(true);
+        previewLayout->addWidget(summary);
+        auto* table = new QTableWidget(imported.size(), 5, &preview);
+        table->setObjectName("sessionImportPreview");
+        table->setHorizontalHeaderLabels({tr("Name"), tr("Protocol"), tr("Host"), tr("Port"), tr("Folder")});
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+        table->horizontalHeader()->setStretchLastSection(true);
+        for (int row = 0; row < imported.size(); ++row) {
+            const auto& session = imported[row];
+            const QString protocol = session.toJson().value("type").toString().toUpper();
+            const QStringList values{session.name, protocol, session.host, QString::number(session.port),
+                                     session.group};
+            for (int col = 0; col < values.size(); ++col)
+                table->setItem(row, col, new QTableWidgetItem(values[col]));
+        }
+        previewLayout->addWidget(table, 1);
+        if (!importWarnings.isEmpty()) {
+            auto* notes = new QPlainTextEdit(importWarnings.join('\n'), &preview);
+            notes->setObjectName("sessionImportWarnings");
+            notes->setReadOnly(true);
+            notes->setMaximumHeight(110);
+            notes->setAccessibleName(tr("Import notes"));
+            previewLayout->addWidget(notes);
+        }
+        auto* previewButtons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &preview);
+        previewButtons->button(QDialogButtonBox::Ok)->setText(tr("Import sessions"));
+        connect(previewButtons, &QDialogButtonBox::accepted, &preview, &QDialog::accept);
+        connect(previewButtons, &QDialogButtonBox::rejected, &preview, &QDialog::reject);
+        previewLayout->addWidget(previewButtons);
+        if (preview.exec() != QDialog::Accepted)
+            return;
     }
 
     QSet<QString> knownIds;

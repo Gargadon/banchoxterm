@@ -14,8 +14,9 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **FTP/FTPS** — browse, transfer files and folders, drag & drop, pause/cancel,
   automatic reconnect, and configurable TLS validation
 - **Telnet client** — connect to telnet hosts
-- **Serial console** — supports picocom, screen, and minicom, with XMODEM/YMODEM
-  and optional ZMODEM sending through `sz` from lrzsz
+- **Serial console** — native serial connections with configurable baud rate,
+  data/parity/stop bits and flow control, with XMODEM/YMODEM and optional ZMODEM
+  sending through `sz` from lrzsz
 - **Local terminal** — open local shell sessions
 - **Multi-input** — send commands to selected terminals, with a separate sensitive mode for temporary entries
 - **Remote monitoring** — CPU, RAM, disk, and uptime stats in the status bar
@@ -24,6 +25,49 @@ A multi-protocol terminal emulator and remote session manager for Linux and Wind
 - **Session logging** — record terminal output to a file
 - **Dark & Light themes** — the default interface adapts to the system or can be forced to light/dark mode
 - **Internationalization** — English, Spanish, and Portuguese
+
+## Importing MobaXterm sessions
+
+Import a `.mxtsessions` export or a `MobaXterm.ini` file from the session sidebar.
+The importer reads compact bookmarks for SSH, Telnet and RDP, including usernames,
+ports and folder paths (`SubRep`), as well as the previously supported expanded
+SSH format. UTF-8 and UTF-16 exports are accepted. A preview lists the endpoints
+before anything is saved and reports skipped or incomplete entries. Advanced
+options and stored credentials are not imported; review authentication and
+connection settings afterward. Existing duplicate-name handling still applies.
+
+## Terminal highlighting and paste review
+
+Enable **Configuration > Highlighting > Highlight terminal text** to mark output
+with translucent colors. Add literal or regex patterns, choose colors, and toggle
+case sensitivity or individual rules. Example rules cover errors, warnings and
+success messages. Changes apply to open terminals when you press **OK**. Copied
+text, terminal output and logs retain their original contents. There are at most
+32 rules with 256 characters each; matching follows wrapped lines, while DEC
+double-size lines keep their native appearance.
+
+**Configuration > Appearance > Review multiline paste before sending** is enabled
+by default. Multiline text or text with control characters opens an editable
+preview; **Cancel** sends nothing and **Paste** sends the edited text without an
+extra Enter. You can also use **Paste with review...** in the terminal context
+menu for any clipboard text. Keyboard and middle-button paste use the same review
+and preserve bracketed paste and synchronized input.
+
+## RDP clipboard and resizing
+
+On Linux, RDP runs inside the tab through FreeRDP 3 on X11 and Wayland. New connections share
+Unicode text through the regular clipboard and request a remote resolution that
+follows the tab size. Resize requests are coalesced while dragging the window;
+servers without display-control support keep the scaled desktop behavior.
+Clipboard updates apply to the focused RDP tab, so background sessions do not
+replace the local clipboard. Images and files are not shared through this channel.
+
+Both options are available on Linux and Windows under
+**Configuration > Appearance > RDP** and apply to new connections. Windows uses
+the native Microsoft RDP control for clipboard redirection and remote resolution
+updates, with scaling on older controls. The external `mstsc.exe` fallback uses
+its own connection preferences. On Linux, audio and drive redirection remain
+unavailable.
 
 ## Organizing sessions
 
@@ -219,6 +263,7 @@ time and compositor support at runtime. Settings are global and persist between
 launches. A value of 100% keeps the default opaque appearance.
 
 Internal startup/RAM/CPU measurement instructions are in [benchmarks/README.md](benchmarks/README.md).
+Serial integration tests and CI verification requirements are in [tests/SERIAL.md](tests/SERIAL.md).
 
 ## Install
 
@@ -271,7 +316,7 @@ CI builds use Qt 6.8.3 on Linux and Windows (x64 and ARM64), pinned by
   for compilation and at runtime. Install `freerdp3-dev`, `libwinpr3-dev`,
   and `pkg-config` on Debian/Ubuntu; `freerdp-devel`, `winpr-devel`, and
   `pkgconf-pkg-config` on Fedora; or `freerdp` and `pkgconf` on Arch Linux.
-  CMake requires the `freerdp3` and `winpr3` pkg-config modules; `xfreerdp`
+  CMake requires the `freerdp3`, `freerdp-client3`, and `winpr3` pkg-config modules; `xfreerdp`
   is not required.
 - Linux password storage: `secret-tool` (`libsecret-tools` on Debian/Ubuntu,
   `libsecret` on Fedora). This is a runtime dependency.
@@ -365,14 +410,15 @@ without KPty, so local shells are bridged through ConPTY).
   Windows builds require Qt ActiveQt (`AxContainer`); if the Windows control
   cannot be created at runtime, the app falls back to a separate `mstsc.exe`
   window. Linux builds require the FreeRDP 3 and WinPR 3 development libraries
-  (`freerdp3` and `winpr3` pkg-config modules). RDP runs inside the tab using
+  (`freerdp3`, `freerdp-client3`, and `winpr3` pkg-config modules). RDP runs inside the tab using
   `libfreerdp`, with Qt rendering and input on both X11 and Wayland; no external
   `xfreerdp` executable is needed. A graphical dialog collects the username,
   optional domain, and password. Passwords can be saved in the same credential
   store as SSH, from the session settings or connection dialog; saved credentials
   connect without prompting. Use `DOMAIN\username` in the profile for domain
-  accounts. The desktop scales to fit the tab; clipboard,
-  audio, drive redirection, and dynamic remote resolution are not yet supported.
+  accounts. Linux supports text clipboard sharing and dynamic remote resolution when the
+  server supports the corresponding channels, with scaling as a fallback.
+  Audio and drive redirection are not yet supported.
   Certificate validation follows the previous client's ignore policy.
 - **VNC** supports a limited set of encodings (Raw, Hextile, CopyRect; Tight and
   ZRLE are disabled because the embedded libvncclient builds without zlib).

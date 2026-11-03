@@ -23,6 +23,7 @@ class QAxWidget;
 class VncClientWidget;
 class RdpClientWidget;
 class QSerialPort;
+class TerminalHighlighter;
 
 class TerminalTab : public QWidget {
     Q_OBJECT
@@ -136,7 +137,7 @@ private:
     void doToggleSearchBar();
     void doFocusTerminal();
     void doCopy();
-    void doPaste();
+    void doPaste(bool forceReview = false, bool primarySelection = false);
     void doClear();
     void doZoomIn();
     void doZoomOut();
@@ -150,6 +151,7 @@ private:
 
     Session m_session;
     QTermWidget* m_terminal = nullptr;
+    TerminalHighlighter* m_highlighter = nullptr;
     QLabel* m_statusLabel = nullptr;
     QPushButton* m_reconnectButton = nullptr;
     QWidget* m_embeddedContainer = nullptr;
@@ -161,6 +163,7 @@ private:
     QAxWidget* m_rdpWidget = nullptr;
     QTimer* m_rdpPollTimer = nullptr;
     bool m_rdpWasConnected = false;
+    bool m_rdpDynamicResolution = true;
     VncClientWidget* m_vncWidget = nullptr;
     RdpClientWidget* m_nativeRdpWidget = nullptr;
     QSerialPort* m_serialPort = nullptr;

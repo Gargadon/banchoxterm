@@ -6,7 +6,7 @@ if(CMAKE_GENERATOR MATCHES "NMake Makefiles")
     # Use CMake's include scanner instead of parsing the compiler's output.
     set(CMAKE_DEPENDS_USE_COMPILER FALSE)
 endif()
-project(banchoxterm VERSION 1.3.1 LANGUAGES C CXX)
+project(banchoxterm VERSION 1.4.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
@@ -176,6 +176,8 @@ set(SOURCES
     src/settingsdialog.h
     src/keyboardshortcuts.cpp
     src/keyboardshortcuts.h
+    src/terminalhighlighter.cpp
+    src/terminalhighlighter.h
     src/terminalappearance.cpp
     src/terminalappearance.h
     src/sshconnection.cpp
@@ -370,7 +372,7 @@ endif()
 # Linux RDP is rendered directly in Qt, including under Wayland.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig REQUIRED)
-    pkg_check_modules(FREERDP REQUIRED IMPORTED_TARGET freerdp3>=3.0 winpr3>=3.0)
+    pkg_check_modules(FREERDP REQUIRED IMPORTED_TARGET freerdp3>=3.0 freerdp-client3>=3.0 winpr3>=3.0)
     target_sources(banchoxterm PRIVATE src/rdpclientwidget.cpp src/rdpclientwidget.h)
     target_link_libraries(banchoxterm PRIVATE PkgConfig::FREERDP)
     target_compile_definitions(banchoxterm PRIVATE BANCHO_HAVE_FREERDP)
@@ -504,6 +506,8 @@ add_executable(banchoxterm_tests
     src/settingsdialog.h
     src/keyboardshortcuts.cpp
     src/keyboardshortcuts.h
+    src/terminalhighlighter.cpp
+    src/terminalhighlighter.h
     src/terminalappearance.cpp
     src/terminalappearance.h
     src/updater.cpp
@@ -512,6 +516,7 @@ add_executable(banchoxterm_tests
     src/xservermanager.h
     resources.qrc
 )
+add_dependencies(banchoxterm_tests translations)
 
 target_link_libraries(banchoxterm_tests
     PRIVATE
