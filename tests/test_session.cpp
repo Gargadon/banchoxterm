@@ -1361,9 +1361,15 @@ private slots:
         screen->setSelectionStart(0, 0, false);
         screen->setSelectionEnd(screen->windowColumns() - 1, screen->windowLines() - 1);
         QVERIFY(screen->selectedText(false).contains(QString::fromUtf8("device: conexión correcta 界")));
+        // Exercise the native hangup fallback even on Qt versions which would
+        // normally emit ResourceError, matching Qt 6.8's silent-EOF behavior.
+        const QSignalBlocker suppressQtDisconnect(port);
+        QSignalSpy closed(&tab, &TerminalTab::titleChanged);
         ::close(peer);
         peer = -1;
         QTRY_VERIFY(!tab.isSessionActive());
+        QVERIFY(!port->isOpen());
+        QCOMPARE(closed.count(), 1);
 #endif
     }
 
@@ -4441,6 +4447,11 @@ private slots:
         auto* display = tab.getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
         auto* emulation = tab.getTerminalWidget()->findChild<Konsole::Session*>()->emulation();
         QByteArray writes;
+        QStringList pastes;
+        connect(&tab, &TerminalTab::userKeyInput, &tab, [&](QKeyEvent* event, bool fromPaste) {
+            if (fromPaste)
+                pastes.append(event->text());
+        });
         connect(emulation, &Konsole::Emulation::sendData, &tab,
                 [&](const char* data, int size) { writes.append(data, size); });
         QApplication::clipboard()->setText("first\nsecond\n");
@@ -4451,7 +4462,8 @@ private slots:
             dialog->reject();
         });
         tab.pasteSelection();
-        QVERIFY(writes.isEmpty());
+        QVERIFY(pastes.isEmpty());
+        QVERIFY(!writes.contains("first") && !writes.contains("second"));
         const QByteArray enableBrackets("\033[?2004h");
         emulation->receiveData(enableBrackets.constData(), enableBrackets.size());
         QTimer::singleShot(0, &tab, [&] {
@@ -4464,7 +4476,9 @@ private slots:
             dialog->accept();
         });
         tab.pasteSelection();
-        QCOMPARE(writes, QByteArray("\033[200~edited\rcommand\033[201~"));
+        const QByteArray expected("\033[200~edited\rcommand\033[201~");
+        QCOMPARE(pastes, QStringList{QString::fromLatin1(expected)});
+        QVERIFY2(writes.contains(expected), writes.toHex().constData());
         QCOMPARE(QApplication::clipboard()->text(), QString("first\nsecond\n"));
         writes.clear();
         // Shift+Insert must use the same review, rather than QTermWidget's built-in paste.
@@ -4472,10 +4486,18 @@ private slots:
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             QCOMPARE(dialog->objectName(), QString("pasteReviewDialog"));
+            // Reproduce a legitimate device-status reply arriving while the
+            // review is open, independently of the local shell's timing.
+            const QByteArray query("\033[6n");
+            emulation->receiveData(query.constData(), query.size());
             dialog->reject();
         });
         QTest::keyClick(display, Qt::Key_Insert, Qt::ShiftModifier);
-        QVERIFY(writes.isEmpty());
+        // ConPTY may answer device queries during the modal event loop. Those
+        // protocol replies are allowed; cancellation must emit no new paste.
+        QCOMPARE(pastes.size(), 1);
+        QVERIFY(writes.contains('R')); // cursor-position reply is still sent
+        QVERIFY(!writes.contains("first") && !writes.contains("second"));
     }
 
     void testHighlightSettingsSaveAndCancel() {

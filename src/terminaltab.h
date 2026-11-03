@@ -115,6 +115,7 @@ private:
     void launchExternalClient();
     void setupSshTerminal();
     void setupLocalTerminal();
+    void finishSerialSession(const QString& message);
     void setupWindowsConPty(const QString& program, const QStringList& args);
     void applySshOptions();
     void setupWindowsRdpActiveX();

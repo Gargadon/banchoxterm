@@ -1,5 +1,8 @@
 #include "terminaltab.h"
 #include <algorithm>
+#ifdef Q_OS_LINUX
+#include <poll.h>
+#endif
 #include "terminalhighlighter.h"
 #include <QPlainTextEdit>
 #include <QDialogButtonBox>
@@ -250,15 +253,14 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             connect(m_serialPort, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError error) {
                 if (error == QSerialPort::NoError)
                     return;
-                feedTerminalData(tr("\r\n[Serial error: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
-                // PTYs and some USB adapters cannot drive modem-control lines.
-                // An unsupported DTR/RTS operation does not close the data link;
-                // a timeout also leaves the port available for subsequent I/O.
-                if (error == QSerialPort::UnsupportedOperationError || error == QSerialPort::TimeoutError)
+                const QString message = tr("\r\n[Serial error: %1]\r\n").arg(m_serialPort->errorString());
+                // Unsupported modem-line operations and timeouts leave the data
+                // link open. A fatal I/O error must stop all further port access.
+                if (error == QSerialPort::UnsupportedOperationError || error == QSerialPort::TimeoutError) {
+                    feedTerminalData(message.toUtf8());
                     return;
-                m_isActive = false;
-                emit titleChanged(tr("[Closed] %1").arg(m_session.name));
-                showStoppedPrompt();
+                }
+                finishSerialSession(message);
             });
             if (!m_serialPort->open(QIODevice::ReadWrite)) {
                 feedTerminalData(
@@ -272,6 +274,31 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                 if (m_serialPort->flowControl() != QSerialPort::HardwareControl &&
                     !m_serialPort->setRequestToSend(m_session.serialRts))
                     feedTerminalData(tr("\r\n[Unable to set RTS: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
+#ifdef Q_OS_LINUX
+                // Qt 6.8 can leave a hung-up PTY open without errorOccurred().
+                // Poll only hangup/error flags; QSerialPort retains ownership of
+                // reads and its socket notifier, so incoming bytes stay intact.
+                auto* disconnectTimer = new QTimer(m_serialPort);
+                disconnectTimer->setInterval(250);
+                connect(disconnectTimer, &QTimer::timeout, this, [this, disconnectTimer] {
+                    if (m_closing || !m_isActive) {
+                        disconnectTimer->stop();
+                        return;
+                    }
+                    bool disconnected = !m_serialPort->isOpen();
+                    if (!disconnected) {
+                        pollfd descriptor{int(m_serialPort->handle()), 0, 0};
+                        disconnected =
+                            ::poll(&descriptor, 1, 0) > 0 && (descriptor.revents & (POLLHUP | POLLERR | POLLNVAL));
+                    }
+                    if (disconnected) {
+                        disconnectTimer->stop();
+                        finishSerialSession(QStringLiteral("\r\n[") + tr("Serial port disconnected.") +
+                                            QStringLiteral("]\r\n"));
+                    }
+                });
+                disconnectTimer->start();
+#endif
             }
         } else {
             setupLocalTerminal();
@@ -550,6 +577,18 @@ void TerminalTab::pollConPtyOutput() {
 }
 
 #endif
+
+void TerminalTab::finishSerialSession(const QString& message) {
+    if (!m_isActive || m_closing)
+        return;
+    m_isActive = false;
+    cancelSerialFile();
+    if (m_serialPort && m_serialPort->isOpen())
+        m_serialPort->close();
+    feedTerminalData(message.toUtf8());
+    emit titleChanged(tr("[Closed] %1").arg(m_session.name));
+    showStoppedPrompt();
+}
 
 void TerminalTab::setupLocalTerminal() {
 #ifdef Q_OS_WIN

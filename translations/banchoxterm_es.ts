@@ -4419,6 +4419,10 @@ Cierra esta pestaña cuando termines.</translation>
         <source>Review or edit the text before pasting. Synchronized terminals also receive this text. A trailing line break may execute a command.</source>
         <translation>Revisa o edita el texto antes de pegarlo. Los terminales sincronizados también reciben este texto. Un salto de línea al final puede ejecutar un comando.</translation>
     </message>
+    <message>
+        <source>Serial port disconnected.</source>
+        <translation>Puerto serial desconectado.</translation>
+    </message>
 </context>
 <context>
     <name>TunnelEditDialog</name>
