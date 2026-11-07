@@ -163,7 +163,8 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         m_terminal->setHistorySize(m_session.scrollback > 0 ? m_session.scrollback : 5000);
         m_terminal->setScrollBarPosition(QTermWidget::ScrollBarRight);
         QStringList environment;
-        environment << QStringLiteral("COLORTERM=truecolor") << QStringLiteral("TERM_PROGRAM=banchoxterm");
+        environment << QStringLiteral("COLORTERM=truecolor") << QStringLiteral("TERM_PROGRAM=banchoxterm")
+                    << QStringLiteral("TERM_PROGRAM_VERSION=") + QStringLiteral(BANCHO_VERSION);
         if (!m_session.terminalType.isEmpty())
             environment << QStringLiteral("TERM=") + m_session.terminalType;
         if (!m_session.language.isEmpty())

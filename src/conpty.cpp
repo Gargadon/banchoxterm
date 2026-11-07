@@ -150,6 +150,7 @@ bool ConPty::start(const QString& program, const QStringList& args, int cols, in
     auto environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("COLORTERM"), QStringLiteral("truecolor"));
     environment.insert(QStringLiteral("TERM_PROGRAM"), QStringLiteral("banchoxterm"));
+    environment.insert(QStringLiteral("TERM_PROGRAM_VERSION"), QStringLiteral(BANCHO_VERSION));
     if (!environment.contains(QStringLiteral("TERM")))
         environment.insert(QStringLiteral("TERM"), QStringLiteral("xterm-256color"));
     QStringList entries = environment.toStringList();

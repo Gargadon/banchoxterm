@@ -3735,6 +3735,14 @@ App:OutroApp</translation>
         <translation>Alterando permissões de %1...</translation>
     </message>
     <message>
+        <source>Are you sure you want to delete the selected items?
+
+%1</source>
+        <translation>Tem certeza de que deseja excluir os itens selecionados?
+
+%1</translation>
+    </message>
+    <message>
         <location filename="../src/sftpsidebar.cpp" line="1172"/>
         <source>Are you sure you want to delete &apos;%1&apos;?</source>
         <translation>Tem certeza de que deseja excluir &apos;%1&apos;?</translation>

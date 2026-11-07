@@ -172,6 +172,9 @@ private:
     QList<ParallelTransfer> m_parallelTransfers;
     int m_maxParallelTransfers = 1;
 
+    void startNextEdit();
+    QStringList m_editQueue;
+    bool m_editUploadPending = false;
     QString m_pendingEditRemotePath;
     QString m_pendingEditLocalPath;
 

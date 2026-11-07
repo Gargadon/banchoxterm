@@ -165,6 +165,189 @@ private slots:
         QVERIFY(!sidebar->hasActiveTransfers());
     }
 
+    void testSftpDeleteSelection_data() {
+        QTest::addColumn<bool>("confirm");
+        QTest::addColumn<bool>("multiple");
+        QTest::newRow("multiple-confirm") << true << true;
+        QTest::newRow("multiple-cancel") << false << true;
+        QTest::newRow("single-confirm") << true << false;
+    }
+
+    void testSftpDeleteSelection() {
+        QFETCH(bool, confirm);
+        QFETCH(bool, multiple);
+        SftpSidebar sidebar;
+        const QList<SftpFile> files = {{"folder", true}, {"first.txt", false}, {"second.txt", false}};
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDirectoryListed", Qt::DirectConnection,
+                                          Q_ARG(QString, "/remote"), Q_ARG(QList<SftpFile>, files)));
+        auto* tree = sidebar.findChild<QTreeWidget*>("sftpTree");
+        QVERIFY(tree);
+        tree->setCurrentItem(tree->findItems("first.txt", Qt::MatchExactly).first());
+        if (multiple) {
+            tree->findItems("folder", Qt::MatchExactly).first()->setSelected(true);
+            tree->findItems("second.txt", Qt::MatchExactly).first()->setSelected(true);
+            tree->findItems(".", Qt::MatchExactly).first()->setSelected(true);
+            tree->findItems("..", Qt::MatchExactly).first()->setSelected(true);
+        }
+        QSignalSpy deleted(&sidebar, &SftpSidebar::requestDelete);
+        int confirmations = 0;
+        QTimer::singleShot(0, &sidebar, [&] {
+            auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+            QVERIFY(box);
+            ++confirmations;
+            QVERIFY(box->text().contains("first.txt"));
+            if (multiple) {
+                QVERIFY(box->text().contains("second.txt"));
+                QVERIFY(box->text().contains("folder"));
+            }
+            box->button(confirm ? QMessageBox::Yes : QMessageBox::No)->click();
+        });
+        // Simulate an immediate refresh after the first deletion. The rest of
+        // the batch must retain the paths and file types confirmed by the user.
+        connect(&sidebar, &SftpSidebar::requestDelete, tree, [tree] { tree->clear(); });
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDeleteClicked", Qt::DirectConnection));
+        QCOMPARE(confirmations, 1);
+        QCOMPARE(deleted.count(), confirm ? (multiple ? 3 : 1) : 0);
+        QMap<QString, bool> targets;
+        for (const auto& args : deleted)
+            targets.insert(args.at(0).toString(), args.at(1).toBool());
+        if (confirm) {
+            QVERIFY(targets.contains("/remote/first.txt"));
+            QVERIFY(!targets.value("/remote/first.txt"));
+            if (multiple) {
+                QVERIFY(targets.value("/remote/folder"));
+                QVERIFY(targets.contains("/remote/second.txt"));
+                QVERIFY(!targets.value("/remote/second.txt"));
+            }
+        }
+    }
+
+    void testSftpSelectionPermissionsAndRename() {
+        SftpSidebar sidebar;
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onConnectionSuccess"));
+        const QList<SftpFile> files = {{"first.txt", false}, {"second.txt", false}};
+        const auto selectFiles = [&] {
+            QMetaObject::invokeMethod(&sidebar, "onDirectoryListed", Qt::DirectConnection, Q_ARG(QString, "/remote"),
+                                      Q_ARG(QList<SftpFile>, files));
+            auto* tree = sidebar.findChild<QTreeWidget*>("sftpTree");
+            tree->setCurrentItem(tree->findItems("first.txt", Qt::MatchExactly).first());
+            tree->findItems("second.txt", Qt::MatchExactly).first()->setSelected(true);
+            tree->findItems(".", Qt::MatchExactly).first()->setSelected(true);
+        };
+        selectFiles();
+        QSignalSpy permissions(&sidebar, &SftpSidebar::requestChmod);
+        QTimer::singleShot(0, &sidebar, [] {
+            auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            QVERIFY(dialog->windowTitle().contains("first.txt"));
+            QVERIFY(dialog->windowTitle().contains("second.txt"));
+            dialog->accept();
+        });
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onChmodClicked"));
+        QCOMPARE(permissions.count(), 2);
+        QSet<QString> paths;
+        for (const auto& args : permissions) {
+            paths.insert(args.at(0).toString());
+            QCOMPARE(args.at(1).toInt(), 0755);
+        }
+        QCOMPARE(paths, QSet<QString>({"/remote/first.txt", "/remote/second.txt"}));
+
+        QSignalSpy renamed(&sidebar, &SftpSidebar::requestRename);
+        QTimer responder;
+        int prompts = 0;
+        connect(&responder, &QTimer::timeout, &sidebar, [&] {
+            auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            ++prompts;
+            dialog->setTextValue("renamed-" + dialog->textValue());
+            dialog->accept();
+        });
+        responder.start(0);
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onRenameClicked"));
+        responder.stop();
+        QCOMPARE(prompts, 2);
+        QCOMPARE(renamed.count(), 2);
+        for (const auto& args : renamed) {
+            const QString oldPath = args.at(0).toString();
+            QCOMPARE(args.at(1).toString(), "/remote/renamed-" + QFileInfo(oldPath).fileName());
+        }
+        // Cancelling a later prompt must not submit a partially confirmed batch.
+        selectFiles();
+        prompts = 0;
+        disconnect(&responder, nullptr, &sidebar, nullptr);
+        connect(&responder, &QTimer::timeout, &sidebar, [&] {
+            auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
+            if (!dialog)
+                return;
+            if (++prompts == 1) {
+                dialog->setTextValue("changed.txt");
+                dialog->accept();
+            } else {
+                dialog->reject();
+            }
+        });
+        responder.start(0);
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onRenameClicked"));
+        responder.stop();
+        QCOMPARE(prompts, 2);
+        QCOMPARE(renamed.count(), 2);
+    }
+
+    void testSftpEditSelectionQueue() {
+        const QString editor = QStandardPaths::findExecutable("true");
+        if (editor.isEmpty())
+            QSKIP("A noninteractive editor stub is required.");
+        QSettings settings;
+        const QVariant oldCustom = settings.value("editor/useCustom");
+        const QVariant oldPath = settings.value("editor/customPath");
+        const auto restore = qScopeGuard([&] {
+            for (const auto& entry : {qMakePair(QString("editor/useCustom"), oldCustom),
+                                      qMakePair(QString("editor/customPath"), oldPath)}) {
+                if (entry.second.isValid())
+                    settings.setValue(entry.first, entry.second);
+                else
+                    settings.remove(entry.first);
+            }
+        });
+        settings.setValue("editor/useCustom", true);
+        settings.setValue("editor/customPath", editor);
+        SftpSidebar sidebar;
+        const QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QList<SftpFile> files = {
+            {prefix + "-first.txt", false}, {prefix + "-second.txt", false}, {"folder", true}};
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDirectoryListed", Qt::DirectConnection,
+                                          Q_ARG(QString, "/remote"), Q_ARG(QList<SftpFile>, files)));
+        auto* tree = sidebar.findChild<QTreeWidget*>("sftpTree");
+        tree->selectAll();
+        QSignalSpy downloads(&sidebar, &SftpSidebar::requestDownload);
+        QStringList localFiles;
+        const auto cleanup = qScopeGuard([&] {
+            for (const QString& path : localFiles)
+                QFile::remove(path);
+        });
+        connect(&sidebar, &SftpSidebar::requestDownload, &sidebar, [&](const QString&, const QString& local) {
+            QFile file(local);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write("test");
+            localFiles.append(local);
+        });
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onEditClicked"));
+        QCOMPARE(downloads.count(), 1);
+        tree->clear();
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onOperationFinished", Qt::DirectConnection, Q_ARG(bool, true),
+                                          Q_ARG(QString, QString())));
+        QTRY_COMPARE(downloads.count(), 2);
+        QVERIFY(QMetaObject::invokeMethod(&sidebar, "onOperationFinished", Qt::DirectConnection, Q_ARG(bool, true),
+                                          Q_ARG(QString, QString())));
+        QCoreApplication::processEvents();
+        QCOMPARE(downloads.count(), 2);
+        QSet<QString> paths;
+        for (const auto& args : downloads)
+            paths.insert(args.at(0).toString());
+        QCOMPARE(paths, QSet<QString>({"/remote/" + files.at(0).name, "/remote/" + files.at(1).name}));
+    }
+
     void testTransferConflictChoices() {
         QSettings settings;
         const QVariant original = settings.value("sftp/existingFilePolicy");
@@ -1993,7 +2176,7 @@ private slots:
                                                  "UsePAM no\n"
                                                  "StrictModes no\n"
                                                  "PermitRootLogin no\n"
-                                                 "AcceptEnv COLORTERM TERM_PROGRAM\n"
+                                                 "AcceptEnv COLORTERM TERM_PROGRAM TERM_PROGRAM_VERSION\n"
                                                  "Subsystem sftp internal-sftp\n"
                                                  "LogLevel VERBOSE\n")
                                       .arg(hostKey, authorizedKeys)
@@ -2252,12 +2435,15 @@ private slots:
 
         directorySpy.clear();
         QSignalSpy colorEnvironmentSpy(&connection, &SshConnection::shellDataReceived);
-        connection.sendToShell(QByteArrayLiteral("printf '\\nBANCHO_COLOR=%s\\n' \"$COLORTERM\"\r"));
+        connection.sendToShell(
+            QByteArrayLiteral("printf '\\nBANCHO_COLOR=%s\\nBANCHO_TERMINAL=%s\\nBANCHO_VERSION=%s\\n' "
+                              "\"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"\r"));
         auto trueColorAnnounced = [&]() {
             QByteArray received;
             for (const auto& event : colorEnvironmentSpy)
                 received += event.at(0).toByteArray();
-            return received.contains("BANCHO_COLOR=truecolor");
+            return received.contains("BANCHO_COLOR=truecolor") && received.contains("BANCHO_TERMINAL=banchoxterm") &&
+                   received.contains(QByteArray("BANCHO_VERSION=") + BANCHO_VERSION);
         };
         QTRY_VERIFY_WITH_TIMEOUT(trueColorAnnounced(), 3000);
 
@@ -4853,6 +5039,27 @@ private slots:
 #else
         QSKIP("ConPTY is only available on Windows.");
 #endif
+    }
+
+    void testTerminalVersionOverridesInheritedEnvironment() {
+        const bool hadVersion = qEnvironmentVariableIsSet("TERM_PROGRAM_VERSION");
+        const QByteArray previousVersion = qgetenv("TERM_PROGRAM_VERSION");
+        const auto restore = qScopeGuard([&] {
+            if (hadVersion)
+                qputenv("TERM_PROGRAM_VERSION", previousVersion);
+            else
+                qunsetenv("TERM_PROGRAM_VERSION");
+        });
+        qputenv("TERM_PROGRAM_VERSION", "51.0");
+        Session profile;
+        profile.type = SessionType::SSH;
+        TerminalTab tab(profile);
+        auto* session = tab.getTerminalWidget()->findChild<Konsole::Session*>();
+        QVERIFY(session);
+        const QStringList environment = session->environment();
+        QVERIFY(environment.contains("TERM_PROGRAM=banchoxterm"));
+        QVERIFY(environment.contains(QStringLiteral("TERM_PROGRAM_VERSION=") + QStringLiteral(BANCHO_VERSION)));
+        QVERIFY(!environment.contains("TERM_PROGRAM_VERSION=51.0"));
     }
 
     void testConPtyEscape() {

@@ -1004,6 +1004,7 @@ void SshConnection::openShell() {
     // Rejection must not prevent opening the interactive shell.
     retry([this]() { return libssh2_channel_setenv(m_channel, "COLORTERM", "truecolor"); });
     retry([this]() { return libssh2_channel_setenv(m_channel, "TERM_PROGRAM", "banchoxterm"); });
+    retry([this]() { return libssh2_channel_setenv(m_channel, "TERM_PROGRAM_VERSION", BANCHO_VERSION); });
 
     if (!m_language.isEmpty()) {
         const QByteArray language = m_language.toUtf8();

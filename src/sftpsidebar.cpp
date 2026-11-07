@@ -37,6 +37,7 @@
 #include <QGroupBox>
 #include <QThread>
 #include <QTimer>
+#include <QScopeGuard>
 #include <QScrollBar>
 #include <QUuid>
 #include <QMap>
@@ -603,6 +604,10 @@ void SftpSidebar::setConnection(SshConnection* connection) {
 }
 
 void SftpSidebar::detachConnection() {
+    m_editQueue.clear();
+    m_editUploadPending = false;
+    m_pendingEditRemotePath.clear();
+    m_pendingEditLocalPath.clear();
     if (!m_connection)
         return;
 
@@ -637,6 +642,10 @@ void SftpSidebar::setFtpClient(FtpClient* client) {
 }
 
 void SftpSidebar::detachFtp() {
+    m_editQueue.clear();
+    m_editUploadPending = false;
+    m_pendingEditRemotePath.clear();
+    m_pendingEditLocalPath.clear();
     if (!m_ftp)
         return;
     disconnect(this, nullptr, m_ftp, nullptr);
@@ -996,6 +1005,16 @@ void SftpSidebar::onCompareFoldersClicked() {
 
 void SftpSidebar::onOperationFinished(bool success, const QString& error) {
     refreshLocalFiles();
+    if (m_editUploadPending) {
+        m_editUploadPending = false;
+        if (!success) {
+            m_editQueue.clear();
+            QMessageBox::critical(this, tr("SFTP Transfer Error"), error);
+        } else {
+            startNextEdit();
+        }
+        return;
+    }
     if (m_directoryDownloadActive) {
         m_directoryDownloadActive = false;
         m_directoryDownloadCancelled = false;
@@ -1024,6 +1043,11 @@ void SftpSidebar::onOperationFinished(bool success, const QString& error) {
 
             m_pendingEditRemotePath.clear();
             m_pendingEditLocalPath.clear();
+            // Start the next download only after this file has been opened.
+            const auto nextEdit = qScopeGuard([this] {
+                if (!m_editUploadPending)
+                    QTimer::singleShot(0, this, &SftpSidebar::startNextEdit);
+            });
 
             QSettings settings;
             bool useCustom = settings.value("editor/useCustom", false).toBool();
@@ -1045,6 +1069,7 @@ void SftpSidebar::onOperationFinished(bool success, const QString& error) {
                     RemoteEditorDialog dialog(QFileInfo(remotePath).fileName(), localPath, this);
                     if (dialog.exec() == QDialog::Accepted && dialog.isSaved()) {
                         m_statusLabel->setText(tr("Uploading %1...").arg(QFileInfo(remotePath).fileName()));
+                        m_editUploadPending = true;
                         emit requestUpload(localPath, remotePath);
                     }
                 }
@@ -1061,6 +1086,7 @@ void SftpSidebar::onOperationFinished(bool success, const QString& error) {
                     RemoteEditorDialog dialog(QFileInfo(remotePath).fileName(), localPath, this);
                     if (dialog.exec() == QDialog::Accepted && dialog.isSaved()) {
                         m_statusLabel->setText(tr("Uploading %1...").arg(QFileInfo(remotePath).fileName()));
+                        m_editUploadPending = true;
                         emit requestUpload(localPath, remotePath);
                     }
                 }
@@ -1072,6 +1098,7 @@ void SftpSidebar::onOperationFinished(bool success, const QString& error) {
     } else {
         m_pendingEditRemotePath.clear();
         m_pendingEditLocalPath.clear();
+        m_editQueue.clear();
         const QString protocol = m_ftp ? QStringLiteral("FTP") : QStringLiteral("SFTP");
         emit diagnosticMessage(QStringLiteral("[%1 operation error] ").arg(protocol) + error);
         QMessageBox::critical(this, tr("%1 Error").arg(protocol), error);
@@ -1179,40 +1206,40 @@ void SftpSidebar::onNewFolderClicked() {
 void SftpSidebar::onRenameClicked() {
     if (!m_isConnected || m_transferActive)
         return;
-    auto* item = m_treeWidget->currentItem();
-    if (!item)
-        return;
-
-    QString special = item->data(0, Qt::UserRole + 1).toString();
-    if (special == "." || special == "..")
-        return;
-
-    QString oldName = item->text(0);
-    bool ok = false;
-    QString newName = QInputDialog::getText(this, tr("Rename"), tr("New name:"), QLineEdit::Normal, oldName, &ok);
-    if (!ok || newName.trimmed().isEmpty() || newName.trimmed() == oldName)
-        return;
-
-    QString base = m_currentPath;
-    if (!base.endsWith("/"))
-        base += "/";
-
-    m_statusLabel->setText(tr("Renaming %1...").arg(oldName));
-    emit requestRename(base + oldName, base + newName.trimmed());
+    const QStringList paths = selectedRemotePaths();
+    QList<QPair<QString, QString>> renames;
+    for (const QString& path : paths) {
+        const QString oldName = QFileInfo(path).fileName();
+        bool ok = false;
+        const QString newName = QInputDialog::getText(this, tr("Renaming %1...").arg(oldName), tr("New name:"),
+                                                      QLineEdit::Normal, oldName, &ok)
+                                    .trimmed();
+        if (!ok)
+            return;
+        if (newName.isEmpty() || newName == oldName)
+            continue;
+        if (newName == "." || newName == ".." || newName.contains('/') || newName.contains('\\')) {
+            QMessageBox::warning(this, tr("Rename"), tr("Invalid remote file name."));
+            return;
+        }
+        renames.append({path, path.left(path.size() - oldName.size()) + newName});
+    }
+    for (const auto& rename : renames) {
+        m_statusLabel->setText(tr("Renaming %1...").arg(QFileInfo(rename.first).fileName()));
+        emit requestRename(rename.first, rename.second);
+    }
 }
 
 void SftpSidebar::onChmodClicked() {
     if (!m_isConnected || m_transferActive)
         return;
-    auto* item = m_treeWidget->currentItem();
-    if (!item)
+    const QStringList paths = selectedRemotePaths();
+    if (paths.isEmpty())
         return;
-
-    QString special = item->data(0, Qt::UserRole + 1).toString();
-    if (special == "." || special == "..")
-        return;
-
-    const QString name = item->text(0);
+    QStringList names;
+    for (const QString& path : paths)
+        names.append(QFileInfo(path).fileName());
+    const QString name = names.join(", ");
     QDialog dialog(this);
     dialog.setObjectName("sftpUtilityDialog");
     dialog.setWindowTitle(tr("Permissions — %1").arg(name));
@@ -1330,12 +1357,10 @@ void SftpSidebar::onChmodClicked() {
             mode |= modeBits.at(i);
     }
 
-    QString base = m_currentPath;
-    if (!base.endsWith("/"))
-        base += "/";
-
-    m_statusLabel->setText(tr("Changing permissions of %1...").arg(name));
-    emit requestChmod(base + name, mode);
+    for (const QString& path : paths) {
+        m_statusLabel->setText(tr("Changing permissions of %1...").arg(QFileInfo(path).fileName()));
+        emit requestChmod(path, mode);
+    }
 }
 
 void SftpSidebar::navigateLocalTo(const QString& path) {
@@ -1447,22 +1472,33 @@ void SftpSidebar::onDownloadToLocalClicked() {
 void SftpSidebar::onDeleteClicked() {
     if (m_transferActive)
         return;
-    auto* item = m_treeWidget->currentItem();
-    if (!item)
+    QList<QPair<QString, bool>> targets;
+    QStringList names;
+    for (auto* item : m_treeWidget->selectedItems()) {
+        const QString special = item->data(0, Qt::UserRole + 1).toString();
+        if (special == "." || special == "..")
+            continue;
+        QString path = item->data(0, Qt::UserRole + 2).toString();
+        if (path.isEmpty())
+            path = (m_currentPath.endsWith('/') ? m_currentPath : m_currentPath + '/') + item->text(0);
+        targets.append({path, item->data(0, Qt::UserRole).toBool()});
+        names.append(item->text(0));
+    }
+    if (targets.isEmpty())
         return;
 
-    QString name = item->text(0);
-    bool isDir = item->data(0, Qt::UserRole).toBool();
-    QString remotePath = m_currentPath;
-    if (!remotePath.endsWith("/"))
-        remotePath += "/";
-    remotePath += name;
+    const QString prompt = targets.size() == 1
+                               ? tr("Are you sure you want to delete '%1'?").arg(names.first())
+                               : tr("Are you sure you want to delete the selected items?\n\n%1").arg(names.join('\n'));
+    const auto result = localizedQuestion(this, tr("Delete"), prompt, QMessageBox::Yes | QMessageBox::No);
+    if (result != QMessageBox::Yes)
+        return;
 
-    auto result = localizedQuestion(this, tr("Delete File"), tr("Are you sure you want to delete '%1'?").arg(name),
-                                    QMessageBox::Yes | QMessageBox::No);
-    if (result == QMessageBox::Yes) {
-        m_statusLabel->setText(tr("Deleting %1...").arg(name));
-        emit requestDelete(remotePath, isDir);
+    // Keep values rather than tree items: directory refreshes can replace the
+    // selection while the queued deletions are being processed.
+    for (const auto& target : targets) {
+        m_statusLabel->setText(tr("Deleting %1...").arg(target.first));
+        emit requestDelete(target.first, target.second);
     }
 }
 
@@ -1514,14 +1550,10 @@ void SftpSidebar::showContextMenu(const QPoint& pos) {
     if (!item)
         return;
 
-    QString special = item->data(0, Qt::UserRole + 1).toString();
-
+    if (!item->isSelected())
+        m_treeWidget->setCurrentItem(item);
     QMenu menu(this);
-    bool isDir = item->data(0, Qt::UserRole).toBool();
-
-    QAction* editAct = nullptr;
-    if (!isDir)
-        editAct = menu.addAction(QIcon(":/icons/edit.svg"), tr("Edit"));
+    auto* editAct = menu.addAction(QIcon(":/icons/edit.svg"), tr("Edit"));
     auto* downloadAct = menu.addAction(downloadIcon(), tr("Download"));
     auto* renameAct = menu.addAction(QIcon(":/icons/edit.svg"), tr("Rename"));
     auto* chmodAct = menu.addAction(QIcon(":/icons/edit.svg"), tr("Permissions"));
@@ -1530,18 +1562,23 @@ void SftpSidebar::showContextMenu(const QPoint& pos) {
     auto* newFolderAct = menu.addAction(QIcon(":/icons/folder.svg"), tr("New Folder"));
     auto* refreshAct = menu.addAction(QIcon(":/icons/refresh.svg"), tr("Refresh"));
 
-    if (special == "." || special == "..") {
-        if (editAct)
-            editAct->setEnabled(false);
-        if (downloadAct)
-            downloadAct->setEnabled(false);
-        deleteAct->setEnabled(false);
-        renameAct->setEnabled(false);
-        chmodAct->setEnabled(false);
+    const bool hasSelection = !selectedRemotePaths().isEmpty();
+    const bool canModify = hasSelection && !m_transferActive && m_pendingEditRemotePath.isEmpty();
+    bool hasFiles = false;
+    for (auto* selectedItem : m_treeWidget->selectedItems()) {
+        if (!selectedItem->data(0, Qt::UserRole).toBool())
+            hasFiles = true;
     }
+    if (editAct)
+        editAct->setEnabled(canModify && hasFiles);
+    downloadAct->setEnabled(hasSelection && m_pendingEditRemotePath.isEmpty());
+    deleteAct->setEnabled(canModify);
+    renameAct->setEnabled(canModify);
+    chmodAct->setEnabled(canModify);
+    newFolderAct->setEnabled(!m_transferActive && m_pendingEditRemotePath.isEmpty());
 
     auto* selected = menu.exec(m_treeWidget->mapToGlobal(pos));
-    if (selected == editAct) {
+    if (selected && selected == editAct) {
         onEditClicked();
     } else if (selected == downloadAct) {
         onDownloadClicked();
@@ -1568,25 +1605,26 @@ void SftpSidebar::updatePath(const QString& path) {
 }
 
 void SftpSidebar::onEditClicked() {
-    if (m_transferActive)
+    if (m_transferActive || !m_pendingEditRemotePath.isEmpty())
         return;
-    auto* item = m_treeWidget->currentItem();
-    if (!item)
+    for (auto* item : m_treeWidget->selectedItems()) {
+        const QString special = item->data(0, Qt::UserRole + 1).toString();
+        if (item->data(0, Qt::UserRole).toBool() || special == "." || special == "..")
+            continue;
+        QString path = item->data(0, Qt::UserRole + 2).toString();
+        if (path.isEmpty())
+            path = (m_currentPath.endsWith('/') ? m_currentPath : m_currentPath + '/') + item->text(0);
+        m_editQueue.append(path);
+    }
+    startNextEdit();
+}
+
+void SftpSidebar::startNextEdit() {
+    if (m_editQueue.isEmpty() || !m_pendingEditRemotePath.isEmpty() || m_editUploadPending)
         return;
-
-    bool isDir = item->data(0, Qt::UserRole).toBool();
-    if (isDir)
-        return;
-
-    QString name = item->text(0);
-    QString remotePath = m_currentPath;
-    if (!remotePath.endsWith("/"))
-        remotePath += "/";
-    remotePath += name;
-
-    m_pendingEditRemotePath = remotePath;
+    m_pendingEditRemotePath = m_editQueue.takeFirst();
+    const QString name = QFileInfo(m_pendingEditRemotePath).fileName();
     m_pendingEditLocalPath = QDir::tempPath() + "/banchoxterm_" + name;
-
     m_statusLabel->setText(tr("Downloading %1 for editing...").arg(name));
     emit requestDownload(m_pendingEditRemotePath, m_pendingEditLocalPath);
 }
