@@ -421,22 +421,25 @@ TerminalTab::~TerminalTab() {
     if (m_connection)
         disconnect(m_connection, nullptr, this, nullptr);
 
-    if (m_connection && m_connectionThread && m_connectionThread->isRunning()) {
-        QMetaObject::invokeMethod(m_connection, "disconnectFromHost", Qt::BlockingQueuedConnection);
-    }
-    if (m_connectionThread) {
-        m_connectionThread->quit();
-        if (!m_connectionThread->wait(3000)) {
-            m_connectionThread->terminate();
-            m_connectionThread->wait();
-        }
+    if (m_connectionThread && m_connectionThread->isRunning()) {
+        // The worker may be resolving DNS, authenticating or waiting for SFTP.
+        // Let it unwind without making the GUI wait for network I/O.
+        m_connectionThread->requestInterruption();
+        m_connection->cancelTransfer();
+        m_connectionThread->setParent(nullptr);
+        connect(m_connectionThread, &QThread::finished, m_connectionThread, &QObject::deleteLater);
+        QMetaObject::invokeMethod(
+            m_connection,
+            [connection = m_connection, thread = m_connectionThread] {
+                connection->disconnectFromHost();
+                thread->quit();
+            },
+            Qt::QueuedConnection);
+    } else {
         delete m_connectionThread;
-        m_connectionThread = nullptr;
     }
-    if (m_connection) {
-        delete m_connection;
-        m_connection = nullptr;
-    }
+    m_connectionThread = nullptr;
+    m_connection = nullptr;
 }
 
 void TerminalTab::resizeEvent(QResizeEvent* event) {
@@ -680,6 +683,7 @@ void TerminalTab::setupSshTerminal() {
     m_connection = new SshConnection();
     m_connectionThread = new QThread(this);
     m_connection->moveToThread(m_connectionThread);
+    connect(m_connectionThread, &QThread::finished, m_connection, &QObject::deleteLater);
     m_connectionThread->start();
 
     connect(m_connection, &SshConnection::remoteDirectoryChanged, this, [this](const QString& path) {

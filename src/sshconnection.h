@@ -93,6 +93,8 @@ private slots:
     void pollRemoteDirectory();
 
 private:
+    bool interrupted() const;
+    void checkTransport();
     bool openSocket();
     void closeSocket();
     bool waitSocket(int timeoutMs);
@@ -104,7 +106,9 @@ private:
     static ssize_t proxyRecv(libssh2_socket_t socket, void* buffer, size_t length, int flags, void** abstract);
 
     template <typename Fn> auto retryPtr(Fn&& fn) -> decltype(fn()) {
-        while (true) {
+        QElapsedTimer deadline;
+        deadline.start();
+        while (!interrupted() && !m_transportFailed && deadline.elapsed() < 15000) {
             auto result = fn();
             if (result)
                 return result;
@@ -113,6 +117,9 @@ private:
             if (!waitSocket(15000))
                 return nullptr;
         }
+        if (m_connected && !interrupted())
+            handleShellClosed();
+        return nullptr;
     }
 
     void openShell();
@@ -184,10 +191,12 @@ private:
     QString m_directoryChangeInFlight;
     QElapsedTimer m_directoryChangeTimer;
     int m_directoryDiscoveryAttempts = 0;
+    QTimer* m_transportTimer = nullptr;
     QTimer* m_keepAliveTimer = nullptr;
     QSocketNotifier* m_readNotifier = nullptr;
     QSocketNotifier* m_writeNotifier = nullptr;
     bool m_connected = false;
+    bool m_transportFailed = false;
     QElapsedTimer m_connectionTimer;
 
     // Per-session SSH options (set before connectToHost)

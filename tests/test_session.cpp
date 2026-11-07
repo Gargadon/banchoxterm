@@ -1108,6 +1108,34 @@ private slots:
         QCOMPARE(failure.count(), 1); // Fail before any socket is opened; never connect directly.
     }
 
+    void testClosingStalledSshTabDoesNotBlockGui() {
+        QTcpServer server;
+        QVERIFY(server.listen(QHostAddress::LocalHost));
+        Session session;
+        session.type = SessionType::SSH;
+        session.host = QStringLiteral("127.0.0.1");
+        session.port = server.serverPort();
+        session.user = QStringLiteral("test");
+        auto* tab = new TerminalTab(session);
+        QMetaObject::invokeMethod(
+            tab->connection(),
+            [connection = tab->connection(), session] {
+                connection->connectToHost(session.host, session.port, session.user, {}, {}, {});
+            },
+            Qt::QueuedConnection);
+        QTRY_VERIFY_WITH_TIMEOUT(server.hasPendingConnections(), 3000);
+        auto* peer = server.nextPendingConnection();
+        QVERIFY(peer);
+        // Accept TCP but never send an SSH banner: the worker is in handshake.
+        QTest::qWait(100);
+        QElapsedTimer elapsed;
+        elapsed.start();
+        delete tab;
+        QVERIFY2(elapsed.elapsed() < 250, "Closing an SSH tab blocked the GUI on network I/O");
+        QTRY_COMPARE_WITH_TIMEOUT(peer->state(), QAbstractSocket::UnconnectedState, 3000);
+        delete peer;
+    }
+
     void testSessionFilesArePrivate() {
 #ifdef Q_OS_WIN
         QSKIP("This test verifies POSIX mode bits, not Windows ACLs.");
@@ -2493,6 +2521,17 @@ private slots:
         connection.listDirectory(QStringLiteral("."));
         QTRY_COMPARE_WITH_TIMEOUT(directorySpy.count(), 4, 3000);
         QVERIFY(!qvariant_cast<QList<SftpFile>>(directorySpy.last().at(1)).isEmpty());
+        QSignalSpy closedSpy(&connection, &SshConnection::shellClosed);
+        connection.sendToShell("exit\n");
+        QTRY_COMPARE_WITH_TIMEOUT(closedSpy.count(), 1, 5000);
+        QVERIFY(!connection.isConnected());
+        QSignalSpy disconnectedOperation(&connection, &SshConnection::operationFinished);
+        QElapsedTimer disconnectedElapsed;
+        disconnectedElapsed.start();
+        connection.listDirectory(QStringLiteral("."));
+        QVERIFY(disconnectedElapsed.elapsed() < 250);
+        QCOMPARE(disconnectedOperation.count(), 1);
+        QVERIFY(!disconnectedOperation.first().first().toBool());
         connection.disconnectFromHost();
         sshd.terminate();
         QVERIFY(sshd.waitForFinished(3000));

@@ -142,7 +142,25 @@ SshConnection::~SshConnection() {
     disconnectFromHost();
 }
 
+bool SshConnection::interrupted() const {
+    return QThread::currentThread()->isInterruptionRequested();
+}
+
+void SshConnection::checkTransport() {
+    if (!m_connected)
+        return;
+    const int socket = m_jumpSock >= 0 ? m_jumpSock : m_sock;
+    char byte;
+    const int result = ::recv(socket, &byte, 1, MSG_PEEK);
+    if (result == 0 || (result < 0 && !wouldBlock(lastError())))
+        handleShellClosed();
+    else
+        readShell();
+}
+
 bool SshConnection::openSocket() {
+    if (interrupted())
+        return false;
     m_sock = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
     if (m_sock < 0) {
         emit connectionFailed(QString("socket() failed: %1").arg(lastError()));
@@ -168,6 +186,17 @@ bool SshConnection::openSocket() {
 
     int flag = 1;
     ::setsockopt(m_sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+    ::setsockopt(m_sock, SOL_SOCKET, SO_KEEPALIVE, reinterpret_cast<const char*>(&flag), sizeof(flag));
+#ifdef TCP_KEEPIDLE
+    int idle = 15, interval = 5, probes = 3;
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPCNT, &probes, sizeof(probes));
+#endif
+#ifdef TCP_USER_TIMEOUT
+    int transportTimeout = 15000;
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_USER_TIMEOUT, &transportTimeout, sizeof(transportTimeout));
+#endif
     int bufSize = 262144;
     ::setsockopt(m_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&bufSize), sizeof(bufSize));
     ::setsockopt(m_sock, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&bufSize), sizeof(bufSize));
@@ -218,7 +247,7 @@ void SshConnection::closeSocket() {
 }
 
 bool SshConnection::waitSocket(int timeoutMs) {
-    if (!m_session)
+    if (!m_session || interrupted())
         return false;
 
     LIBSSH2_SESSION* waitSession = m_proxyTransport && m_jumpSession ? m_jumpSession : m_session;
@@ -238,30 +267,45 @@ bool SshConnection::waitSocket(int timeoutMs) {
         return true;
     }
 
-    fd_set rfds;
-    fd_set wfds;
-    FD_ZERO(&rfds);
-    FD_ZERO(&wfds);
-    if (dir & LIBSSH2_SESSION_BLOCK_INBOUND)
-        FD_SET(waitSock, &rfds);
-    if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
-        FD_SET(waitSock, &wfds);
-
-    struct timeval tv;
-    tv.tv_sec = timeoutMs / 1000;
-    tv.tv_usec = (timeoutMs % 1000) * 1000;
-
-    int rc = select(waitSock + 1, &rfds, &wfds, nullptr, &tv);
-    return rc > 0;
+    QElapsedTimer deadline;
+    deadline.start();
+    while (!interrupted() && deadline.elapsed() < timeoutMs) {
+        fd_set rfds, wfds;
+        FD_ZERO(&rfds);
+        FD_ZERO(&wfds);
+        if (dir & LIBSSH2_SESSION_BLOCK_INBOUND)
+            FD_SET(waitSock, &rfds);
+        if (dir & LIBSSH2_SESSION_BLOCK_OUTBOUND)
+            FD_SET(waitSock, &wfds);
+        timeval tv{0, 100000};
+        const int rc = select(waitSock + 1, &rfds, &wfds, nullptr, &tv);
+        if (rc > 0)
+            return true;
+        if (rc < 0)
+            break;
+    }
+    if (m_connected && !interrupted())
+        handleShellClosed();
+    return false;
 }
 
 int SshConnection::retry(const std::function<int()>& fn) {
-    int rc;
-    while ((rc = fn()) == LIBSSH2_ERROR_EAGAIN) {
+    QElapsedTimer deadline;
+    deadline.start();
+    int rc = -1;
+    while (!interrupted() && !m_transportFailed && (rc = fn()) == LIBSSH2_ERROR_EAGAIN) {
+        if (deadline.elapsed() >= 15000) {
+            if (m_connected)
+                handleShellClosed();
+            return -1;
+        }
         if (!waitSocket(15000))
             return -1;
     }
-    return rc;
+    if (m_connected && (rc == LIBSSH2_ERROR_SOCKET_RECV || rc == LIBSSH2_ERROR_SOCKET_SEND ||
+                        rc == LIBSSH2_ERROR_SOCKET_DISCONNECT || rc == LIBSSH2_ERROR_TIMEOUT))
+        handleShellClosed();
+    return interrupted() ? -1 : rc;
 }
 
 QString SshConnection::knownHostsPath() const {
@@ -456,6 +500,7 @@ bool SshConnection::promptKbdInteractive(const QString& name, const QString& ins
 }
 
 void SshConnection::configureSession(LIBSSH2_SESSION* session, bool enableX11) {
+    libssh2_session_set_timeout(session, 5000);
     libssh2_session_set_blocking(session, 0);
     if (!m_cryptCipher.isEmpty()) {
         libssh2_session_method_pref(session, LIBSSH2_METHOD_CRYPT_CS, m_cryptCipher.toUtf8().constData());
@@ -681,6 +726,7 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     // for the new one; disconnectFromHost() clears the old tunnel list.
     disconnectFromHost();
 
+    m_transportFailed = false;
     m_tunnelConfigs = tunnels;
     for (int i = 0; i < m_tunnelConfigs.size(); ++i) {
         TunnelConfig& tunnel = m_tunnelConfigs[i];
@@ -854,6 +900,9 @@ void SshConnection::connectToHost(const QString& host, int port, const QString& 
     }
 
     m_connected = true;
+    m_transportTimer = new QTimer(this);
+    connect(m_transportTimer, &QTimer::timeout, this, &SshConnection::checkTransport);
+    m_transportTimer->start(1000);
     m_directoryTimer = new QTimer(this);
     m_directoryTimer->setInterval(1000);
     connect(m_directoryTimer, &QTimer::timeout, this, &SshConnection::pollRemoteDirectory);
@@ -1139,7 +1188,12 @@ void SshConnection::readShell() {
 }
 
 void SshConnection::handleShellClosed() {
+    if (!m_connected)
+        return;
     m_connected = false;
+    m_transportFailed = true;
+    if (m_transportTimer)
+        m_transportTimer->stop();
     if (m_directoryTimer)
         m_directoryTimer->stop();
     stopNotifiers();
@@ -1251,7 +1305,11 @@ void SshConnection::onKeepAlive() {
     // Non-blocking: sends a keepalive only when it is due. Re-arm the notifiers
     // in case libssh2 now wants to write (the write notifier is otherwise only
     // armed from onSocketActivity()).
-    libssh2_keepalive_send(m_session, nullptr);
+    const int rc = libssh2_keepalive_send(m_session, nullptr);
+    if (rc < 0 && rc != LIBSSH2_ERROR_EAGAIN) {
+        handleShellClosed();
+        return;
+    }
     armNotifiers();
 }
 
@@ -1264,7 +1322,7 @@ void SshConnection::sendBreak() {
 }
 
 void SshConnection::sendToShell(const QByteArray& data) {
-    if (!m_channel || data.isEmpty())
+    if (!m_connected || !m_channel || data.isEmpty())
         return;
 
     const char* ptr = data.constData();
@@ -1334,7 +1392,7 @@ void SshConnection::navigateDirectory(const QString& path) {
 }
 
 QString SshConnection::listDirectoryImpl(const QString& path) {
-    if (!m_sftp) {
+    if (!m_connected || !m_sftp) {
         emit operationFinished(false, "SFTP session not active");
         return {};
     }
@@ -1399,7 +1457,7 @@ void SshConnection::downloadFile(const QString& remotePath, const QString& local
         }
     }
 
-    if (!m_sftp) {
+    if (!m_connected || !m_sftp) {
         emit operationFinished(false, "SFTP session not active");
         return;
     }
@@ -1481,7 +1539,7 @@ int SshConnection::remoteOverwriteDecision(const QString& path) {
 }
 
 void SshConnection::uploadFile(const QString& localPath, const QString& remotePath) {
-    if (!m_sftp) {
+    if (!m_connected || !m_sftp) {
         emit operationFinished(false, "SFTP session not active");
         return;
     }
@@ -1564,7 +1622,7 @@ void SshConnection::uploadFile(const QString& localPath, const QString& remotePa
 }
 
 void SshConnection::deleteFile(const QString& remotePath, bool isDir) {
-    if (!m_sftp) {
+    if (!m_connected || !m_sftp) {
         emit operationFinished(false, "SFTP session not active");
         return;
     }
@@ -1584,7 +1642,7 @@ void SshConnection::deleteFile(const QString& remotePath, bool isDir) {
 }
 
 void SshConnection::createDirectory(const QString& path) {
-    if (!m_sftp) {
+    if (!m_connected || !m_sftp) {
         emit operationFinished(false, "SFTP session not active");
         return;
     }
@@ -1597,7 +1655,7 @@ void SshConnection::createDirectory(const QString& path) {
 }
 
 void SshConnection::renamePath(const QString& oldPath, const QString& newPath) {
-    if (!m_sftp) {
+    if (!m_connected || !m_sftp) {
         emit operationFinished(false, "SFTP session not active");
         return;
     }
@@ -1612,7 +1670,7 @@ void SshConnection::renamePath(const QString& oldPath, const QString& newPath) {
 }
 
 void SshConnection::chmodPath(const QString& path, int mode) {
-    if (!m_sftp) {
+    if (!m_connected || !m_sftp) {
         emit operationFinished(false, "SFTP session not active");
         return;
     }
@@ -1814,7 +1872,7 @@ bool SshConnection::uploadDirRecursive(const QString& localDir, const QString& r
 void SshConnection::uploadDirectory(const QString& localPath, const QString& remoteBasePath) {
     m_transferCancelRequested.store(false, std::memory_order_relaxed);
     m_transferPaused.store(false, std::memory_order_relaxed);
-    if (m_sftp == nullptr) {
+    if (!m_connected || m_sftp == nullptr) {
         emit operationFinished(false, "SFTP session not active");
         return;
     }
@@ -2259,6 +2317,18 @@ void SshConnection::pollX11Bridges() {
 }
 
 void SshConnection::disconnectFromHost() {
+    delete m_transportTimer;
+    m_transportTimer = nullptr;
+    // Abort network I/O before channel/tunnel teardown, which can otherwise
+    // wait for acknowledgements from an unreachable peer.
+    const int socket = m_jumpSock >= 0 ? m_jumpSock : m_sock;
+    if (socket >= 0) {
+#ifdef Q_OS_WIN
+        ::shutdown(socket, SD_BOTH);
+#else
+        ::shutdown(socket, SHUT_RDWR);
+#endif
+    }
     if (m_directoryTimer) {
         delete m_directoryTimer;
         m_directoryTimer = nullptr;
