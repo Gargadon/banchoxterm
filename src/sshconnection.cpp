@@ -189,13 +189,14 @@ bool SshConnection::openSocket() {
     ::setsockopt(m_sock, SOL_SOCKET, SO_KEEPALIVE, reinterpret_cast<const char*>(&flag), sizeof(flag));
 #ifdef TCP_KEEPIDLE
     int idle = 15, interval = 5, probes = 3;
-    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
-    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPINTVL, &interval, sizeof(interval));
-    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPCNT, &probes, sizeof(probes));
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPIDLE, reinterpret_cast<const char*>(&idle), sizeof(idle));
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPINTVL, reinterpret_cast<const char*>(&interval), sizeof(interval));
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_KEEPCNT, reinterpret_cast<const char*>(&probes), sizeof(probes));
 #endif
 #ifdef TCP_USER_TIMEOUT
     int transportTimeout = 15000;
-    ::setsockopt(m_sock, IPPROTO_TCP, TCP_USER_TIMEOUT, &transportTimeout, sizeof(transportTimeout));
+    ::setsockopt(m_sock, IPPROTO_TCP, TCP_USER_TIMEOUT, reinterpret_cast<const char*>(&transportTimeout),
+                 sizeof(transportTimeout));
 #endif
     int bufSize = 262144;
     ::setsockopt(m_sock, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&bufSize), sizeof(bufSize));
