@@ -36,8 +36,9 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-# Find Qt6 components
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Gui Network SerialPort Test LinguistTools)
+# Keep the application and its vendored QTermWidget on the same Qt baseline.
+set(BANCHO_QT_MINIMUM_VERSION "6.12.0")
+find_package(Qt6 ${BANCHO_QT_MINIMUM_VERSION} REQUIRED COMPONENTS Core Widgets Gui Network SerialPort Test LinguistTools)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(KF6WindowSystem QUIET)
@@ -364,7 +365,7 @@ endif()
 # Embed RDP on Windows via the native Remote Desktop ActiveX control.
 # Require ActiveQt so Windows builds cannot silently lose embedded RDP.
 if(WIN32)
-    find_package(Qt6 REQUIRED COMPONENTS AxContainer)
+    find_package(Qt6 ${BANCHO_QT_MINIMUM_VERSION} REQUIRED COMPONENTS AxContainer)
     if(TARGET Qt6::AxContainer)
         target_link_libraries(banchoxterm PRIVATE Qt6::AxContainer)
         target_compile_definitions(banchoxterm PRIVATE BANCHO_HAVE_RDP_AX)

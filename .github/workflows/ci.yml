@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 env:
-  BANCHO_QT_VERSION: '6.8.3'
+  BANCHO_QT_VERSION: '6.12.0'
 
 jobs:
   format-check:

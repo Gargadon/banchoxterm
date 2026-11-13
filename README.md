@@ -291,7 +291,7 @@ package, configure with the package directories before building:
 
 ```powershell
 cmake -B build -A x64 `
-  -DCMAKE_PREFIX_PATH=C:\Qt\6.8.3\msvc2022_64 `
+  -DCMAKE_PREFIX_PATH=C:\Qt\6.12.0\msvc2022_64 `
   -DBANCHO_VCXSRV_DIR=C:\path\to\vcxsrv-package `
   -DBANCHO_VCXSRV_ARM64_DIR=C:\path\to\vcxsrv-package-arm64
 cmake --build build --config Release --target banchoxterm
@@ -305,12 +305,12 @@ use an installed X server such as Xming or X410.
 
 ### Requirements
 
-CI builds use Qt 6.8.3 on Linux and Windows (x64 and ARM64), pinned by
+CI builds use Qt 6.12.0 on Linux and Windows (x64 and ARM64), pinned by
 `BANCHO_QT_VERSION` in `.github/workflows/ci.yml`.
 
 - CMake 3.16+
 - C++17 compiler (GCC, Clang, or MSVC)
-- Qt 6.6+ (Core, Widgets, Gui, Network, Test, LinguistTools)
+- Qt 6.12.0+ (Core, Widgets, Gui, Network, Test, LinguistTools)
 - [libssh2](https://www.libssh2.org) — fetched automatically by CMake (FetchContent)
 - Linux RDP: [FreeRDP](https://www.freerdp.com/) 3 and WinPR 3 are required
   for compilation and at runtime. Install `freerdp3-dev`, `libwinpr3-dev`,
