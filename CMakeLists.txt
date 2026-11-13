@@ -279,6 +279,7 @@ set(QTQ_SOURCES
     ${QTQ_LIB}/History.cpp
     ${QTQ_LIB}/HistorySearch.cpp
     ${QTQ_LIB}/HistorySearch.h
+    ${QTQ_LIB}/Hyperlink.cpp
     ${QTQ_LIB}/KeyboardTranslator.cpp
     ${QTQ_LIB}/konsole_wcwidth.cpp
     ${QTQ_LIB}/Pty.cpp

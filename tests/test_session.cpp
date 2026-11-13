@@ -98,6 +98,7 @@
 #endif
 #include <qtermwidget.h>
 #include <TerminalDisplay.h>
+#include <Filter.h>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QProgressBar>
@@ -5687,6 +5688,96 @@ private slots:
         QVERIFY(QRegularExpression(QStringLiteral("rgb:[0-9a-f]{4}/[0-9a-f]{4}/[0-9a-f]{4}"))
                     .match(QString::fromLatin1(response))
                     .hasMatch());
+    }
+
+    void testTerminalOscColorChangesAndSizeQuery() {
+        QTermWidget terminal(0);
+        terminal.resize(640, 320);
+        terminal.startExternal();
+        terminal.show();
+        QByteArray response;
+        connect(&terminal, &QTermWidget::sendData, &terminal,
+                [&response](const char* data, int size) { response.append(data, size); });
+        terminal.feedData(QByteArrayLiteral("\x1b]10;#123456\x07\x1b]11;#234567\x07\x1b]12;#345678\x07"));
+        terminal.feedData(QByteArrayLiteral("\x1b]10;?\x07\x1b]11;?\x07\x1b]12;?\x07\x1b[18t"));
+        QTRY_VERIFY(response.contains("\x1b]10;rgb:1212/3434/5656"));
+        QVERIFY(response.contains("\x1b]11;rgb:2323/4545/6767"));
+        QVERIFY(response.contains("\x1b]12;rgb:3434/5656/7878"));
+        const QByteArray sizeReply = QByteArray("\x1b[8;") + QByteArray::number(terminal.screenLinesCount()) + ";" +
+                                     QByteArray::number(terminal.screenColumnsCount()) + "t";
+        QVERIFY(response.contains(sizeReply));
+    }
+
+    void testTerminalBracketedPasteEmbeddedTerminator() {
+        QTermWidget terminal(0);
+        terminal.startExternal();
+        terminal.feedData(QByteArrayLiteral("\x1b[?2004h"));
+        QByteArray sent;
+        connect(&terminal, &QTermWidget::sendData, &terminal,
+                [&sent](const char* data, int size) { sent.append(data, size); });
+        const QString oldClipboard = QApplication::clipboard()->text();
+        const auto restore = qScopeGuard([&] { QApplication::clipboard()->setText(oldClipboard); });
+        QApplication::clipboard()->setText(QStringLiteral("before\x1b[201~after"));
+        terminal.pasteClipboard();
+        QCOMPARE(sent, QByteArray("\x1b[200~before\\033[201~after\x1b[201~"));
+        QCOMPARE(sent.count(QByteArray("\x1b[201~")), 1);
+    }
+
+    void testTerminalSharedBackgroundCache() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath("background.png");
+        QImage background(8, 8, QImage::Format_RGB32);
+        background.fill(QColor(170, 30, 60));
+        QVERIFY(background.save(path));
+        QTermWidget terminal(0);
+        terminal.resize(640, 320);
+        terminal.setBlinkingCursor(false);
+        terminal.startExternal();
+        terminal.show();
+        auto* display = terminal.findChild<Konsole::TerminalDisplay*>();
+        QVERIFY(display);
+        display->setBackgroundMode(Konsole::Tiled);
+        display->setBackgroundImage(path);
+        {
+            QTermWidget other(0);
+            auto* otherDisplay = other.findChild<Konsole::TerminalDisplay*>();
+            QVERIFY(otherDisplay);
+            otherDisplay->setBackgroundImage(path);
+        }
+        QTest::qWait(50);
+        QCOMPARE(display->grab().toImage().pixelColor(30, 30), QColor(170, 30, 60));
+        QVERIFY(!display->testAttribute(Qt::WA_OpaquePaintEvent));
+        display->setOpacity(0.4);
+        display->setBackgroundImage(QString());
+        QVERIFY(!display->testAttribute(Qt::WA_OpaquePaintEvent));
+        display->setOpacity(1);
+        QVERIFY(display->testAttribute(Qt::WA_OpaquePaintEvent));
+        display->setBackgroundImage(directory.filePath("missing.png"));
+        QVERIFY(display->testAttribute(Qt::WA_OpaquePaintEvent));
+    }
+
+    void testTerminalOsc8Hyperlink() {
+        QTermWidget terminal(0);
+        terminal.resize(640, 320);
+        terminal.startExternal();
+        terminal.show();
+        auto* display = terminal.findChild<Konsole::TerminalDisplay*>();
+        QVERIFY(display);
+        QSignalSpy activated(&terminal, &QTermWidget::urlActivated);
+        terminal.feedData(
+            QByteArrayLiteral("\x1b]8;id=test;https://example.org/target\x1b\\label\x1b]8;;\x1b\\ plain"));
+        QTest::qWait(50);
+        display->processFilters();
+        auto* spot = dynamic_cast<Konsole::HyperlinkFilter::HotSpot*>(display->filterChain()->hotSpotAt(0, 0));
+        QVERIFY(spot);
+        QCOMPARE(spot->url(), QStringLiteral("https://example.org/target"));
+        QVERIFY(!display->filterChain()->hotSpotAt(0, 6));
+        spot->activate(QStringLiteral("click-action"));
+        QCOMPARE(activated.count(), 1);
+        QCOMPARE(activated.first().at(0).toUrl(), QUrl("https://example.org/target"));
+        terminal.searchText(QStringLiteral("label"), true, true, true);
+        QCOMPARE(terminal.selectedText(), QStringLiteral("label"));
     }
 
     void testShiftEnterEncoding() {
