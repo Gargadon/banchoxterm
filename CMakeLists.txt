@@ -270,8 +270,6 @@ target_link_libraries(banchoxterm
 # emulator via QTermWidget::startExternal()/feedData(). On Unix KPty backs
 # the local shells via startShellProgram().
 set(QTQ_LIB ${CMAKE_CURRENT_SOURCE_DIR}/third_party/qtermwidget/lib)
-include(cmake/PatchQTermWidgetSearch.cmake)
-include(cmake/PatchQTermWidgetBackground.cmake)
 
 set(QTQ_SOURCES
     ${QTQ_LIB}/BlockArray.cpp
@@ -279,7 +277,7 @@ set(QTQ_SOURCES
     ${QTQ_LIB}/Emulation.cpp
     ${QTQ_LIB}/Filter.cpp
     ${QTQ_LIB}/History.cpp
-    ${BANCHO_HISTORY_SEARCH_SOURCE}
+    ${QTQ_LIB}/HistorySearch.cpp
     ${QTQ_LIB}/HistorySearch.h
     ${QTQ_LIB}/KeyboardTranslator.cpp
     ${QTQ_LIB}/konsole_wcwidth.cpp
@@ -292,7 +290,7 @@ set(QTQ_SOURCES
     ${QTQ_LIB}/Session.cpp
     ${QTQ_LIB}/ShellCommand.cpp
     ${QTQ_LIB}/TerminalCharacterDecoder.cpp
-    ${BANCHO_TERMINAL_DISPLAY_SOURCE}
+    ${QTQ_LIB}/TerminalDisplay.cpp
     ${QTQ_LIB}/TerminalDisplay.h
     ${QTQ_LIB}/tools.cpp
     ${QTQ_LIB}/Vt102Emulation.cpp

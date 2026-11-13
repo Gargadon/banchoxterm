@@ -330,6 +330,12 @@ CI builds use Qt 6.8.3 on Linux and Windows (x64 and ARM64), pinned by
 > submodule on every platform (same fork, same emulator code on Linux and
 > Windows), instead of relying on a distro/system package.
 
+All changes to QTermWidget itself must be committed and published in
+[Gargadon/qtermwidget](https://github.com/Gargadon/qtermwidget). Update this
+repository's submodule reference to the published commit; do not apply private
+source patches or generate modified QTermWidget sources during the application
+build. Application-specific integration and tests remain in BanchoXterm.
+
 ### Linux
 
 Saving and retrieving passwords requires a running Secret Service provider in
