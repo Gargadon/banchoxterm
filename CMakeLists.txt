@@ -326,6 +326,9 @@ if(BANCHO_ENABLE_ASAN AND MSVC)
     endforeach()
 endif()
 target_compile_definitions(qtermwidget6 PRIVATE
+    # Match the standalone LXQt build's explicit string conversion rules.
+    QT_NO_CAST_FROM_ASCII
+    QT_NO_CAST_TO_ASCII
     KB_LAYOUT_DIR="${QTQ_LIB}/kb-layouts"
     COLORSCHEMES_DIR="${QTQ_LIB}/color-schemes"
     TRANSLATIONS_DIR="${QTQ_LIB}/translations"
