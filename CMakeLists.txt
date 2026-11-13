@@ -6,7 +6,7 @@ if(CMAKE_GENERATOR MATCHES "NMake Makefiles")
     # Use CMake's include scanner instead of parsing the compiler's output.
     set(CMAKE_DEPENDS_USE_COMPILER FALSE)
 endif()
-project(banchoxterm VERSION 1.4.1 LANGUAGES C CXX)
+project(banchoxterm VERSION 1.5.0 LANGUAGES C CXX)
 
 include(GNUInstallDirs)
 
