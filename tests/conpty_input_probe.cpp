@@ -29,7 +29,8 @@ int main(int argc, char** argv) {
         const auto& key = record.Event.KeyEvent;
         if (query) {
             reply += key.uChar.UnicodeChar;
-            if (reply.find(L"rgb:") != std::wstring::npos && reply.find(L"\x1b\\") != std::wstring::npos) {
+            if (reply.find(L"rgb:") != std::wstring::npos &&
+                (reply.find(L"\x1b\\") != std::wstring::npos || reply.find(L'\x07') != std::wstring::npos)) {
                 std::puts("QUERY_REPLY_RECEIVED");
                 std::fflush(stdout);
                 return 0;
