@@ -14,8 +14,7 @@ RemoteEditorDialog::RemoteEditorDialog(const QString& fileName, const QString& l
     loadFile();
 }
 
-RemoteEditorDialog::~RemoteEditorDialog() {
-}
+RemoteEditorDialog::~RemoteEditorDialog() = default;
 
 void RemoteEditorDialog::setupUi(const QString& fileName) {
     resize(700, 500);

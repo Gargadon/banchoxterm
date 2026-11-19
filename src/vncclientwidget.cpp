@@ -19,12 +19,14 @@ VncClientWidget::VncClientWidget(QWidget* parent) : QWidget(parent) {
     setAttribute(Qt::WA_OpaquePaintEvent);
     setContextMenuPolicy(Qt::CustomContextMenu);
     connect(this, &QWidget::customContextMenuRequested, this, &VncClientWidget::showDisplayContextMenu);
-    connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [this]() {
-        if (!m_connected || m_updatingClipboard)
+    connect(QApplication::clipboard(), &QClipboard::dataChanged, this, [this] {
+        if (!m_connected || m_updatingClipboard) {
             return;
+        }
         const QString text = QApplication::clipboard()->text();
-        if (!text.isEmpty())
+        if (!text.isEmpty()) {
             enqueueClipboard(text.toUtf8());
+        }
     });
 }
 
@@ -37,20 +39,22 @@ void VncClientWidget::start(const QString& host, int port, const QString& passwo
     m_port = port;
     m_password = password;
     m_stopRequested = false;
-    m_thread = std::thread([this]() { runVncLoop(); });
+    m_thread = std::thread([this] { runVncLoop(); });
 }
 
 void VncClientWidget::stop() {
     m_stopRequested = true;
-    if (m_thread.joinable())
+    if (m_thread.joinable()) {
         m_thread.join();
+    }
 }
 
 rfbBool VncClientWidget::onMallocFrameBuffer(rfbClient* client) {
     VncClientWidget* self = static_cast<VncClientWidget*>(rfbClientGetClientData(client, nullptr));
-    if (!self)
+    if (self == nullptr) {
         return 0;
-    if (client->frameBuffer) {
+    }
+    if (client->frameBuffer != nullptr) {
         free(client->frameBuffer);
         client->frameBuffer = nullptr;
     }
@@ -58,38 +62,52 @@ rfbBool VncClientWidget::onMallocFrameBuffer(rfbClient* client) {
     self->m_remoteHeight = client->height;
     {
         QMutexLocker locker(&self->m_framebufferMutex);
+        self->m_dirtyFrame = QRect(0, 0, client->width, client->height);
         self->m_framebuffer = QImage(client->width, client->height, QImage::Format_RGB32);
+        self->m_framebuffer.fill(Qt::black);
     }
     client->frameBuffer = static_cast<uint8_t*>(calloc(static_cast<size_t>(client->width) * client->height, 4));
-    return client->frameBuffer ? 1 : 0;
+    return (client->frameBuffer != nullptr) ? 1 : 0;
 }
 
 void VncClientWidget::onGotFrameBufferUpdate(rfbClient* client, int x, int y, int w, int h) {
     VncClientWidget* self = static_cast<VncClientWidget*>(rfbClientGetClientData(client, nullptr));
-    if (!self)
+    if (self == nullptr) {
         return;
+    }
     QMutexLocker locker(&self->m_framebufferMutex);
     QImage& img = self->m_framebuffer;
-    if (img.isNull())
+    if (img.isNull()) {
         return;
+    }
     const int x1 = qMin(x + w, img.width());
     const int y1 = qMin(y + h, img.height());
     for (int row = qMax(0, y); row < y1; ++row) {
-        const uint8_t* src = client->frameBuffer + (static_cast<size_t>(row) * client->width + qMax(0, x)) * 4;
-        uint8_t* dst = img.scanLine(row) + qMax(0, x) * 4;
+        const uint8_t* src = client->frameBuffer + (((static_cast<size_t>(row) * client->width) + qMax(0, x)) * 4);
+        uint8_t* dst = img.scanLine(row) + (qMax(0, x) * 4);
         memcpy(dst, src, static_cast<size_t>(qMax(0, x1 - qMax(0, x))) * 4);
     }
-    QMetaObject::invokeMethod(self, [self]() { self->update(); }, Qt::QueuedConnection);
+    self->m_dirtyFrame |= QRect(x, y, w, h).intersected(img.rect());
+    if (!self->m_updatePending.exchange(true)) {
+        QMetaObject::invokeMethod(
+            self,
+            [self] {
+                self->m_updatePending = false;
+                self->update();
+            },
+            Qt::QueuedConnection);
+    }
 }
 
 void VncClientWidget::onGotXCutText(rfbClient* client, const char* text, int textLength) {
     VncClientWidget* self = static_cast<VncClientWidget*>(rfbClientGetClientData(client, nullptr));
-    if (!self || !text || textLength <= 0)
+    if ((self == nullptr) || (text == nullptr) || textLength <= 0) {
         return;
+    }
     const QString clipboardText = QString::fromUtf8(text, textLength);
     QMetaObject::invokeMethod(
         self,
-        [self, clipboardText]() {
+        [self, clipboardText] {
             self->m_updatingClipboard = true;
             QApplication::clipboard()->setText(clipboardText);
             self->m_updatingClipboard = false;
@@ -99,11 +117,13 @@ void VncClientWidget::onGotXCutText(rfbClient* client, const char* text, int tex
 
 rfbCredential* VncClientWidget::onGetCredential(rfbClient* client, int credentialType) {
     VncClientWidget* self = static_cast<VncClientWidget*>(rfbClientGetClientData(client, nullptr));
-    if (!self || credentialType != rfbCredentialTypeUser)
+    if ((self == nullptr) || credentialType != rfbCredentialTypeUser) {
         return nullptr;
+    }
     rfbCredential* cred = static_cast<rfbCredential*>(calloc(1, sizeof(rfbCredential)));
-    if (!cred)
+    if (cred == nullptr) {
         return nullptr;
+    }
     const QByteArray pwd = self->m_password.toUtf8();
     cred->userCredential.username = qstrdup("");
     cred->userCredential.password = qstrdup(pwd.constData());
@@ -112,7 +132,7 @@ rfbCredential* VncClientWidget::onGetCredential(rfbClient* client, int credentia
 
 void VncClientWidget::runVncLoop() {
     rfbClient* client = rfbGetClient(8, 3, 4);
-    if (!client) {
+    if (client == nullptr) {
         emit errorOccurred(tr("Failed to create VNC client"));
         return;
     }
@@ -151,7 +171,7 @@ void VncClientWidget::runVncLoop() {
     char progname[] = "banchoxterm";
     char* argv[1] = {progname};
 
-    if (!rfbInitClient(client, &argc, argv)) {
+    if (rfbInitClient(client, &argc, argv) == 0) {
         m_client = nullptr;
         // rfbInitClient() owns and cleans up the client structure on failure.
         // Calling rfbClientCleanup() here again double-frees libvncclient's
@@ -166,8 +186,10 @@ void VncClientWidget::runVncLoop() {
     SendFramebufferUpdateRequest(client, 0, 0, client->width, client->height, 0);
 
     while (!m_stopRequested) {
-        if (WaitForMessage(client, 20000) < 0)
+        const int ready = WaitForMessage(client, 20000);
+        if (ready < 0 || (ready > 0 && (HandleRFBServerMessage(client) == 0))) {
             break;
+        }
         processPendingInput(client);
     }
 
@@ -184,11 +206,15 @@ void VncClientWidget::processPendingInput(rfbClient* client) {
         batch.swap(m_pendingInputs);
     }
     for (const PendingInput& in : batch) {
-        if (in.type == PendingInput::Key)
-            SendKeyEvent(client, in.keysym, in.down);
-        else if (in.type == PendingInput::Pointer)
-            SendPointerEvent(client, in.x, in.y, in.buttonMask);
-        else if (!in.clipboardText.isEmpty()) {
+        if (in.type == PendingInput::Key) {
+            {
+                SendKeyEvent(client, in.keysym, in.down);
+            }
+        } else if (in.type == PendingInput::Pointer) {
+            {
+                SendPointerEvent(client, in.x, in.y, in.buttonMask);
+            }
+        } else if (!in.clipboardText.isEmpty()) {
             QByteArray clipboardText = in.clipboardText;
             SendClientCutText(client, clipboardText.data(), clipboardText.size());
         }
@@ -200,7 +226,7 @@ void VncClientWidget::enqueueKey(rfbKeySym keysym, bool down) {
     PendingInput in;
     in.type = PendingInput::Key;
     in.keysym = keysym;
-    in.down = down;
+    in.down = static_cast<rfbBool>(down);
     m_pendingInputs.append(in);
 }
 
@@ -230,18 +256,28 @@ void VncClientWidget::paintEvent(QPaintEvent*) {
         painter.fillRect(rect(), QColor(0, 0, 0));
         return;
     }
-    const QImage copy = m_framebuffer.copy();
+    if (m_displayFrame.size() != m_framebuffer.size()) {
+        m_displayFrame = QImage(m_framebuffer.size(), m_framebuffer.format());
+        m_dirtyFrame = m_framebuffer.rect();
+    }
+    for (int y = m_dirtyFrame.top(); y <= m_dirtyFrame.bottom(); ++y) {
+        const int offset = m_dirtyFrame.x() * 4;
+        memcpy(m_displayFrame.scanLine(y) + offset, m_framebuffer.constScanLine(y) + offset,
+               static_cast<size_t>(m_dirtyFrame.width()) * 4);
+    }
+    m_dirtyFrame = {};
     locker.unlock();
+
     painter.fillRect(rect(), Qt::black);
     if (m_scaleMode == ScaleMode::OneToOne) {
-        const QPoint topLeft((width() - copy.width()) / 2, (height() - copy.height()) / 2);
-        painter.drawImage(topLeft, copy);
+        const QPoint topLeft((width() - m_displayFrame.width()) / 2, (height() - m_displayFrame.height()) / 2);
+        painter.drawImage(topLeft, m_displayFrame);
         return;
     }
-
-    const QImage scaled = copy.scaled(size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    const QPoint topLeft((width() - scaled.width()) / 2, (height() - scaled.height()) / 2);
-    painter.drawImage(topLeft, scaled);
+    const QSize fitted = m_displayFrame.size().scaled(size(), Qt::KeepAspectRatio);
+    const QPoint topLeft((width() - fitted.width()) / 2, (height() - fitted.height()) / 2);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    painter.drawImage(QRect(topLeft, fitted), m_displayFrame);
 }
 
 void VncClientWidget::showDisplayContextMenu(const QPoint& position) {
@@ -263,10 +299,11 @@ void VncClientWidget::showDisplayContextMenu(const QPoint& position) {
         m_scaleMode = ScaleMode::OneToOne;
         update();
     } else if (selected == fullscreenAction) {
-        if (window()->isFullScreen())
+        if (window()->isFullScreen()) {
             window()->showNormal();
-        else
+        } else {
             window()->showFullScreen();
+        }
     }
 }
 
@@ -332,25 +369,25 @@ rfbKeySym VncClientWidget::keysymForEvent(QKeyEvent* event) const {
     case Qt::Key_Period:
         return XK_KP_Decimal;
     case Qt::Key_0:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_0 : '0';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_0 : '0';
     case Qt::Key_1:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_1 : '1';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_1 : '1';
     case Qt::Key_2:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_2 : '2';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_2 : '2';
     case Qt::Key_3:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_3 : '3';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_3 : '3';
     case Qt::Key_4:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_4 : '4';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_4 : '4';
     case Qt::Key_5:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_5 : '5';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_5 : '5';
     case Qt::Key_6:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_6 : '6';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_6 : '6';
     case Qt::Key_7:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_7 : '7';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_7 : '7';
     case Qt::Key_8:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_8 : '8';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_8 : '8';
     case Qt::Key_9:
-        return (event->modifiers() & Qt::KeypadModifier) ? XK_KP_9 : '9';
+        return ((event->modifiers() & Qt::KeypadModifier) != 0u) ? XK_KP_9 : '9';
     case Qt::Key_Shift:
         return XK_Shift_L;
     case Qt::Key_Control:
@@ -363,14 +400,16 @@ rfbKeySym VncClientWidget::keysymForEvent(QKeyEvent* event) const {
         break;
     }
 
-    if (event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F24)
+    if (event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F24) {
         return XK_F1 + (event->key() - Qt::Key_F1);
+    }
 
     const QString text = event->text();
     if (text.size() == 1) {
         const ushort ch = text.at(0).unicode();
-        if (ch >= 0x20 && ch <= 0x7E)
+        if (ch >= 0x20 && ch <= 0x7E) {
             return ch;
+        }
     }
     return 0;
 }
@@ -404,8 +443,9 @@ void VncClientWidget::keyReleaseEvent(QKeyEvent* event) {
     case Qt::Key_Control:
     case Qt::Key_Alt:
     case Qt::Key_Meta:
-        if (keysym != 0)
+        if (keysym != 0) {
             enqueueKey(keysym, 0);
+        }
         break;
     default:
         break;
@@ -416,24 +456,27 @@ void VncClientWidget::keyReleaseEvent(QKeyEvent* event) {
 void VncClientWidget::sendPointerEvent(QMouseEvent* event, bool down) {
     const int remoteW = m_remoteWidth.load();
     const int remoteH = m_remoteHeight.load();
-    if (remoteW <= 0 || remoteH <= 0)
+    if (remoteW <= 0 || remoteH <= 0) {
         return;
+    }
 
-    const int x = static_cast<int>(static_cast<qreal>(event->position().x()) * remoteW / qMax(1, width()));
-    const int y = static_cast<int>(static_cast<qreal>(event->position().y()) * remoteH / qMax(1, height()));
+    const int x = static_cast<int>(event->position().x() * remoteW / qMax(1, width()));
+    const int y = static_cast<int>(event->position().y() * remoteH / qMax(1, height()));
 
     int btn = 0;
-    if (event->button() == Qt::LeftButton)
+    if (event->button() == Qt::LeftButton) {
         btn = rfbButton1Mask;
-    else if (event->button() == Qt::MiddleButton)
+    } else if (event->button() == Qt::MiddleButton) {
         btn = rfbButton2Mask;
-    else if (event->button() == Qt::RightButton)
+    } else if (event->button() == Qt::RightButton) {
         btn = rfbButton3Mask;
+    }
 
-    if (down)
+    if (down) {
         m_buttonMask |= btn;
-    else
+    } else {
         m_buttonMask &= ~btn;
+    }
 
     enqueuePointer(x, y, m_buttonMask);
 }
@@ -451,20 +494,24 @@ void VncClientWidget::mouseReleaseEvent(QMouseEvent* event) {
 void VncClientWidget::mouseMoveEvent(QMouseEvent* event) {
     const int remoteW = m_remoteWidth.load();
     const int remoteH = m_remoteHeight.load();
-    if (remoteW <= 0 || remoteH <= 0)
+    if (remoteW <= 0 || remoteH <= 0) {
         return;
+    }
 
     int mask = 0;
-    if (event->buttons() & Qt::LeftButton)
+    if (event->buttons().testFlag(Qt::LeftButton)) {
         mask |= rfbButton1Mask;
-    if (event->buttons() & Qt::MiddleButton)
+    }
+    if (event->buttons().testFlag(Qt::MiddleButton)) {
         mask |= rfbButton2Mask;
-    if (event->buttons() & Qt::RightButton)
+    }
+    if (event->buttons().testFlag(Qt::RightButton)) {
         mask |= rfbButton3Mask;
+    }
     m_buttonMask = mask;
 
-    const int x = static_cast<int>(static_cast<qreal>(event->position().x()) * remoteW / qMax(1, width()));
-    const int y = static_cast<int>(static_cast<qreal>(event->position().y()) * remoteH / qMax(1, height()));
+    const int x = static_cast<int>(event->position().x() * remoteW / qMax(1, width()));
+    const int y = static_cast<int>(event->position().y() * remoteH / qMax(1, height()));
     enqueuePointer(x, y, mask);
     event->accept();
 }
@@ -472,11 +519,12 @@ void VncClientWidget::mouseMoveEvent(QMouseEvent* event) {
 void VncClientWidget::wheelEvent(QWheelEvent* event) {
     const int remoteW = m_remoteWidth.load();
     const int remoteH = m_remoteHeight.load();
-    if (remoteW <= 0 || remoteH <= 0)
+    if (remoteW <= 0 || remoteH <= 0) {
         return;
+    }
 
-    const int x = static_cast<int>(static_cast<qreal>(event->position().x()) * remoteW / qMax(1, width()));
-    const int y = static_cast<int>(static_cast<qreal>(event->position().y()) * remoteH / qMax(1, height()));
+    const int x = static_cast<int>(event->position().x() * remoteW / qMax(1, width()));
+    const int y = static_cast<int>(event->position().y() * remoteH / qMax(1, height()));
 
     const bool up = event->angleDelta().y() > 0;
     enqueuePointer(x, y, m_buttonMask | (up ? rfbWheelUpMask : rfbWheelDownMask));

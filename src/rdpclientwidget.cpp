@@ -9,6 +9,7 @@
 #include <QResizeEvent>
 #include <QSettings>
 #include <mutex>
+#include <cstring>
 #include <QPainter>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -29,8 +30,9 @@ RdpClientWidget::RdpClientWidget(QWidget* parent) : QWidget(parent) {
     m_resizeTimer.setSingleShot(true);
     m_resizeTimer.setInterval(250);
     connect(&m_resizeTimer, &QTimer::timeout, this, [this] {
-        if (!isVisible())
+        if (!isVisible()) {
             return;
+        }
         QMutexLocker lock(&m_mutex);
         m_requestedSize = remoteSize(size());
     });
@@ -78,11 +80,13 @@ void RdpClientWidget::stop() {
     m_stop = true;
     {
         QMutexLocker lock(&m_instanceMutex);
-        if (m_instance && m_instance->context)
+        if ((m_instance != nullptr) && (m_instance->context != nullptr)) {
             (void) freerdp_abort_connect_context(m_instance->context);
+        }
     }
-    if (m_thread.joinable())
+    if (m_thread.joinable()) {
         m_thread.join();
+    }
     m_connected = false;
 }
 BOOL RdpClientWidget::authenticate(freerdp*, char**, char**, char**, rdp_auth_reason) {
@@ -90,8 +94,9 @@ BOOL RdpClientWidget::authenticate(freerdp*, char**, char**, char**, rdp_auth_re
     return TRUE;
 }
 BOOL RdpClientWidget::postConnect(freerdp* instance) {
-    if (!gdi_init(instance, PIXEL_FORMAT_BGRX32))
+    if (gdi_init(instance, PIXEL_FORMAT_BGRX32) == 0) {
         return FALSE;
+    }
     instance->context->update->BeginPaint = beginPaint;
     instance->context->update->EndPaint = endPaint;
     instance->context->update->DesktopResize = desktopResize;
@@ -104,15 +109,31 @@ BOOL RdpClientWidget::beginPaint(rdpContext* context) {
 BOOL RdpClientWidget::endPaint(rdpContext* context) {
     auto* self = reinterpret_cast<Context*>(context)->widget;
     auto* gdi = context->gdi;
-    if (!gdi || !gdi->primary_buffer)
+    if ((gdi == nullptr) || (gdi->primary_buffer == nullptr)) {
         return FALSE;
-    if (gdi->primary->hdc->hwnd->invalid->null)
+    }
+    const auto* invalid = gdi->primary->hdc->hwnd->invalid;
+    if (invalid->null != 0) {
         return TRUE;
+    }
     {
         QMutexLocker lock(&self->m_mutex);
-        self->m_frame = QImage(gdi->primary_buffer, gdi->width, gdi->height, gdi->stride, QImage::Format_RGB32).copy();
+        const QSize size(gdi->width, gdi->height);
+        QRect dirty(invalid->x, invalid->y, invalid->w, invalid->h);
+        if (self->m_frame.size() != size) {
+            self->m_frame = QImage(size, QImage::Format_RGB32);
+            self->m_dirtyFrame = {};
+            dirty = self->m_frame.rect();
+        }
+        dirty = dirty.intersected(self->m_frame.rect());
+        for (int y = dirty.top(); y <= dirty.bottom(); ++y) {
+            const int offset = dirty.x() * 4;
+            std::memcpy(self->m_frame.scanLine(y) + offset, gdi->primary_buffer + (y * gdi->stride) + offset,
+                        static_cast<size_t>(dirty.width()) * 4);
+        }
+        self->m_dirtyFrame |= dirty;
     }
-    if (!self->m_updatePending.exchange(true))
+    if (!self->m_updatePending.exchange(true)) {
         QMetaObject::invokeMethod(
             self,
             [self] {
@@ -120,6 +141,7 @@ BOOL RdpClientWidget::endPaint(rdpContext* context) {
                 self->update();
             },
             Qt::QueuedConnection);
+    }
     return TRUE;
 }
 BOOL RdpClientWidget::desktopResize(rdpContext* context) {
@@ -128,7 +150,7 @@ BOOL RdpClientWidget::desktopResize(rdpContext* context) {
 }
 void RdpClientWidget::run() {
     freerdp* instance = freerdp_new();
-    if (!instance) {
+    if (instance == nullptr) {
         emit errorOccurred(tr("Failed to create RDP client."));
         return;
     }
@@ -136,52 +158,59 @@ void RdpClientWidget::run() {
     instance->PreConnect = preConnect;
     instance->PostConnect = postConnect;
     instance->AuthenticateEx = authenticate;
-    if (!freerdp_context_new(instance)) {
+    if (freerdp_context_new(instance) == 0) {
         freerdp_free(instance);
         emit errorOccurred(tr("Failed to create RDP context."));
         return;
     }
     reinterpret_cast<Context*>(instance->context)->widget = this;
     auto* settings = instance->context->settings;
-    bool configured = freerdp_settings_set_string(settings, FreeRDP_ServerHostname, m_host.toUtf8().constData()) &&
-                      freerdp_settings_set_uint32(settings, FreeRDP_ServerPort, m_port) &&
-                      freerdp_settings_set_string(settings, FreeRDP_Username, m_user.toUtf8().constData()) &&
-                      freerdp_settings_set_string(settings, FreeRDP_Domain, m_domain.toUtf8().constData()) &&
-                      freerdp_settings_set_string(settings, FreeRDP_Password, m_password.toUtf8().constData()) &&
-                      freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, m_initialSize.width()) &&
-                      freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, m_initialSize.height()) &&
-                      freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32) &&
-                      freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 10000) &&
-                      freerdp_settings_set_bool(settings, FreeRDP_SoftwareGdi, TRUE) &&
-                      freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, FALSE) &&
-                      freerdp_settings_set_bool(settings, FreeRDP_AudioPlayback, FALSE) &&
-                      freerdp_settings_set_bool(settings, FreeRDP_AudioCapture, FALSE) &&
-                      freerdp_settings_set_bool(settings, FreeRDP_DeviceRedirection, FALSE) &&
-                      // Preserve the existing external client's certificate policy.
-                      freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE);
-    configured = configured && freerdp_settings_set_bool(settings, FreeRDP_RedirectClipboard, m_clipboardEnabled) &&
-                 freerdp_settings_set_bool(settings, FreeRDP_DynamicResolutionUpdate, m_dynamicResolution) &&
-                 freerdp_settings_set_bool(settings, FreeRDP_SupportDisplayControl, m_dynamicResolution);
+    bool configured =
+        (freerdp_settings_set_string(settings, FreeRDP_ServerHostname, m_host.toUtf8().constData()) != 0) &&
+        (freerdp_settings_set_uint32(settings, FreeRDP_ServerPort, m_port) != 0) &&
+        (freerdp_settings_set_string(settings, FreeRDP_Username, m_user.toUtf8().constData()) != 0) &&
+        (freerdp_settings_set_string(settings, FreeRDP_Domain, m_domain.toUtf8().constData()) != 0) &&
+        (freerdp_settings_set_string(settings, FreeRDP_Password, m_password.toUtf8().constData()) != 0) &&
+        (freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, m_initialSize.width()) != 0) &&
+        (freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, m_initialSize.height()) != 0) &&
+        (freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32) != 0) &&
+        (freerdp_settings_set_uint32(settings, FreeRDP_TcpConnectTimeout, 10000) != 0) &&
+        (freerdp_settings_set_bool(settings, FreeRDP_SoftwareGdi, TRUE) != 0) &&
+        (freerdp_settings_set_bool(settings, FreeRDP_SupportGraphicsPipeline, FALSE) != 0) &&
+        (freerdp_settings_set_bool(settings, FreeRDP_AudioPlayback, FALSE) != 0) &&
+        (freerdp_settings_set_bool(settings, FreeRDP_AudioCapture, FALSE) != 0) &&
+        (freerdp_settings_set_bool(settings, FreeRDP_DeviceRedirection, FALSE) != 0) &&
+        // Preserve the existing external client's certificate policy.
+        (freerdp_settings_set_bool(settings, FreeRDP_IgnoreCertificate, TRUE) != 0);
+    configured =
+        configured &&
+        (freerdp_settings_set_bool(settings, FreeRDP_RedirectClipboard, static_cast<BOOL>(m_clipboardEnabled)) != 0) &&
+        (freerdp_settings_set_bool(settings, FreeRDP_DynamicResolutionUpdate, static_cast<BOOL>(m_dynamicResolution)) !=
+         0) &&
+        (freerdp_settings_set_bool(settings, FreeRDP_SupportDisplayControl, static_cast<BOOL>(m_dynamicResolution)) !=
+         0);
     if (configured && m_dynamicResolution) {
         const char* channel[] = {"disp"};
-        configured = freerdp_client_add_dynamic_channel(settings, 1, channel);
+        configured = (freerdp_client_add_dynamic_channel(settings, 1, channel) != 0);
     }
     m_password.clear();
     {
         QMutexLocker lock(&m_instanceMutex);
         m_instance = instance;
     }
-    const bool connectedOk = configured && !m_stop && freerdp_connect(instance);
+    const bool connectedOk = configured && !m_stop && (freerdp_connect(instance) != 0);
     if (connectedOk) {
         m_connected = true;
         emit connected();
-        while (!m_stop && !freerdp_shall_disconnect_context(instance->context)) {
+        while (!m_stop && (freerdp_shall_disconnect_context(instance->context) == 0)) {
             HANDLE handles[MAXIMUM_WAIT_OBJECTS];
             const DWORD count = freerdp_get_event_handles(instance->context, handles, MAXIMUM_WAIT_OBJECTS);
-            if (!count || WaitForMultipleObjects(count, handles, FALSE, 20) == WAIT_FAILED)
+            if ((count == 0u) || WaitForMultipleObjects(count, handles, FALSE, 20) == WAIT_FAILED) {
                 break;
-            if (!freerdp_check_event_handles(instance->context))
+            }
+            if (freerdp_check_event_handles(instance->context) == 0) {
                 break;
+            }
             processChannels();
             QList<Input> batch;
             {
@@ -191,10 +220,10 @@ void RdpClientWidget::run() {
             for (const auto& input : batch) {
                 const BOOL ok =
                     input.keyboard
-                        ? freerdp_input_send_keyboard_event_ex(instance->context->input, input.flags != 0, FALSE,
-                                                               input.code)
+                        ? freerdp_input_send_keyboard_event_ex(instance->context->input,
+                                                               static_cast<BOOL>(input.flags != 0), FALSE, input.code)
                         : freerdp_input_send_mouse_event(instance->context->input, input.flags, input.x, input.y);
-                if (!ok) {
+                if (ok == 0) {
                     m_stop = true;
                     break;
                 }
@@ -208,19 +237,21 @@ void RdpClientWidget::run() {
     PubSub_UnsubscribeChannelDisconnected(instance->context->pubSub, channelDisconnected);
     m_cliprdr = nullptr;
     m_disp = nullptr;
-    if (instance->context->gdi)
+    if (instance->context->gdi != nullptr) {
         gdi_free(instance);
+    }
     {
         QMutexLocker lock(&m_instanceMutex);
         m_instance = nullptr;
         freerdp_context_free(instance);
         freerdp_free(instance);
     }
-    if (!m_stop && (!connectedOk || error != 0))
+    if (!m_stop && (!connectedOk || error != 0)) {
         emit errorOccurred(
             tr("RDP connection failed: %1").arg(QString::fromUtf8(freerdp_get_last_error_string(error))));
-    else if (!m_stop)
+    } else if (!m_stop) {
         emit disconnected();
+    }
 }
 QRect RdpClientWidget::imageRect() const {
     const QSize size = m_frame.size().scaled(this->size(), Qt::KeepAspectRatio);
@@ -229,28 +260,47 @@ QRect RdpClientWidget::imageRect() const {
 void RdpClientWidget::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     painter.fillRect(rect(), Qt::black);
-    QMutexLocker lock(&m_mutex);
-    if (!m_frame.isNull())
-        painter.drawImage(imageRect(), m_frame);
+    QRect target;
+    {
+        QMutexLocker lock(&m_mutex);
+        if (m_frame.isNull()) {
+            return;
+        }
+        if (m_displayFrame.size() != m_frame.size()) {
+            m_displayFrame = QImage(m_frame.size(), m_frame.format());
+            m_dirtyFrame = m_frame.rect();
+        }
+        for (int y = m_dirtyFrame.top(); y <= m_dirtyFrame.bottom(); ++y) {
+            const int offset = m_dirtyFrame.x() * 4;
+            std::memcpy(m_displayFrame.scanLine(y) + offset, m_frame.constScanLine(y) + offset,
+                        static_cast<size_t>(m_dirtyFrame.width()) * 4);
+        }
+        m_dirtyFrame = {};
+        target = imageRect();
+    }
+    painter.drawImage(target, m_displayFrame);
 }
 void RdpClientWidget::enqueue(const Input& input) {
-    if (!m_connected)
+    if (!m_connected) {
         return;
+    }
     QMutexLocker lock(&m_mutex);
     m_inputs.append(input);
 }
 void RdpClientWidget::sendKey(QKeyEvent* event, bool down) {
-    if (event->isAutoRepeat() && !down)
+    if (event->isAutoRepeat() && !down) {
         return;
+    }
     // Qt reports XKB keycodes on both xcb and Wayland; map physical keys
     // rather than assuming a US layout or sending characters for shortcuts.
     DWORD vk = GetVirtualKeyCodeFromKeycode(event->nativeScanCode(), WINPR_KEYCODE_TYPE_XKB);
     DWORD scan = GetVirtualScanCodeFromVirtualKeyCode(vk, 4);
-    if (scan) {
-        if (down)
+    if (scan != 0u) {
+        if (down) {
             m_pressedKeys.insert(scan);
-        else
+        } else {
             m_pressedKeys.remove(scan);
+        }
         enqueue({true, static_cast<UINT16>(down), scan});
     }
     event->accept();
@@ -262,8 +312,9 @@ void RdpClientWidget::keyReleaseEvent(QKeyEvent* event) {
     sendKey(event, false);
 }
 bool RdpClientWidget::event(QEvent* event) {
-    if (event->type() == QEvent::Show && m_dynamicResolution)
+    if (event->type() == QEvent::Show && m_dynamicResolution) {
         m_resizeTimer.start();
+    }
     if (event->type() == QEvent::ShortcutOverride && m_connected) {
         event->accept();
         return true;
@@ -283,54 +334,66 @@ void RdpClientWidget::sendMouse(const QPointF& position, UINT16 flags) {
     Input input{false, flags, 0};
     {
         QMutexLocker lock(&m_mutex);
-        if (m_frame.isNull())
+        if (m_frame.isNull()) {
             return;
+        }
         const QRect target = imageRect();
-        if (target.isEmpty())
+        if (target.isEmpty()) {
             return;
-        input.x = qBound(0, int((position.x() - target.x()) * m_frame.width() / target.width()), m_frame.width() - 1);
-        input.y =
-            qBound(0, int((position.y() - target.y()) * m_frame.height() / target.height()), m_frame.height() - 1);
+        }
+        input.x = qBound(0, static_cast<int>((position.x() - target.x()) * m_frame.width() / target.width()),
+                         m_frame.width() - 1);
+        input.y = qBound(0, static_cast<int>((position.y() - target.y()) * m_frame.height() / target.height()),
+                         m_frame.height() - 1);
     }
     enqueue(input);
 }
 static UINT16 mouseButton(Qt::MouseButton button) {
-    if (button == Qt::LeftButton)
+    if (button == Qt::LeftButton) {
         return PTR_FLAGS_BUTTON1;
-    if (button == Qt::RightButton)
+    }
+    if (button == Qt::RightButton) {
         return PTR_FLAGS_BUTTON2;
-    if (button == Qt::MiddleButton)
+    }
+    if (button == Qt::MiddleButton) {
         return PTR_FLAGS_BUTTON3;
+    }
     return 0;
 }
 void RdpClientWidget::mousePressEvent(QMouseEvent* event) {
     setFocus();
     m_pressedButtons |= event->button();
-    if (auto flag = mouseButton(event->button()))
+    if (auto flag = mouseButton(event->button())) {
         sendMouse(event->position(), flag | PTR_FLAGS_DOWN);
+    }
 }
 void RdpClientWidget::mouseReleaseEvent(QMouseEvent* event) {
     m_pressedButtons &= ~event->button();
-    if (auto flag = mouseButton(event->button()))
+    if (auto flag = mouseButton(event->button())) {
         sendMouse(event->position(), flag);
+    }
 }
 void RdpClientWidget::mouseMoveEvent(QMouseEvent* event) {
     sendMouse(event->position(), PTR_FLAGS_MOVE);
 }
 void RdpClientWidget::wheelEvent(QWheelEvent* event) {
     const int delta = qBound(-255, event->angleDelta().y(), 255);
-    if (delta)
+    if (delta != 0) {
         sendMouse(event->position(), PTR_FLAGS_WHEEL | (delta & 0x1ff));
+    }
     event->accept();
 }
 void RdpClientWidget::focusOutEvent(QFocusEvent* event) {
     m_clipboardFocused = false;
-    for (auto scan : m_pressedKeys)
+    for (auto scan : m_pressedKeys) {
         enqueue({true, 0, scan});
+    }
     m_pressedKeys.clear();
-    for (auto button : {Qt::LeftButton, Qt::RightButton, Qt::MiddleButton})
-        if (m_pressedButtons.testFlag(button))
-            sendMouse(QPointF(width() / 2, height() / 2), mouseButton(button));
+    for (auto button : {Qt::LeftButton, Qt::RightButton, Qt::MiddleButton}) {
+        if (m_pressedButtons.testFlag(button)) {
+            sendMouse(QPointF(width() / 2.0, height() / 2.0), mouseButton(button));
+        }
+    }
     m_pressedButtons = {};
     QWidget::focusOutEvent(event);
 }
@@ -349,8 +412,8 @@ QByteArray RdpClientWidget::encodeClipboardText(QString text) {
     QByteArray bytes;
     bytes.reserve((text.size() + 1) * 2);
     for (QChar c : text) {
-        bytes.append(char(c.unicode() & 0xff));
-        bytes.append(char(c.unicode() >> 8));
+        bytes.append(static_cast<char>(c.unicode() & 0xff));
+        bytes.append(static_cast<char>(c.unicode() >> 8));
     }
     bytes.append('\0');
     bytes.append('\0');
@@ -360,23 +423,27 @@ QString RdpClientWidget::decodeClipboardText(const QByteArray& bytes) {
     QString text;
     text.reserve(bytes.size() / 2);
     for (qsizetype i = 0; i + 1 < bytes.size(); i += 2) {
-        const auto c = ushort(uchar(bytes[i]) | (ushort(uchar(bytes[i + 1])) << 8));
-        if (!c)
+        const auto c = static_cast<ushort>(static_cast<uchar>(bytes[i]) |
+                                           (static_cast<ushort>(static_cast<uchar>(bytes[i + 1])) << 8));
+        if (c == 0u) {
             break;
+        }
         text.append(QChar(c));
     }
     text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
     return text;
 }
 void RdpClientWidget::captureLocalClipboard() {
-    if (!m_clipboardEnabled || m_settingRemoteClipboard || !hasFocus())
+    if (!m_clipboardEnabled || m_settingRemoteClipboard || !hasFocus()) {
         return;
+    }
     const auto* mime = QApplication::clipboard()->mimeData();
-    QString text = mime && mime->hasText() ? mime->text() : QString();
-    if (text.size() > maxClipboardBytes / 4)
+    QString text = (mime != nullptr) && mime->hasText() ? mime->text() : QString();
+    if (text.size() > maxClipboardBytes / 4) {
         text.clear();
+    }
     QMutexLocker lock(&m_mutex);
-    m_clipboardText = text;
+    m_clipboardText = std::move(text);
     m_clipboardDirty = true;
     ++m_clipboardRevision;
 }
@@ -388,8 +455,9 @@ void RdpClientWidget::focusInEvent(QFocusEvent* event) {
 void RdpClientWidget::resizeEvent(QResizeEvent* event) {
     QWidget::resizeEvent(event);
     // Coalesce interactive resizing and never resize the remote to a hidden tab.
-    if (m_dynamicResolution && isVisible())
+    if (m_dynamicResolution && isVisible()) {
         m_resizeTimer.start();
+    }
 }
 BOOL RdpClientWidget::preConnect(freerdp* instance) {
     static std::once_flag addinProvider;
@@ -405,8 +473,9 @@ void RdpClientWidget::channelConnected(void* context, const ChannelConnectedEven
     QMutexLocker channelLock(&self->m_channelMutex);
     if (strcmp(event->name, CLIPRDR_SVC_CHANNEL_NAME) == 0 && self->m_clipboardEnabled) {
         auto* clip = static_cast<CliprdrClientContext*>(event->pInterface);
-        if (!clip)
+        if (clip == nullptr) {
             return;
+        }
         self->m_cliprdr = clip;
         clip->custom = self;
         clip->MonitorReady = clipboardReady;
@@ -415,8 +484,9 @@ void RdpClientWidget::channelConnected(void* context, const ChannelConnectedEven
         clip->ServerFormatDataResponse = clipboardResponse;
     } else if (strcmp(event->name, DISP_DVC_CHANNEL_NAME) == 0 && self->m_dynamicResolution) {
         auto* disp = static_cast<DispClientContext*>(event->pInterface);
-        if (!disp)
+        if (disp == nullptr) {
             return;
+        }
         self->m_disp = disp;
         disp->custom = self;
         disp->DisplayControlCaps = displayCaps;
@@ -438,8 +508,9 @@ void RdpClientWidget::channelDisconnected(void* context, const ChannelDisconnect
 }
 UINT RdpClientWidget::queueChannelEvent(ChannelEvent event) {
     QMutexLocker lock(&m_mutex);
-    if (m_channelEvents.size() >= 64)
+    if (m_channelEvents.size() >= 64) {
         return ERROR_NOT_ENOUGH_MEMORY;
+    }
     m_channelEvents.append(std::move(event));
     return CHANNEL_RC_OK;
 }
@@ -462,20 +533,22 @@ UINT RdpClientWidget::clipboardRequest(CliprdrClientContext* context, const CLIP
 }
 UINT RdpClientWidget::clipboardResponse(CliprdrClientContext* context, const CLIPRDR_FORMAT_DATA_RESPONSE* response) {
     ChannelEvent event{ChannelEvent::Response, context};
-    event.success = (response->common.msgFlags & CB_RESPONSE_OK) && response->requestedFormatData &&
-                    response->common.dataLen <= maxClipboardBytes && !(response->common.dataLen & 1);
-    if (event.success)
+    event.success = ((response->common.msgFlags & CB_RESPONSE_OK) != 0) && (response->requestedFormatData != nullptr) &&
+                    response->common.dataLen <= maxClipboardBytes && ((response->common.dataLen & 1) == 0u);
+    if (event.success) {
         event.data = QByteArray(reinterpret_cast<const char*>(response->requestedFormatData), response->common.dataLen);
+    }
     return static_cast<RdpClientWidget*>(context->custom)->queueChannelEvent(std::move(event));
 }
 UINT RdpClientWidget::displayCaps(DispClientContext* context, UINT32 monitors, UINT32 factorA, UINT32 factorB) {
     ChannelEvent event{ChannelEvent::DisplayCaps, context, monitors};
-    event.maxArea = quint64(factorA) * factorB;
+    event.maxArea = static_cast<quint64>(factorA) * factorB;
     return static_cast<RdpClientWidget*>(context->custom)->queueChannelEvent(std::move(event));
 }
 void RdpClientWidget::requestRemoteClipboard() {
-    if (!m_cliprdr || !m_clipboardReady || !m_remoteHasText || m_clipboardRequestPending)
+    if ((m_cliprdr == nullptr) || !m_clipboardReady || !m_remoteHasText || m_clipboardRequestPending) {
         return;
+    }
     CLIPRDR_FORMAT_DATA_REQUEST request{};
     request.requestedFormatId = CF_UNICODETEXT;
     m_requestedFormatsSerial = m_remoteFormatsSerial;
@@ -484,8 +557,9 @@ void RdpClientWidget::requestRemoteClipboard() {
         m_requestedClipboardRevision = m_clipboardRevision;
     }
     m_clipboardRequestPending = true;
-    if (m_cliprdr->ClientFormatDataRequest(m_cliprdr, &request) != CHANNEL_RC_OK)
+    if (m_cliprdr->ClientFormatDataRequest(m_cliprdr, &request) != CHANNEL_RC_OK) {
         m_clipboardRequestPending = false;
+    }
 }
 void RdpClientWidget::processChannels() {
     QMutexLocker channelLock(&m_channelMutex);
@@ -503,8 +577,9 @@ void RdpClientWidget::processChannels() {
             }
             continue;
         }
-        if (!m_cliprdr || event.source != m_cliprdr)
+        if ((m_cliprdr == nullptr) || event.source != m_cliprdr) {
             continue;
+        }
         if (event.type == ChannelEvent::Ready) {
             CLIPRDR_GENERAL_CAPABILITY_SET general{};
             general.capabilitySetType = CB_CAPSTYPE_GENERAL;
@@ -536,7 +611,7 @@ void RdpClientWidget::processChannels() {
             const QByteArray bytes = valid ? encodeClipboardText(text) : QByteArray();
             CLIPRDR_FORMAT_DATA_RESPONSE response{};
             response.common.msgFlags = valid ? CB_RESPONSE_OK : CB_RESPONSE_FAIL;
-            response.common.dataLen = UINT32(bytes.size());
+            response.common.dataLen = static_cast<UINT32>(bytes.size());
             response.requestedFormatData = reinterpret_cast<const BYTE*>(bytes.constData());
             (void) m_cliprdr->ClientFormatDataResponse(m_cliprdr, &response);
         } else if (event.type == ChannelEvent::Response && m_clipboardRequestPending) {
@@ -545,20 +620,23 @@ void RdpClientWidget::processChannels() {
                 requestRemoteClipboard(); // discard data for an obsolete remote selection
                 continue;
             }
-            if (!event.success)
+            if (!event.success) {
                 continue;
+            }
             const QString text = decodeClipboardText(event.data);
             const quint64 revision = m_requestedClipboardRevision;
             const quint64 generation = m_generation;
             QMetaObject::invokeMethod(
                 this,
                 [this, text, revision, generation] {
-                    if (!m_connected || m_generation != generation || !hasFocus())
+                    if (!m_connected || m_generation != generation || !hasFocus()) {
                         return;
+                    }
                     {
                         QMutexLocker lock(&m_mutex);
-                        if (m_clipboardRevision != revision)
+                        if (m_clipboardRevision != revision) {
                             return; // a newer local copy takes precedence
+                        }
                         m_clipboardText = text;
                     }
                     m_settingRemoteClipboard = true;
@@ -568,7 +646,7 @@ void RdpClientWidget::processChannels() {
                 Qt::QueuedConnection);
         }
     }
-    if (m_cliprdr && m_clipboardReady) {
+    if ((m_cliprdr != nullptr) && m_clipboardReady) {
         bool dirty;
         QString text;
         {
@@ -585,13 +663,14 @@ void RdpClientWidget::processChannels() {
             (void) m_cliprdr->ClientFormatList(m_cliprdr, &list);
         }
     }
-    if (m_disp && m_displayReady) {
+    if ((m_disp != nullptr) && m_displayReady) {
         QSize size;
         {
             QMutexLocker lock(&m_mutex);
             size = m_requestedSize;
         }
-        if (size.isValid() && size != m_lastSentSize && quint64(size.width()) * size.height() <= m_displayMaxArea) {
+        if (size.isValid() && size != m_lastSentSize &&
+            static_cast<quint64>(size.width()) * size.height() <= m_displayMaxArea) {
             DISPLAY_CONTROL_MONITOR_LAYOUT layout{};
             layout.Flags = DISPLAY_CONTROL_MONITOR_PRIMARY;
             layout.Width = size.width();
@@ -600,10 +679,11 @@ void RdpClientWidget::processChannels() {
             layout.PhysicalHeight = qMax(10, qRound(size.height() * 25.4 / 96));
             layout.DesktopScaleFactor = 100;
             layout.DeviceScaleFactor = 100;
-            if (m_disp->SendMonitorLayout(m_disp, 1, &layout) == CHANNEL_RC_OK)
+            if (m_disp->SendMonitorLayout(m_disp, 1, &layout) == CHANNEL_RC_OK) {
                 m_lastSentSize = size;
-            else
+            } else {
                 m_displayReady = false; // retain the scaled desktop on channel failure
+            }
         }
     }
 }

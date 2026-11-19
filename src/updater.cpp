@@ -29,8 +29,9 @@ const char* kRepoApi = "https://api.github.com/repos/Gargadon/banchoxterm/releas
 
 QStringList parseVersion(const QString& tag) {
     QString v = tag;
-    if (v.startsWith('v'))
+    if (v.startsWith('v')) {
         v = v.mid(1);
+    }
     QStringList parts = v.split('.');
     return parts;
 }
@@ -42,26 +43,29 @@ bool isNewer(const QString& latestTag, const QString& current) {
     for (int i = 0; i < n; ++i) {
         const int ai = i < a.size() ? a[i].toInt() : 0;
         const int bi = i < b.size() ? b[i].toInt() : 0;
-        if (ai != bi)
+        if (ai != bi) {
             return ai > bi;
+        }
     }
     return false;
 }
 
 QString findAssetUrl(const QJsonArray& assets, const QString& name) {
-    for (const QJsonValue& val : assets) {
+    for (const auto& val : assets) {
         const QJsonObject obj = val.toObject();
-        if (obj.value("name").toString() == name)
+        if (obj.value("name").toString() == name) {
             return obj.value("browser_download_url").toString();
+        }
     }
     return QString();
 }
 
 QString findAssetDigest(const QJsonArray& assets, const QString& name) {
-    for (const QJsonValue& val : assets) {
+    for (const auto& val : assets) {
         const QJsonObject obj = val.toObject();
-        if (obj.value("name").toString() == name)
+        if (obj.value("name").toString() == name) {
             return obj.value("digest").toString();
+        }
     }
     return {};
 }
@@ -135,7 +139,7 @@ void Updater::checkForUpdates(QWidget* parent) {
     req.setHeader(QNetworkRequest::UserAgentHeader, "BanchoXterm/" BANCHO_VERSION);
 
     QNetworkReply* reply = nam->get(req);
-    QObject::connect(reply, &QNetworkReply::finished, reply, [reply, nam, parent]() {
+    QObject::connect(reply, &QNetworkReply::finished, reply, [reply, nam, parent] {
         reply->deleteLater();
         nam->deleteLater();
 
@@ -167,14 +171,16 @@ void Updater::checkForUpdates(QWidget* parent) {
         box.setWindowTitle(tr("Update Available"));
         box.setIcon(QMessageBox::Information);
         box.setText(tr("Version %1 is available.\n\nCurrent version: %2").arg(tag).arg(QStringLiteral(BANCHO_VERSION)));
-        if (!body.isEmpty())
+        if (!body.isEmpty()) {
             box.setInformativeText(tr("Release notes:\n%1").arg(body.left(800)));
+        }
         box.addButton(tr("Download & Update"), QMessageBox::AcceptRole);
         QPushButton* laterBtn = box.addButton(tr("Later"), QMessageBox::RejectRole);
         box.setDefaultButton(laterBtn);
         box.exec();
-        if (box.clickedButton() == laterBtn)
+        if (box.clickedButton() == laterBtn) {
             return;
+        }
 
         const bool portable = AppPaths::isPortable();
         const QString architecture = QSysInfo::currentCpuArchitecture().contains("arm", Qt::CaseInsensitive)
@@ -209,7 +215,7 @@ void Updater::checkForUpdates(QWidget* parent) {
 
         QObject::connect(progress, &QProgressDialog::canceled, dreply, &QNetworkReply::abort);
 
-        QObject::connect(dreply, &QNetworkReply::finished, progress, [=]() {
+        QObject::connect(dreply, &QNetworkReply::finished, progress, [=] {
             progress->close();
             progress->deleteLater();
 

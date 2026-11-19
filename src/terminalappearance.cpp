@@ -19,14 +19,17 @@
 namespace {
 QRegion glassRegion(QWidget* window) {
     QRegion region;
-    for (auto* terminal : window->findChildren<QTermWidget*>())
-        if (terminal->window() == window && terminal->isVisible())
+    for (auto* terminal : window->findChildren<QTermWidget*>()) {
+        if (terminal->window() == window && terminal->isVisible()) {
             region += QRect(terminal->mapTo(window, QPoint()), terminal->size());
+        }
+    }
     return region;
 }
 
 void clearAncestorBackgrounds(QWidget* widget, QWidget* window) {
-    for (auto* ancestor = widget->parentWidget(); ancestor && ancestor != window; ancestor = ancestor->parentWidget()) {
+    for (auto* ancestor = widget->parentWidget(); (ancestor != nullptr) && ancestor != window;
+         ancestor = ancestor->parentWidget()) {
         ancestor->setAutoFillBackground(false);
         ancestor->setAttribute(Qt::WA_OpaquePaintEvent, false);
     }
@@ -43,22 +46,24 @@ protected:
             if (event->type() == QEvent::Show || event->type() == QEvent::Hide || event->type() == QEvent::Move ||
                 event->type() == QEvent::Resize) {
                 auto* widget = qobject_cast<QTermWidget*>(watched);
-                if (widget && widget->window() == m_window)
-                    QTimer::singleShot(0, m_window, [this]() { TerminalAppearance::refreshWindow(m_window); });
+                if ((widget != nullptr) && widget->window() == m_window) {
+                    QTimer::singleShot(0, m_window, [this] { TerminalAppearance::refreshWindow(m_window); });
+                }
             }
             return false;
         }
         if (event->type() == QEvent::Show || event->type() == QEvent::Resize ||
             event->type() == QEvent::WindowActivate || event->type() == QEvent::WindowDeactivate ||
             event->type() == QEvent::ApplicationPaletteChange) {
-            QTimer::singleShot(0, m_window, [this]() { TerminalAppearance::refreshWindow(m_window); });
+            QTimer::singleShot(0, m_window, [this] { TerminalAppearance::refreshWindow(m_window); });
         } else if (event->type() == QEvent::Paint) {
             QPainter painter(m_window);
             painter.setCompositionMode(QPainter::CompositionMode_Source);
             painter.fillRect(m_window->rect(), Qt::transparent);
             QRegion opaque(m_window->rect());
-            if (TerminalAppearance::opacityPercent() < 100)
+            if (TerminalAppearance::opacityPercent() < 100) {
                 opaque -= glassRegion(m_window);
+            }
             painter.setClipRegion(opaque);
             painter.fillRect(m_window->rect(), m_window->palette().color(QPalette::Window));
             return true;
@@ -84,8 +89,9 @@ QFont globalFont() {
     QFont font = defaultFont();
     QFont stored;
     const QString value = QSettings().value("terminal/font").toString();
-    if (!value.trimmed().isEmpty() && stored.fromString(value) && !stored.family().trimmed().isEmpty())
-        font = stored;
+    if (!value.trimmed().isEmpty() && stored.fromString(value) && !stored.family().trimmed().isEmpty()) {
+        font = std::move(stored);
+    }
     font.setStyleHint(QFont::Monospace);
     font.setFixedPitch(true);
     return font;
@@ -109,14 +115,17 @@ bool blurSupported() {
 void refreshWindow(QWidget* window) {
     const bool translucent = window->testAttribute(Qt::WA_TranslucentBackground);
     for (auto* terminal : window->findChildren<QTermWidget*>()) {
-        if (terminal->window() != window)
+        if (terminal->window() != window) {
             continue;
+        }
         terminal->setTerminalOpacity(translucent ? opacityPercent() / 100.0 : 1.0);
-        if (translucent)
+        if (translucent) {
             clearAncestorBackgrounds(terminal, window);
+        }
     }
-    if (!window->property("terminalGlass").toBool())
+    if (!window->property("terminalGlass").toBool()) {
         return;
+    }
 #ifdef BANCHO_HAVE_KWINDOWSYSTEM
     if (auto* handle = window->windowHandle()) {
         const QRegion region = glassRegion(window);
@@ -195,8 +204,9 @@ void refreshWindow(QWidget* window) {
 }
 
 void initializeWindow(QMainWindow* window) {
-    if (opacityPercent() == 100)
+    if (opacityPercent() == 100) {
         return;
+    }
     window->setProperty("terminalGlass", true);
     window->setStyleSheet(QStringLiteral("QTabWidget#terminalTabs::pane { background: transparent; }"));
     window->setAttribute(Qt::WA_TranslucentBackground);

@@ -83,8 +83,9 @@ bool kwalletWrite(const QString& sessionId, const QString& password) {
     QProcess process;
     process.start(QStringLiteral("kwallet-query"),
                   {QString::fromLatin1(kKWalletName), "-f", QString::fromLatin1(kKWalletFolder), "-w", sessionId});
-    if (!process.waitForStarted(2000))
+    if (!process.waitForStarted(2000)) {
         return false;
+    }
     process.write(password.toUtf8());
     process.closeWriteChannel();
     return process.waitForFinished(3000) && process.exitCode() == 0;
@@ -94,18 +95,21 @@ QString kwalletRead(const QString& sessionId) {
     QProcess process;
     process.start(QStringLiteral("kwallet-query"),
                   {QString::fromLatin1(kKWalletName), "-f", QString::fromLatin1(kKWalletFolder), "-r", sessionId});
-    if (!process.waitForFinished(3000) || process.exitCode() != 0)
+    if (!process.waitForFinished(3000) || process.exitCode() != 0) {
         return {};
+    }
     QString password = QString::fromUtf8(process.readAllStandardOutput());
-    if (password.endsWith(QLatin1Char('\n')))
+    if (password.endsWith(QLatin1Char('\n'))) {
         password.chop(1);
+    }
     return password;
 }
 } // namespace
 
 bool storePassword(const QString& sessionId, const QString& password) {
-    if (sessionId.isEmpty() || password.isEmpty())
+    if (sessionId.isEmpty() || password.isEmpty()) {
         return false;
+    }
 
     QString storedPassword = password;
     if (MasterPasswordManager::instance().isEnabled()) {
@@ -118,37 +122,44 @@ bool storePassword(const QString& sessionId, const QString& password) {
     if (process.waitForStarted(2000)) {
         process.write(passwordData);
         process.closeWriteChannel();
-        if (process.waitForFinished(3000) && process.exitCode() == 0)
+        if (process.waitForFinished(3000) && process.exitCode() == 0) {
             return true;
+        }
     }
     return kwalletWrite(sessionId, storedPassword);
 }
 
 QString lookupPassword(const QString& sessionId) {
-    if (sessionId.isEmpty())
+    if (sessionId.isEmpty()) {
         return "";
+    }
 
     QProcess process;
     process.start("secret-tool", {"lookup", "id", sessionId});
     if (process.waitForFinished(3000) && process.exitCode() == 0) {
         QString password = QString::fromUtf8(process.readAllStandardOutput());
         // Remove only the newline appended by secret-tool, preserving password whitespace.
-        if (password.endsWith(QLatin1Char('\n')))
+        if (password.endsWith(QLatin1Char('\n'))) {
             password.chop(1);
-        if (isEncryptedPassword(password))
+        }
+        if (isEncryptedPassword(password)) {
             return MasterPasswordManager::instance().decryptPassword(password);
-        if (!password.isEmpty())
+        }
+        if (!password.isEmpty()) {
             return password;
+        }
     }
     const QString password = kwalletRead(sessionId);
-    if (isEncryptedPassword(password))
+    if (isEncryptedPassword(password)) {
         return MasterPasswordManager::instance().decryptPassword(password);
+    }
     return password;
 }
 
 bool deletePassword(const QString& sessionId) {
-    if (sessionId.isEmpty())
+    if (sessionId.isEmpty()) {
         return false;
+    }
 
     QProcess process;
     process.start("secret-tool", {"clear", "id", sessionId});

@@ -17,10 +17,12 @@
 
 namespace {
 QString decodeSessionText(const QByteArray& bytes) {
-    if (bytes.startsWith(QByteArray::fromHex("fffe")))
+    if (bytes.startsWith(QByteArray::fromHex("fffe"))) {
         return QStringDecoder(QStringDecoder::Utf16LE)(bytes);
-    if (bytes.startsWith(QByteArray::fromHex("feff")))
+    }
+    if (bytes.startsWith(QByteArray::fromHex("feff"))) {
         return QStringDecoder(QStringDecoder::Utf16BE)(bytes);
+    }
     QStringDecoder decoder(QStringDecoder::Utf8);
     const QString text = decoder(bytes);
     // Older exports can use the Windows ANSI code page. Preserve UTF-8 first;
@@ -49,10 +51,12 @@ static QString tunnelTypeToString(TunnelConfig::Type type) {
 }
 
 static TunnelConfig::Type tunnelTypeFromString(const QString& s) {
-    if (s == "remote")
+    if (s == "remote") {
         return TunnelConfig::Type::Remote;
-    if (s == "dynamic")
+    }
+    if (s == "dynamic") {
         return TunnelConfig::Type::Dynamic;
+    }
     return TunnelConfig::Type::Local;
 }
 
@@ -96,18 +100,24 @@ static QString sessionTypeToString(SessionType type) {
 }
 
 static SessionType sessionTypeFromString(const QString& s) {
-    if (s == "ssh")
+    if (s == "ssh") {
         return SessionType::SSH;
-    if (s == "telnet")
+    }
+    if (s == "telnet") {
         return SessionType::Telnet;
-    if (s == "serial")
+    }
+    if (s == "serial") {
         return SessionType::Serial;
-    if (s == "rdp")
+    }
+    if (s == "rdp") {
         return SessionType::RDP;
-    if (s == "vnc")
+    }
+    if (s == "vnc") {
         return SessionType::VNC;
-    if (s == "ftp")
+    }
+    if (s == "ftp") {
         return SessionType::FTP;
+    }
     return SessionType::Local;
 }
 
@@ -222,13 +232,16 @@ Session Session::fromJson(const QJsonObject& json) {
     s.backspaceSequence =
         json.contains("backspaceSequence") ? json["backspaceSequence"].toString() : QString(QChar(0x7f));
     s.enterSequence = json.contains("enterSequence") ? json["enterSequence"].toString() : QString(QChar('\r'));
-    if (s.backspaceSequence.isEmpty())
+    if (s.backspaceSequence.isEmpty()) {
         s.backspaceSequence = QString(QChar(0x7f));
-    if (s.enterSequence.isEmpty())
+    }
+    if (s.enterSequence.isEmpty()) {
         s.enterSequence = QString(QChar('\r'));
+    }
     s.ciscoBreakSequence = json["ciscoBreakSequence"].toString(QStringLiteral("1E")).remove(' ');
-    if (s.ciscoBreakSequence.isEmpty())
+    if (s.ciscoBreakSequence.isEmpty()) {
         s.ciscoBreakSequence = QStringLiteral("1E");
+    }
     s.initialRows = json["initialRows"].toInt(24);
     s.initialColumns = json["initialColumns"].toInt(80);
     s.keepAliveSeconds = json["keepAliveSeconds"].toInt(0);
@@ -237,8 +250,9 @@ Session Session::fromJson(const QJsonObject& json) {
     s.macAlgo = json["macAlgo"].toString();
     s.ftpTls = json.contains("ftpTls") ? json["ftpTls"].toBool(true) : true;
     s.ftpTlsMinimumVersion = json["ftpTlsMinimumVersion"].toInt(12);
-    if (s.ftpTlsMinimumVersion != 13)
+    if (s.ftpTlsMinimumVersion != 13) {
         s.ftpTlsMinimumVersion = 12;
+    }
     s.ftpTlsCaFile = json["ftpTlsCaFile"].toString();
     s.ftpTlsAllowInvalidCertificates = json["ftpTlsAllowInvalidCertificates"].toBool(false);
 
@@ -280,15 +294,16 @@ QList<Session> SessionManager::loadSessions() {
     QJsonDocument doc = QJsonDocument::fromJson(data);
     if (doc.isArray()) {
         QJsonArray arr = doc.array();
-        for (const QJsonValue& val : arr) {
+        for (const auto& val : arr) {
             sessions.append(Session::fromJson(val.toObject()));
         }
     }
     // Refresh the displayed route from the linked profile. Credentials stay
     // in its keyring entry and are resolved when opening the connection.
     for (Session& session : sessions) {
-        if (session.jumpSessionId.isEmpty())
+        if (session.jumpSessionId.isEmpty()) {
             continue;
+        }
         for (const Session& bastion : sessions) {
             if (bastion.id == session.jumpSessionId && bastion.id != session.id && bastion.type == SessionType::SSH &&
                 bastion.jumpSessionId.isEmpty() && bastion.jumpHost.trimmed().isEmpty()) {
@@ -306,22 +321,26 @@ QList<Session> SessionManager::loadSessions() {
 void SessionManager::saveSessions(const QList<Session>& sessions) {
     QString path = getFilePath();
     QJsonArray arr;
-    for (const Session& s : sessions)
+    for (const Session& s : sessions) {
         arr.append(s.toJson());
+    }
 
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
+    if (!file.open(QIODevice::WriteOnly)) {
         return;
+    }
     file.write(QJsonDocument(arr).toJson());
-    if (!file.commit())
+    if (!file.commit()) {
         return;
+    }
     setPrivateFilePermissions(path);
 }
 
 bool SessionManager::exportSessions(const QList<Session>& sessions, const QString& path) {
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
+    if (!file.open(QIODevice::WriteOnly)) {
         return false;
+    }
     QJsonArray arr;
     for (const Session& s : sessions) {
         arr.append(s.toJson());
@@ -345,17 +364,20 @@ bool SessionManager::exportSessions(const QList<Session>& sessions, const QStrin
     } else {
         doc = QJsonDocument(arr);
     }
-    if (file.write(doc.toJson()) < 0)
+    if (file.write(doc.toJson()) < 0) {
         return false;
-    if (!file.commit())
+    }
+    if (!file.commit()) {
         return false;
+    }
     return setPrivateFilePermissions(path);
 }
 
 bool SessionManager::exportEncryptedSessions(const QList<Session>& sessions, const QString& path) {
     QJsonArray arr;
-    for (const Session& s : sessions)
+    for (const Session& s : sessions) {
         arr.append(s.toJson());
+    }
 
     QSettings settings;
     const QStringList macroNames = settings.value("macros/names").toStringList();
@@ -375,69 +397,84 @@ bool SessionManager::exportEncryptedSessions(const QList<Session>& sessions, con
 
     const QString encrypted = MasterPasswordManager::instance().encryptPassword(
         QString::fromUtf8(QJsonDocument(bundle).toJson(QJsonDocument::Compact)));
-    if (encrypted.isEmpty())
+    if (encrypted.isEmpty()) {
         return false;
+    }
 
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         return false;
-    if (file.write(encrypted.toUtf8()) < 0 || !file.commit())
+    }
+    if (file.write(encrypted.toUtf8()) < 0 || !file.commit()) {
         return false;
+    }
     return setPrivateFilePermissions(path);
 }
 
 bool SessionManager::exportOpenSshConfig(const QList<Session>& sessions, const QString& path) {
     QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         return false;
+    }
 
     QTextStream stream(&file);
     stream << "# Exported by BanchoXterm; credentials are intentionally omitted.\n\n";
     int exported = 0;
     for (const Session& session : sessions) {
-        if (session.type != SessionType::SSH || session.host.trimmed().isEmpty())
+        if (session.type != SessionType::SSH || session.host.trimmed().isEmpty()) {
             continue;
+        }
 
         QString alias = session.name.trimmed();
-        if (alias.isEmpty())
+        if (alias.isEmpty()) {
             alias = session.host.trimmed();
+        }
         alias.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral("_"));
         stream << "Host " << alias << "\n";
         stream << "    HostName " << session.host.trimmed() << "\n";
-        if (!session.user.trimmed().isEmpty())
+        if (!session.user.trimmed().isEmpty()) {
             stream << "    User " << session.user.trimmed() << "\n";
-        if (session.port > 0 && session.port != 22)
+        }
+        if (session.port > 0 && session.port != 22) {
             stream << "    Port " << session.port << "\n";
-        if (!session.keyPath.trimmed().isEmpty())
+        }
+        if (!session.keyPath.trimmed().isEmpty()) {
             stream << "    IdentityFile " << session.keyPath.trimmed() << "\n";
+        }
         if (!session.jumpHost.trimmed().isEmpty()) {
             QString jump = session.jumpHost.trimmed();
-            if (!session.jumpUser.trimmed().isEmpty())
+            if (!session.jumpUser.trimmed().isEmpty()) {
                 jump.prepend(session.jumpUser.trimmed() + '@');
-            if (session.jumpPort > 0 && session.jumpPort != 22)
+            }
+            if (session.jumpPort > 0 && session.jumpPort != 22) {
                 jump += ':' + QString::number(session.jumpPort);
+            }
             stream << "    ProxyJump " << jump << "\n";
         }
         stream << "\n";
         ++exported;
     }
-    if (exported == 0)
+    if (exported == 0) {
         stream << "# No SSH sessions were available for export.\n";
+    }
     stream.flush();
-    if (!file.commit())
+    if (!file.commit()) {
         return false;
+    }
     return setPrivateFilePermissions(path);
 }
 
 QList<Session> SessionManager::importSessions(const QString& path, bool* ok, QStringList* importedMacroNames,
                                               QStringList* importedMacroTexts, QStringList* importWarnings) {
-    if (importWarnings)
+    if (importWarnings != nullptr) {
         importWarnings->clear();
+    }
     QList<Session> sessions;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        if (ok)
+        if (ok != nullptr) {
             *ok = false;
+        }
         return sessions;
     }
     QByteArray data = file.readAll();
@@ -445,26 +482,31 @@ QList<Session> SessionManager::importSessions(const QString& path, bool* ok, QSt
     if (doc.isNull() && (data.startsWith("BANCHO2:") || data.startsWith("BANCHO:"))) {
         const QString decrypted = MasterPasswordManager::instance().decryptPassword(QString::fromUtf8(data));
         if (decrypted.isEmpty()) {
-            if (ok)
+            if (ok != nullptr) {
                 *ok = false;
+            }
             return sessions;
         }
         doc = QJsonDocument::fromJson(decrypted.toUtf8());
     }
     const bool isSessionBundle = doc.isObject() && doc.object().value(QStringLiteral("sessions")).isArray();
     if (!doc.isArray() && !isSessionBundle) {
-        if (path.endsWith(".reg", Qt::CaseInsensitive))
+        if (path.endsWith(".reg", Qt::CaseInsensitive)) {
             return importPuTTYRegistry(path, ok);
-        if (path.endsWith(".mxtsessions", Qt::CaseInsensitive))
+        }
+        if (path.endsWith(".mxtsessions", Qt::CaseInsensitive)) {
             return importMobaXtermSessions(path, ok, importWarnings);
+        }
         if (path.endsWith(".ini", Qt::CaseInsensitive)) {
             if (decodeSessionText(data).contains(
-                    QRegularExpression(QStringLiteral(R"((?im)^\[Bookmarks(?:_\d+|\\[^\]]*)?\]\s*$)"))))
+                    QRegularExpression(QStringLiteral(R"((?im)^\[Bookmarks(?:_\d+|\\[^\]]*)?\]\s*$)")))) {
                 return importMobaXtermSessions(path, ok, importWarnings);
+            }
             return importSecureCrtSession(path, ok);
         }
-        if (path.endsWith(".rtsx", Qt::CaseInsensitive) || path.endsWith(".rts", Qt::CaseInsensitive))
+        if (path.endsWith(".rtsx", Qt::CaseInsensitive) || path.endsWith(".rts", Qt::CaseInsensitive)) {
             return importRoyalTsDocument(path, ok);
+        }
         return importOpenSshConfig(path, ok);
     }
     QJsonArray arr;
@@ -473,34 +515,39 @@ QList<Session> SessionManager::importSessions(const QString& path, bool* ok, QSt
     } else if (doc.isObject() && doc.object().value(QStringLiteral("sessions")).isArray()) {
         arr = doc.object().value(QStringLiteral("sessions")).toArray();
         const QJsonValue macrosValue = doc.object().value(QStringLiteral("macros"));
-        if (macrosValue.isArray() && importedMacroNames && importedMacroTexts) {
-            for (const QJsonValue& value : macrosValue.toArray()) {
-                if (!value.isObject())
+        if (macrosValue.isArray() && (importedMacroNames != nullptr) && (importedMacroTexts != nullptr)) {
+            for (const auto& value : macrosValue.toArray()) {
+                if (!value.isObject()) {
                     continue;
+                }
                 const QJsonObject macro = value.toObject();
                 const QString name = macro.value(QStringLiteral("name")).toString().trimmed();
-                if (name.isEmpty() || !macro.value(QStringLiteral("text")).isString())
+                if (name.isEmpty() || !macro.value(QStringLiteral("text")).isString()) {
                     continue;
+                }
                 importedMacroNames->append(name);
                 importedMacroTexts->append(macro.value(QStringLiteral("text")).toString());
             }
         }
     } else {
-        if (ok)
+        if (ok != nullptr) {
             *ok = false;
+        }
         return sessions;
     }
-    for (const QJsonValue& val : arr) {
+    for (const auto& val : arr) {
         if (!val.isObject()) {
-            if (ok)
+            if (ok != nullptr) {
                 *ok = false;
+            }
             sessions.clear();
             return sessions;
         }
         sessions.append(Session::fromJson(val.toObject()));
     }
-    if (ok)
+    if (ok != nullptr) {
         *ok = true;
+    }
     return sessions;
 }
 
@@ -508,20 +555,24 @@ QList<Session> SessionManager::importOpenSshConfig(const QString& path, bool* ok
     QList<Session> sessions;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (ok)
+        if (ok != nullptr) {
             *ok = false;
+        }
         return sessions;
     }
 
     Session current;
     bool inHost = false;
-    auto finishHost = [&]() {
-        if (!inHost || current.host.isEmpty())
+    auto finishHost = [&] {
+        if (!inHost || current.host.isEmpty()) {
             return;
-        if (current.name.isEmpty())
+        }
+        if (current.name.isEmpty()) {
             current.name = current.host;
-        if (current.id.isEmpty())
+        }
+        if (current.id.isEmpty()) {
             current.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        }
         current.type = SessionType::SSH;
         sessions.append(current);
     };
@@ -529,68 +580,83 @@ QList<Session> SessionManager::importOpenSshConfig(const QString& path, bool* ok
     const QString home = QDir::homePath();
     const auto expandPath = [&home](QString value) {
         value = value.trimmed();
-        if (value.startsWith("~/"))
+        if (value.startsWith("~/")) {
             value.replace(0, 1, home);
+        }
         return value;
     };
 
     const QStringList lines = QString::fromUtf8(file.readAll()).split('\n');
     for (QString line : lines) {
         line = line.trimmed();
-        if (line.isEmpty() || line.startsWith('#'))
+        if (line.isEmpty() || line.startsWith('#')) {
             continue;
-        const int comment = line.indexOf('#');
-        if (comment >= 0)
+        }
+        const qsizetype comment = line.indexOf('#');
+        if (comment >= 0) {
             line = line.left(comment).trimmed();
+        }
         const QStringList parts = line.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-        if (parts.size() < 2)
+        if (parts.size() < 2) {
             continue;
+        }
 
         const QString key = parts.at(0).toLower();
         const QString value = parts.mid(1).join(' ').trimmed();
         if (key == "host") {
             finishHost();
             current = Session();
-            const QString alias = parts.at(1);
+            const QString& alias = parts.at(1);
             inHost = !alias.contains('*') && !alias.contains('?');
-            if (inHost)
+            if (inHost) {
                 current.name = alias;
+            }
             continue;
         }
-        if (!inHost)
+        if (!inHost) {
             continue;
+        }
 
-        if (key == "hostname")
-            current.host = value;
-        else if (key == "user")
-            current.user = value;
-        else if (key == "port") {
+        if (key == "hostname") {
+            {
+                current.host = value;
+            }
+        } else if (key == "user") {
+            {
+                current.user = value;
+            }
+        } else if (key == "port") {
             bool valid = false;
             const int port = value.toInt(&valid);
-            if (valid && port > 0 && port <= 65535)
+            if (valid && port > 0 && port <= 65535) {
                 current.port = port;
-        } else if (key == "identityfile")
-            current.keyPath = expandPath(value);
-        else if (key == "proxyjump") {
+            }
+        } else if (key == "identityfile") {
+            {
+                current.keyPath = expandPath(value);
+            }
+        } else if (key == "proxyjump") {
             current.jumpHost = value;
-            const int at = current.jumpHost.lastIndexOf('@');
+            const qsizetype at = current.jumpHost.lastIndexOf('@');
             if (at >= 0) {
                 current.jumpUser = current.jumpHost.left(at);
                 current.jumpHost = current.jumpHost.mid(at + 1);
             }
-            const int colon = current.jumpHost.lastIndexOf(':');
+            const qsizetype colon = current.jumpHost.lastIndexOf(':');
             if (colon > 0) {
                 bool valid = false;
                 const int port = current.jumpHost.mid(colon + 1).toInt(&valid);
-                if (valid && port > 0 && port <= 65535)
+                if (valid && port > 0 && port <= 65535) {
                     current.jumpPort = port;
+                }
                 current.jumpHost = current.jumpHost.left(colon);
             }
         }
     }
     finishHost();
-    if (ok)
+    if (ok != nullptr) {
         *ok = !sessions.isEmpty();
+    }
     return sessions;
 }
 
@@ -598,20 +664,24 @@ QList<Session> SessionManager::importPuTTYRegistry(const QString& path, bool* ok
     QList<Session> sessions;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (ok)
+        if (ok != nullptr) {
             *ok = false;
+        }
         return sessions;
     }
 
     Session current;
     bool inSession = false;
-    const auto finishSession = [&]() {
-        if (!inSession || current.host.isEmpty())
+    const auto finishSession = [&] {
+        if (!inSession || current.host.isEmpty()) {
             return;
-        if (current.id.isEmpty())
+        }
+        if (current.id.isEmpty()) {
             current.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        if (current.name.isEmpty())
+        }
+        if (current.name.isEmpty()) {
             current.name = current.host;
+        }
         current.type = SessionType::SSH;
         sessions.append(current);
     };
@@ -640,12 +710,14 @@ QList<Session> SessionManager::importPuTTYRegistry(const QString& path, bool* ok
             inSession = true;
             continue;
         }
-        if (!inSession || line.isEmpty() || line.startsWith(';') || !line.startsWith('"'))
+        if (!inSession || line.isEmpty() || line.startsWith(';') || !line.startsWith('"')) {
             continue;
+        }
 
-        const int separator = line.indexOf("\"=");
-        if (separator < 0)
+        const qsizetype separator = line.indexOf("\"=");
+        if (separator < 0) {
             continue;
+        }
         const QString key = line.mid(1, separator - 1);
         const QString value = line.mid(separator + 2);
         if (key == "HostName") {
@@ -656,12 +728,14 @@ QList<Session> SessionManager::importPuTTYRegistry(const QString& path, bool* ok
             const QString number = value.trimmed();
             bool valid = false;
             int port = 0;
-            if (number.startsWith("dword:", Qt::CaseInsensitive))
+            if (number.startsWith("dword:", Qt::CaseInsensitive)) {
                 port = number.mid(6).toInt(&valid, 16);
-            else
+            } else {
                 port = number.toInt(&valid);
-            if (valid && port > 0 && port <= 65535)
+            }
+            if (valid && port > 0 && port <= 65535) {
                 current.port = port;
+            }
         } else if (key == "PublicKeyFile") {
             current.keyPath = decodeValue(value);
         } else if (key == "Compression") {
@@ -672,20 +746,24 @@ QList<Session> SessionManager::importPuTTYRegistry(const QString& path, bool* ok
         }
     }
     finishSession();
-    if (ok)
+    if (ok != nullptr) {
         *ok = !sessions.isEmpty();
+    }
     return sessions;
 }
 
 QList<Session> SessionManager::importMobaXtermSessions(const QString& path, bool* ok, QStringList* warnings) {
     QList<Session> sessions;
-    if (ok)
+    if (ok != nullptr) {
         *ok = false;
-    if (warnings)
+    }
+    if (warnings != nullptr) {
         warnings->clear();
+    }
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return sessions;
+    }
 
     // Parse sections first: SubRep may appear after the bookmarks it describes.
     struct Section {
@@ -699,19 +777,22 @@ QList<Session> SessionManager::importMobaXtermSessions(const QString& path, bool
         if (line.startsWith('[') && line.endsWith(']')) {
             sections.append({line.mid(1, line.size() - 2), {}});
         } else if (!sections.isEmpty() && !line.isEmpty() && !line.startsWith(';') && !line.startsWith('#')) {
-            const int separator = line.indexOf('=');
-            if (separator > 0)
+            const qsizetype separator = line.indexOf('=');
+            if (separator > 0) {
                 sections.last().entries.append({line.left(separator).trimmed(), line.mid(separator + 1).trimmed()});
+            }
         }
     }
     auto warn = [warnings](const QString& name, const QString& reason) {
-        if (warnings)
+        if (warnings) {
             warnings->append(QObject::tr("%1: %2").arg(name, reason));
+        }
     };
     auto add = [&sessions](Session session) {
         session.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        if (session.name.isEmpty())
+        if (session.name.isEmpty()) {
             session.name = session.host;
+        }
         sessions.append(session);
     };
     const QRegularExpression compactSection(QStringLiteral("^Bookmarks(?:_[0-9]+)?$"),
@@ -728,8 +809,9 @@ QList<Session> SessionManager::importMobaXtermSessions(const QString& path, bool
             }
             for (const auto& entry : section.entries) {
                 if (entry.first.compare("SubRep", Qt::CaseInsensitive) == 0 ||
-                    entry.first.compare("ImgNum", Qt::CaseInsensitive) == 0)
+                    entry.first.compare("ImgNum", Qt::CaseInsensitive) == 0) {
                     continue;
+                }
                 // Shipped MobaXterm generator: name=#icon#protocol%host%port%user%...
                 const auto match = QRegularExpression(QStringLiteral("^#[0-9]+#([0-9]+)%(.*)$")).match(entry.second);
                 if (!match.hasMatch()) {
@@ -743,9 +825,11 @@ QList<Session> SessionManager::importMobaXtermSessions(const QString& path, bool
                 session.name = entry.first;
                 session.group = group;
                 int defaultPort = 22;
-                if (validProtocol && protocol == 0)
-                    session.type = SessionType::SSH;
-                else if (validProtocol && protocol == 1) {
+                if (validProtocol && protocol == 0) {
+                    {
+                        session.type = SessionType::SSH;
+                    }
+                } else if (validProtocol && protocol == 1) {
                     session.type = SessionType::Telnet;
                     defaultPort = 23;
                 } else if (validProtocol && protocol == 4) {
@@ -780,25 +864,28 @@ QList<Session> SessionManager::importMobaXtermSessions(const QString& path, bool
             bool validPort = true;
             for (const auto& entry : section.entries) {
                 const QString key = entry.first.toLower();
-                if (key == "hostname" || key == "host")
+                if (key == "hostname" || key == "host") {
                     session.host = entry.second;
-                else if (key == "username" || key == "user")
+                } else if (key == "username" || key == "user") {
                     session.user = entry.second;
-                else if (key == "port")
+                } else if (key == "port") {
                     session.port = entry.second.toInt(&validPort);
-                else if (key == "name")
+                } else if (key == "name") {
                     session.name = entry.second;
-                else if (key == "protocol")
+                } else if (key == "protocol") {
                     supported = entry.second.compare("ssh", Qt::CaseInsensitive) == 0;
+                }
             }
-            if (supported && validPort && !session.host.isEmpty() && session.port > 0 && session.port <= 65535)
+            if (supported && validPort && !session.host.isEmpty() && session.port > 0 && session.port <= 65535) {
                 add(session);
-            else
+            } else {
                 warn(session.name, QObject::tr("Skipped an unsupported or invalid session."));
+            }
         }
     }
-    if (ok)
+    if (ok != nullptr) {
         *ok = !sessions.isEmpty();
+    }
     return sessions;
 }
 
@@ -806,8 +893,9 @@ QList<Session> SessionManager::importSecureCrtSession(const QString& path, bool*
     QList<Session> sessions;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (ok)
+        if (ok != nullptr) {
             *ok = false;
+        }
         return sessions;
     }
 
@@ -817,53 +905,68 @@ QList<Session> SessionManager::importSecureCrtSession(const QString& path, bool*
     current.port = 22;
     const auto decode = [](QString value) {
         value = value.trimmed();
-        if (value.startsWith('"') && value.endsWith('"') && value.size() >= 2)
+        if (value.startsWith('"') && value.endsWith('"') && value.size() >= 2) {
             value = value.mid(1, value.size() - 2);
+        }
         value.replace(QStringLiteral("\\\""), QStringLiteral("\""));
         return value;
     };
 
     for (QString line : QString::fromUtf8(file.readAll()).split('\n')) {
         line = line.trimmed();
-        if (line.isEmpty() || line.startsWith(';') || line.startsWith('#'))
+        if (line.isEmpty() || line.startsWith(';') || line.startsWith('#')) {
             continue;
-        const int separator = line.indexOf('=');
-        if (separator < 0)
+        }
+        const qsizetype separator = line.indexOf('=');
+        if (separator < 0) {
             continue;
+        }
         QString key = line.left(separator).trimmed();
         const QString value = decode(line.mid(separator + 1));
-        const int firstQuote = key.indexOf('"');
-        const int lastQuote = key.lastIndexOf('"');
-        if (firstQuote >= 0 && lastQuote > firstQuote)
+        const qsizetype firstQuote = key.indexOf('"');
+        const qsizetype lastQuote = key.lastIndexOf('"');
+        if (firstQuote >= 0 && lastQuote > firstQuote) {
             key = key.mid(firstQuote + 1, lastQuote - firstQuote - 1);
+        }
         key = key.toLower();
-        if (key == QStringLiteral("hostname"))
-            current.host = value;
-        else if (key == QStringLiteral("username"))
-            current.user = value;
-        else if (key == QStringLiteral("session name"))
-            current.name = value;
-        else if (key == QStringLiteral("port")) {
+        if (key == QStringLiteral("hostname")) {
+            {
+                current.host = value;
+            }
+        } else if (key == QStringLiteral("username")) {
+            {
+                current.user = value;
+            }
+        } else if (key == QStringLiteral("session name")) {
+            {
+                current.name = value;
+            }
+        } else if (key == QStringLiteral("port")) {
             bool valid = false;
             int port = 0;
-            if (value.size() == 8)
+            if (value.size() == 8) {
                 port = value.toInt(&valid, 16);
-            else
+            } else {
                 port = value.toInt(&valid);
-            if (!valid && value.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive))
+            }
+            if (!valid && value.startsWith(QStringLiteral("0x"), Qt::CaseInsensitive)) {
                 port = value.mid(2).toInt(&valid, 16);
-            if (valid && port > 0 && port <= 65535)
+            }
+            if (valid && port > 0 && port <= 65535) {
                 current.port = port;
+            }
         }
     }
     if (!current.host.trimmed().isEmpty()) {
         current.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        if (current.name.trimmed().isEmpty())
+        if (current.name.trimmed().isEmpty()) {
             current.name = current.host;
+        }
         sessions.append(current);
     }
-    if (ok)
+    if (ok != nullptr) {
         *ok = !sessions.isEmpty();
+    }
     return sessions;
 }
 
@@ -871,8 +974,9 @@ QList<Session> SessionManager::importRoyalTsDocument(const QString& path, bool* 
     QList<Session> sessions;
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (ok)
+        if (ok != nullptr) {
             *ok = false;
+        }
         return sessions;
     }
 
@@ -884,32 +988,44 @@ QList<Session> SessionManager::importRoyalTsDocument(const QString& path, bool* 
     QString objectType;
     int depth = 0;
     int objectDepth = -1;
-    const auto finish = [&]() {
-        if (current.host.trimmed().isEmpty())
+    const auto finish = [&] {
+        if (current.host.trimmed().isEmpty()) {
             return;
+        }
         current.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-        if (current.name.trimmed().isEmpty())
+        if (current.name.trimmed().isEmpty()) {
             current.name = current.host;
-        if (current.port <= 0)
+        }
+        if (current.port <= 0) {
             current.port = 22;
+        }
         sessions.append(current);
     };
-    const auto assignProperty = [&]() {
+    const auto assignProperty = [&] {
         const QString value = propertyValue.trimmed();
-        if (property.compare(QStringLiteral("Name"), Qt::CaseInsensitive) == 0)
-            current.name = value;
-        else if (property.compare(QStringLiteral("URI"), Qt::CaseInsensitive) == 0)
-            current.host = value;
-        else if (property.compare(QStringLiteral("CredentialUsername"), Qt::CaseInsensitive) == 0)
-            current.user = value;
-        else if (property.compare(QStringLiteral("ConnectionType"), Qt::CaseInsensitive) == 0 &&
-                 value.compare(QStringLiteral("telnet"), Qt::CaseInsensitive) == 0)
-            current.type = SessionType::Telnet;
-        else if (property.compare(QStringLiteral("Port"), Qt::CaseInsensitive) == 0) {
+        if (property.compare(QStringLiteral("Name"), Qt::CaseInsensitive) == 0) {
+            {
+                current.name = value;
+            }
+        } else if (property.compare(QStringLiteral("URI"), Qt::CaseInsensitive) == 0) {
+            {
+                current.host = value;
+            }
+        } else if (property.compare(QStringLiteral("CredentialUsername"), Qt::CaseInsensitive) == 0) {
+            {
+                current.user = value;
+            }
+        } else if (property.compare(QStringLiteral("ConnectionType"), Qt::CaseInsensitive) == 0 &&
+                   value.compare(QStringLiteral("telnet"), Qt::CaseInsensitive) == 0) {
+            {
+                current.type = SessionType::Telnet;
+            }
+        } else if (property.compare(QStringLiteral("Port"), Qt::CaseInsensitive) == 0) {
             bool valid = false;
             const int port = value.toInt(&valid);
-            if (valid && port > 0 && port <= 65535)
+            if (valid && port > 0 && port <= 65535) {
                 current.port = port;
+            }
         }
     };
 
@@ -957,11 +1073,13 @@ QList<Session> SessionManager::importRoyalTsDocument(const QString& path, bool* 
 
     if (xml.hasError()) {
         sessions.clear();
-        if (ok)
+        if (ok != nullptr) {
             *ok = false;
+        }
         return sessions;
     }
-    if (ok)
+    if (ok != nullptr) {
         *ok = !sessions.isEmpty();
+    }
     return sessions;
 }

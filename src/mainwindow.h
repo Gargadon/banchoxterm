@@ -79,6 +79,7 @@ private slots:
     void showCommandPalette();
     void lockApplication();
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private:
     bool broadcastInput(const QString& text, bool sensitive);
     void setupUi();

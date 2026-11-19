@@ -35,6 +35,7 @@ private slots:
     void onItemDoubleClicked(QTreeWidgetItem* item, int column);
     void showContextMenu(const QPoint& pos);
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private:
     void loadSessions();
     void applyFilter();

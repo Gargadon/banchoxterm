@@ -3,8 +3,9 @@
 #include "keyring.h"
 #include "sshconnection.h"
 
-SftpTransferWorker::SftpTransferWorker(const Session& session, const SftpTransferRequest& request, QObject* parent)
-    : QObject(parent), m_session(session), m_request(request) {
+SftpTransferWorker::SftpTransferWorker(const Session& session, const SftpTransferRequest& request, QObject* parent,
+                                       bool reusable)
+    : QObject(parent), m_session(session), m_request(request), m_reusable(reusable) {
     // Construct before moving the worker to its thread. Control slots only
     // touch SshConnection's atomic transfer flags and can be called directly.
     m_connection = new SshConnection();
@@ -17,8 +18,9 @@ SftpTransferWorker::~SftpTransferWorker() {
 }
 
 void SftpTransferWorker::start() {
-    if (m_started || m_finished)
+    if (m_started || m_finished) {
         return;
+    }
     m_started = true;
 
     m_connection->setKeepAliveSeconds(m_session.keepAliveSeconds);
@@ -29,6 +31,8 @@ void SftpTransferWorker::start() {
     connect(m_connection, &SshConnection::connectionFailed, this, &SftpTransferWorker::onConnectionFailed);
     connect(m_connection, &SshConnection::operationFinished, this, &SftpTransferWorker::onOperationFinished);
     connect(m_connection, &SshConnection::transferProgress, this, &SftpTransferWorker::onTransferProgress);
+    connect(m_connection, &SshConnection::fileTransferred, this,
+            [this](const QString& path) { emit fileTransferred(m_request.id, path); });
 
     const QString password = Keyring::lookupPassword(m_session.id);
     m_connection->connectToHost(m_session.host, m_session.port, m_session.user, m_session.keyPath, password, {},
@@ -36,16 +40,27 @@ void SftpTransferWorker::start() {
                                 m_session.id);
 }
 
+void SftpTransferWorker::submit(const SftpTransferRequest& request) {
+    m_request = request;
+    m_finished = false;
+    onConnected();
+}
+
 void SftpTransferWorker::onConnected() {
     if (m_cancelRequested.load()) {
         finish(false, QStringLiteral("Transfer cancelled by user"));
         return;
     }
-    if (m_finished)
+    if (m_finished) {
         return;
+    }
+    if (!m_connection->isConnected()) {
+        finish(false, QStringLiteral("SFTP session not active"));
+        return;
+    }
 
     if (m_request.isDirUpload) {
-        m_connection->uploadDirectory(m_request.localPath, m_request.remotePath);
+        m_connection->uploadPreparedDirectory(m_request.localPath, m_request.remotePath, m_request.uploadPlan);
     } else if (m_request.isUpload) {
         m_connection->uploadFile(m_request.localPath, m_request.remotePath);
     } else {
@@ -67,25 +82,30 @@ void SftpTransferWorker::onTransferProgress(const QString& fileName, qint64 byte
 
 void SftpTransferWorker::cancel() {
     m_cancelRequested.store(true);
-    if (m_connection)
+    if (m_connection != nullptr) {
         m_connection->cancelTransfer();
+    }
 }
 
 void SftpTransferWorker::pause() {
-    if (m_connection)
+    if (m_connection != nullptr) {
         m_connection->pauseTransfer();
+    }
 }
 
 void SftpTransferWorker::resume() {
-    if (m_connection)
+    if (m_connection != nullptr) {
         m_connection->resumeTransfer();
+    }
 }
 
 void SftpTransferWorker::finish(bool success, const QString& message) {
-    if (m_finished)
+    if (m_finished) {
         return;
+    }
     m_finished = true;
-    if (m_connection)
+    if ((m_connection != nullptr) && (!m_reusable || !success)) {
         m_connection->disconnectFromHost();
+    }
     emit finished(m_request.id, success, message);
 }

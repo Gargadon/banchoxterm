@@ -55,13 +55,14 @@ protected:
 
     void mouseMoveEvent(QMouseEvent* event) override {
         const QPoint position = event->position().toPoint();
-        if (m_tab && (event->buttons() & Qt::LeftButton) && !rect().contains(position) &&
+        if (m_tab && ((event->buttons() & Qt::LeftButton) != 0u) && !rect().contains(position) &&
             (position - m_origin).manhattanLength() >= QApplication::startDragDistance()) {
             QPointer<QWidget> tab = m_tab;
             m_tab.clear();
             const int index = m_pane->indexOf(tab);
-            if (index < 0)
+            if (index < 0) {
                 return;
+            }
             const QPixmap preview = grab(tabRect(index));
             // Finish QTabBar's internal reorder gesture before starting a cross-pane drag.
             QMouseEvent release(QEvent::MouseButtonRelease, event->position(), event->globalPosition(), Qt::LeftButton,
@@ -72,8 +73,9 @@ protected:
             drag->setPixmap(preview);
             drag->setHotSpot(QPoint(preview.width() / 2, preview.height() / 2));
             drag->exec(Qt::MoveAction);
-            if (drag)
+            if (drag) {
                 drag->deleteLater();
+            }
             return;
         }
         QTabBar::mouseMoveEvent(event);

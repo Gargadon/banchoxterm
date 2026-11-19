@@ -46,6 +46,7 @@ private slots:
     void onAccept();
     void onManageKnownHosts();
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private:
     void loadSettings();
     void saveSettings();

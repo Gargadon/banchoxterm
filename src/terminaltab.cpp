@@ -1,3 +1,6 @@
+#include <utility>
+#include <QScopeGuard>
+#include <QSaveFile>
 #include "terminaltab.h"
 #include <algorithm>
 #ifdef Q_OS_LINUX
@@ -50,7 +53,6 @@
 #include <QPair>
 #include <QSerialPort>
 #include <QListWidget>
-#include <QDialogButtonBox>
 #include <QDialog>
 #include <QFormLayout>
 #include <QDesktopServices>
@@ -74,8 +76,9 @@
 #endif
 
 TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(parent), m_session(session) {
-    if (!session.promptPattern.isEmpty())
+    if (!session.promptPattern.isEmpty()) {
         m_promptPattern = QRegularExpression(session.promptPattern);
+    }
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
 
@@ -139,7 +142,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         bellTimer->setSingleShot(true);
         bellTimer->setInterval(1500);
         connect(bellTimer, &QTimer::timeout, bellNotice, &QWidget::hide);
-        connect(m_terminal, &QTermWidget::bell, this, [this, bellNotice, bellTimer]() {
+        connect(m_terminal, &QTermWidget::bell, this, [this, bellNotice, bellTimer] {
             QApplication::beep();
             QApplication::alert(window(), 3000);
             bellNotice->adjustSize();
@@ -165,15 +168,19 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         QStringList environment;
         environment << QStringLiteral("COLORTERM=truecolor") << QStringLiteral("TERM_PROGRAM=banchoxterm")
                     << QStringLiteral("TERM_PROGRAM_VERSION=") + QStringLiteral(BANCHO_VERSION);
-        if (!m_session.terminalType.isEmpty())
+        if (!m_session.terminalType.isEmpty()) {
             environment << QStringLiteral("TERM=") + m_session.terminalType;
-        if (!m_session.language.isEmpty())
+        }
+        if (!m_session.language.isEmpty()) {
             environment << QStringLiteral("LANG=") + m_session.language;
-        if (!environment.isEmpty())
+        }
+        if (!environment.isEmpty()) {
             m_terminal->setEnvironment(environment);
+        }
         m_terminal->setCodec(m_session.encoding);
-        if (m_session.initialRows > 0 && m_session.initialColumns > 0)
+        if (m_session.initialRows > 0 && m_session.initialColumns > 0) {
             m_terminal->setSize(QSize(m_session.initialColumns, m_session.initialRows));
+        }
 
         m_terminal->setContextMenuPolicy(Qt::CustomContextMenu);
         // QTermWidget forwards keyboard input through an internal child
@@ -182,8 +189,9 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         // widget hierarchy.
         qApp->installEventFilter(this);
         connect(m_terminal, &QWidget::customContextMenuRequested, this, &TerminalTab::showTerminalContextMenu);
-        if (m_session.type != SessionType::SSH)
+        if (m_session.type != SessionType::SSH) {
             connect(m_terminal, &QTermWidget::currentDirectoryChanged, this, &TerminalTab::onRemoteDirChanged);
+        }
         connect(m_terminal, &QTermWidget::sendData, this, &TerminalTab::onSendData);
         if (auto* display = m_terminal->findChild<Konsole::TerminalDisplay*>()) {
             m_highlighter = new TerminalHighlighter(display);
@@ -192,8 +200,9 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                     [this](const char* text) { emit userStringInput(QString::fromUtf8(text)); });
         }
         connect(m_terminal, &QTermWidget::urlActivated, this, [this](const QUrl& url, bool) {
-            if (!QDesktopServices::openUrl(url))
+            if (!QDesktopServices::openUrl(url)) {
                 feedTerminalData(tr("\r\n[Unable to open link: %1]\r\n").arg(url.toString()).toUtf8());
+            }
         });
 
         m_shortcutCaptureBar = new QWidget(this);
@@ -208,7 +217,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
         auto* restoreShortcuts = new QPushButton(tr("Restore shortcuts"), m_shortcutCaptureBar);
         restoreShortcuts->setObjectName("restoreShortcutsButton");
         captureLayout->addWidget(restoreShortcuts);
-        connect(restoreShortcuts, &QPushButton::clicked, this, [this]() { setCaptureApplicationShortcuts(false); });
+        connect(restoreShortcuts, &QPushButton::clicked, this, [this] { setCaptureApplicationShortcuts(false); });
         m_shortcutCaptureBar->hide();
         layout->addWidget(m_shortcutCaptureBar);
         layout->addWidget(m_terminal);
@@ -238,7 +247,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             m_serialPort->setParity(static_cast<QSerialPort::Parity>(m_session.serialParity));
             m_serialPort->setStopBits(static_cast<QSerialPort::StopBits>(m_session.serialStopBits));
             m_serialPort->setFlowControl(static_cast<QSerialPort::FlowControl>(m_session.serialFlowControl));
-            connect(m_serialPort, &QSerialPort::readyRead, this, [this]() {
+            connect(m_serialPort, &QSerialPort::readyRead, this, [this] {
                 const QByteArray data = m_serialPort->readAll();
                 if (!data.isEmpty()) {
                     if (m_zmodemProcess) {
@@ -252,8 +261,9 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                 }
             });
             connect(m_serialPort, &QSerialPort::errorOccurred, this, [this](QSerialPort::SerialPortError error) {
-                if (error == QSerialPort::NoError)
+                if (error == QSerialPort::NoError) {
                     return;
+                }
                 const QString message = tr("\r\n[Serial error: %1]\r\n").arg(m_serialPort->errorString());
                 // Unsupported modem-line operations and timeouts leave the data
                 // link open. A fatal I/O error must stop all further port access.
@@ -270,11 +280,13 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
                 showStoppedPrompt();
             } else {
-                if (!m_serialPort->setDataTerminalReady(m_session.serialDtr))
+                if (!m_serialPort->setDataTerminalReady(m_session.serialDtr)) {
                     feedTerminalData(tr("\r\n[Unable to set DTR: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
+                }
                 if (m_serialPort->flowControl() != QSerialPort::HardwareControl &&
-                    !m_serialPort->setRequestToSend(m_session.serialRts))
+                    !m_serialPort->setRequestToSend(m_session.serialRts)) {
                     feedTerminalData(tr("\r\n[Unable to set RTS: %1]\r\n").arg(m_serialPort->errorString()).toUtf8());
+                }
 #ifdef Q_OS_LINUX
                 // Qt 6.8 can leave a hung-up PTY open without errorOccurred().
                 // Poll only hangup/error flags; QSerialPort retains ownership of
@@ -288,7 +300,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
                     }
                     bool disconnected = !m_serialPort->isOpen();
                     if (!disconnected) {
-                        pollfd descriptor{int(m_serialPort->handle()), 0, 0};
+                        pollfd descriptor{static_cast<int>(m_serialPort->handle()), 0, 0};
                         disconnected =
                             ::poll(&descriptor, 1, 0) > 0 && (descriptor.revents & (POLLHUP | POLLERR | POLLNVAL));
                     }
@@ -343,7 +355,7 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
     connect(m_btnPrev, &QPushButton::clicked, this, &TerminalTab::onSearchPrev);
     connect(closeBtn, &QPushButton::clicked, this, &TerminalTab::hideSearchFrame);
 
-    if (m_terminal) {
+    if (m_terminal != nullptr) {
         auto addTerminalShortcut = [this](const QString& id, const QString& label, auto handler) {
             auto* action = new QAction(label, m_terminal);
             m_terminal->addAction(action);
@@ -351,12 +363,12 @@ TerminalTab::TerminalTab(const Session& session, QWidget* parent) : QWidget(pare
             connect(action, &QAction::triggered, this, handler);
             return action;
         };
-        addTerminalShortcut("findTerminal", tr("Find in current terminal"), [this]() { doToggleSearchBar(); });
-        addTerminalShortcut("copy", tr("Copy selection"), [this]() { doCopy(); });
-        auto* paste = addTerminalShortcut("paste", tr("Paste"), [this]() { doPaste(); });
+        addTerminalShortcut("findTerminal", tr("Find in current terminal"), [this] { doToggleSearchBar(); });
+        addTerminalShortcut("copy", tr("Copy selection"), [this] { doCopy(); });
+        auto* paste = addTerminalShortcut("paste", tr("Paste"), [this] { doPaste(); });
         paste->setEnabled(!m_session.readOnly);
-        addTerminalShortcut("zoomIn", tr("Zoom in"), [this]() { doZoomIn(); });
-        addTerminalShortcut("zoomOut", tr("Zoom out"), [this]() { doZoomOut(); });
+        addTerminalShortcut("zoomIn", tr("Zoom in"), [this] { doZoomIn(); });
+        addTerminalShortcut("zoomOut", tr("Zoom out"), [this] { doZoomOut(); });
     }
 
     startLogging();
@@ -366,43 +378,45 @@ TerminalTab::~TerminalTab() {
     m_closing = true;
     closeExternalProcess();
 #ifdef BANCHO_HAVE_FREERDP
-    if (m_nativeRdpWidget)
+    if (m_nativeRdpWidget != nullptr) {
         m_nativeRdpWidget->stop();
+    }
 #endif
 
-    if (m_reconnectTimer) {
+    if (m_reconnectTimer != nullptr) {
         m_reconnectTimer->stop();
         delete m_reconnectTimer;
         m_reconnectTimer = nullptr;
     }
 
-    if (m_logFile) {
+    if (m_logFile != nullptr) {
         m_logFile->close();
         delete m_logFile;
         m_logFile = nullptr;
     }
 
-    if (m_xmodemTimer) {
+    if (m_xmodemTimer != nullptr) {
         m_xmodemTimer->stop();
         delete m_xmodemTimer;
         m_xmodemTimer = nullptr;
     }
-    if (m_zmodemProcess) {
+    if (m_zmodemProcess != nullptr) {
         m_zmodemProcess->kill();
         m_zmodemProcess->waitForFinished(1000);
         delete m_zmodemProcess;
         m_zmodemProcess = nullptr;
     }
-    if (m_xmodemFile) {
+    if (m_xmodemFile != nullptr) {
         m_xmodemFile->close();
         delete m_xmodemFile;
         m_xmodemFile = nullptr;
     }
 
-    if (m_serialPort) {
+    if (m_serialPort != nullptr) {
         disconnect(m_serialPort, nullptr, this, nullptr);
-        if (m_serialPort->isOpen())
+        if (m_serialPort->isOpen()) {
             m_serialPort->close();
+        }
         delete m_serialPort;
         m_serialPort = nullptr;
     }
@@ -419,10 +433,11 @@ TerminalTab::~TerminalTab() {
     }
 #endif
 
-    if (m_connection)
+    if (m_connection != nullptr) {
         disconnect(m_connection, nullptr, this, nullptr);
+    }
 
-    if (m_connectionThread && m_connectionThread->isRunning()) {
+    if ((m_connectionThread != nullptr) && m_connectionThread->isRunning()) {
         // The worker may be resolving DNS, authenticating or waiting for SFTP.
         // Let it unwind without making the GUI wait for network I/O.
         m_connectionThread->requestInterruption();
@@ -463,13 +478,15 @@ void TerminalTab::resizeEvent(QResizeEvent* event) {
 }
 
 void TerminalTab::syncTerminalSize() {
-    if (!m_terminal || !m_terminal->isVisible())
+    if ((m_terminal == nullptr) || !m_terminal->isVisible()) {
         return;
+    }
 
     const int rows = m_terminal->screenLinesCount();
     const int cols = m_terminal->screenColumnsCount();
-    if (rows <= 0 || cols <= 0)
+    if (rows <= 0 || cols <= 0) {
         return;
+    }
 
     applyTerminalSize(rows, cols);
     // A split can expose areas outside the emulator's dirty character region.
@@ -482,8 +499,9 @@ void TerminalTab::syncTerminalSize() {
 }
 
 void TerminalTab::receiveSynchronizedKey(QKeyEvent* event, bool fromPaste) {
-    if (!m_isActive || m_session.readOnly || !m_terminal || isRdpOrVnc())
+    if (!m_isActive || m_session.readOnly || (m_terminal == nullptr) || isRdpOrVnc()) {
         return;
+    }
     if (auto* session = m_terminal->findChild<Konsole::Session*>()) {
         QKeyEvent copy(event->type(), event->key(), event->modifiers(), event->text(), event->isAutoRepeat(),
                        event->count());
@@ -492,10 +510,11 @@ void TerminalTab::receiveSynchronizedKey(QKeyEvent* event, bool fromPaste) {
 }
 
 void TerminalTab::applyTerminalSize(int rows, int cols) {
-    if (rows <= 0 || cols <= 0)
+    if (rows <= 0 || cols <= 0) {
         return;
+    }
 
-    if (m_connection && m_session.type == SessionType::SSH) {
+    if ((m_connection != nullptr) && m_session.type == SessionType::SSH) {
         QMetaObject::invokeMethod(m_connection, "resizePty", Qt::QueuedConnection, Q_ARG(int, rows), Q_ARG(int, cols));
     }
 
@@ -583,12 +602,14 @@ void TerminalTab::pollConPtyOutput() {
 #endif
 
 void TerminalTab::finishSerialSession(const QString& message) {
-    if (!m_isActive || m_closing)
+    if (!m_isActive || m_closing) {
         return;
+    }
     m_isActive = false;
     cancelSerialFile();
-    if (m_serialPort && m_serialPort->isOpen())
+    if ((m_serialPort != nullptr) && m_serialPort->isOpen()) {
         m_serialPort->close();
+    }
     feedTerminalData(message.toUtf8());
     emit titleChanged(tr("[Closed] %1").arg(m_session.name));
     showStoppedPrompt();
@@ -625,8 +646,9 @@ void TerminalTab::setupLocalTerminal() {
     }
     // Keep the local PTY's erase character and the keys emitted by the
     // terminal consistent: Backspace is DEL and Delete is CSI 3 ~.
-    if (QTermWidget::availableKeyBindings().contains(QStringLiteral("linux")))
+    if (QTermWidget::availableKeyBindings().contains(QStringLiteral("linux"))) {
         m_terminal->setKeyBindings(QStringLiteral("linux"));
+    }
     // QTermWidget's auto-close both hides the display and suppresses finished()
     // when disabled. Keep the view and observe the actual shell process instead,
     // including abnormal exits for which Session::finished() is not emitted.
@@ -641,9 +663,10 @@ void TerminalTab::setupLocalTerminal() {
         });
         connect(
             process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this]() {
-                if (m_closing)
+            [this] {
+                if (m_closing) {
                     return;
+                }
                 // Hand keyboard input to the stopped-session actions instead of the
                 // terminated PTY. Queue this until QTermWidget has handled the exit.
                 m_terminal->startExternal();
@@ -662,15 +685,17 @@ void TerminalTab::setupSshTerminal() {
     // The Linux/default keymap emits BS (0x08), while the SSH PTY below is
     // configured with DEL (0x7f) as TTY_OP_ERASE. Use the Linux terminal
     // binding explicitly so Backspace matches the requested remote setting.
-    if (QTermWidget::availableKeyBindings().contains(QStringLiteral("linux")))
+    if (QTermWidget::availableKeyBindings().contains(QStringLiteral("linux"))) {
         m_terminal->setKeyBindings(QStringLiteral("linux"));
+    }
     m_terminal->startExternal();
 
     bool enableX11 = m_session.x11Forwarding;
-    if (!m_session.jumpHost.trimmed().isEmpty())
+    if (!m_session.jumpHost.trimmed().isEmpty()) {
         feedTerminalData(tr("\r\n[Connecting to %1 via bastion %2...]\r\n")
                              .arg(m_session.host, m_session.jumpHost.trimmed())
                              .toUtf8());
+    }
 #ifdef Q_OS_WIN
     if (enableX11) {
         QString x11Error;
@@ -698,7 +723,7 @@ void TerminalTab::setupSshTerminal() {
         feedTerminalData(data);
         logData(data);
     });
-    connect(m_connection, &SshConnection::shellClosed, this, [this]() {
+    connect(m_connection, &SshConnection::shellClosed, this, [this] {
         m_isActive = false;
         feedTerminalData(tr("\r\n[Connection closed]\r\n").toUtf8());
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
@@ -745,21 +770,24 @@ void TerminalTab::onSendData(const char* data, int size) {
     QByteArray input(data, size);
     // Remote prompts commonly accept Ctrl+J (LF) for a newline without
     // submitting. CSI-u requires keyboard-protocol support on the receiver.
-    if (m_session.type == SessionType::SSH && input == QByteArrayLiteral("\x1b[13;2u"))
+    if (m_session.type == SessionType::SSH && input == QByteArrayLiteral("\x1b[13;2u")) {
         input = QByteArrayLiteral("\n");
+    }
     recordTypedInput(input);
     if (!m_sendingRawBytes && (m_session.type == SessionType::SSH || m_session.type == SessionType::Telnet ||
                                m_session.type == SessionType::Serial)) {
         input.replace(QByteArrayLiteral("\x7f"), m_session.backspaceSequence.toUtf8());
-        if (input.contains(QByteArrayLiteral("\r\n")))
+        if (input.contains(QByteArrayLiteral("\r\n"))) {
             input.replace(QByteArrayLiteral("\r\n"), QByteArrayLiteral("\r"));
+        }
         input.replace(QByteArrayLiteral("\r"), m_session.enterSequence.toUtf8());
     }
-    if (m_connection && m_session.type == SessionType::SSH) {
+    if ((m_connection != nullptr) && m_session.type == SessionType::SSH) {
         QMetaObject::invokeMethod(m_connection, "sendToShell", Qt::QueuedConnection, Q_ARG(QByteArray, input));
-    } else if (m_serialPort && m_serialPort->isOpen() && m_session.type == SessionType::Serial) {
-        if (m_zmodemProcess)
+    } else if ((m_serialPort != nullptr) && m_serialPort->isOpen() && m_session.type == SessionType::Serial) {
+        if (m_zmodemProcess != nullptr) {
             return;
+        }
         m_serialPort->write(input);
 #ifdef Q_OS_WIN
     } else if (m_conpty) {
@@ -769,31 +797,38 @@ void TerminalTab::onSendData(const char* data, int size) {
 }
 
 void TerminalTab::applySshOptions() {
-    if (!m_connection)
+    if (m_connection == nullptr) {
         return;
-    if (m_session.keepAliveSeconds > 0)
+    }
+    if (m_session.keepAliveSeconds > 0) {
         QMetaObject::invokeMethod(m_connection, "setKeepAliveSeconds", Qt::QueuedConnection,
                                   Q_ARG(int, m_session.keepAliveSeconds));
-    if (!m_session.cryptCipher.isEmpty())
+    }
+    if (!m_session.cryptCipher.isEmpty()) {
         QMetaObject::invokeMethod(m_connection, "setCipherAlgorithms", Qt::QueuedConnection,
                                   Q_ARG(QString, m_session.cryptCipher));
-    if (!m_session.kexAlgo.isEmpty())
+    }
+    if (!m_session.kexAlgo.isEmpty()) {
         QMetaObject::invokeMethod(m_connection, "setKexAlgorithm", Qt::QueuedConnection,
                                   Q_ARG(QString, m_session.kexAlgo));
-    if (!m_session.macAlgo.isEmpty())
+    }
+    if (!m_session.macAlgo.isEmpty()) {
         QMetaObject::invokeMethod(m_connection, "setMacAlgorithm", Qt::QueuedConnection,
                                   Q_ARG(QString, m_session.macAlgo));
+    }
 }
 
 void TerminalTab::onTitleChanged() {
-    if (m_terminal)
+    if (m_terminal != nullptr) {
         emit titleChanged(m_terminal->title());
+    }
 }
 
 void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
     QWidget* view = terminalView();
-    if (!view)
+    if (view == nullptr) {
         return;
+    }
 
     QMenu menu(this);
     auto* captureAct = menu.addAction(tr("Send shortcuts to terminal"));
@@ -840,7 +875,7 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
     auto* clearAct = menu.addAction(tr("Clear Scrollback"));
     QAction* serialSendAct = nullptr;
     if (m_session.type == SessionType::Serial) {
-        if (m_xmodemFile || m_zmodemProcess) {
+        if ((m_xmodemFile != nullptr) || (m_zmodemProcess != nullptr)) {
             serialSendAct = menu.addAction(tr("Cancel serial file transfer"));
         } else {
             serialSendAct = menu.addAction(tr("Send File with XMODEM/YMODEM/ZMODEM..."));
@@ -860,8 +895,9 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
     }
 
     auto* selected = menu.exec(view->mapToGlobal(pos));
-    if (!selected)
+    if (selected == nullptr) {
         return;
+    }
     if (selected == captureAct) {
         setCaptureApplicationShortcuts(captureAct->isChecked());
     } else if (selected == copyAct) {
@@ -872,22 +908,24 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
         doPaste();
     } else if (selected == findAct) {
         doToggleSearchBar();
-    } else if (selected && selected->parent() == specialMenu) {
-        if (selected->property("physicalBreak").toBool())
+    } else if ((selected != nullptr) && selected->parent() == specialMenu) {
+        if (selected->property("physicalBreak").toBool()) {
             sendBreak();
-        else if (selected->property("ciscoEscape").toBool())
+        } else if (selected->property("ciscoEscape").toBool()) {
             sendCiscoEscape();
-        else if (selected->property("telnetEscape").toBool())
+        } else if (selected->property("telnetEscape").toBool()) {
             sendTelnetEscape();
-        else
+        } else {
             sendSpecialCharacter(selected->data().toByteArray());
+        }
     } else if (selected == clearAct) {
         doClear();
     } else if (selected == serialSendAct) {
-        if (m_xmodemFile)
+        if (m_xmodemFile != nullptr) {
             cancelSerialFile();
-        else
+        } else {
             sendSerialFile();
+        }
     } else if (selected == historyAct) {
         showCommandHistory();
     } else if (selected == zoomInAct) {
@@ -900,8 +938,9 @@ void TerminalTab::showTerminalContextMenu(const QPoint& pos) {
 }
 
 void TerminalTab::onTerminalFinished() {
-    if (m_closing || m_stopPromptShown)
+    if (m_closing || m_stopPromptShown) {
         return;
+    }
     m_isActive = false;
     feedTerminalData(tr("\r\n[Connection closed]\r\n").toUtf8());
     emit titleChanged(tr("[Closed] %1").arg(m_session.name));
@@ -928,9 +967,10 @@ void TerminalTab::updateFontFromSettings() {
                                     ? settings.value("terminal/colorScheme", "DarkPastels").toString()
                                     : m_session.colorScheme;
 
-    if (m_terminal) {
-        if (m_highlighter)
+    if (m_terminal != nullptr) {
+        if (m_highlighter != nullptr) {
             m_highlighter->reload();
+        }
         m_terminal->setTerminalFont(font);
         const bool translucent = window()->testAttribute(Qt::WA_TranslucentBackground);
         m_terminal->setTerminalOpacity(translucent ? TerminalAppearance::opacityPercent() / 100.0 : 1.0);
@@ -950,18 +990,22 @@ void TerminalTab::updateFontFromSettings() {
 }
 
 void TerminalTab::startLogging() {
-    if (m_session.type == SessionType::RDP || m_session.type == SessionType::VNC)
+    if (m_session.type == SessionType::RDP || m_session.type == SessionType::VNC) {
         return;
+    }
 
     QSettings settings;
-    if (!settings.value("terminal/loggingEnabled", false).toBool())
+    if (!settings.value("terminal/loggingEnabled", false).toBool()) {
         return;
+    }
 
     QString dir = settings.value("terminal/logDirectory", "").toString().trimmed();
-    if (dir.isEmpty())
+    if (dir.isEmpty()) {
         dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (!QDir().mkpath(dir))
+    }
+    if (!QDir().mkpath(dir)) {
         return;
+    }
 
     QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
     QString safeName = m_session.name;
@@ -976,36 +1020,41 @@ void TerminalTab::startLogging() {
 }
 
 void TerminalTab::logData(const QByteArray& data) {
-    if (m_logFile && m_logFile->isOpen() && !data.isEmpty())
+    if ((m_logFile != nullptr) && m_logFile->isOpen() && !data.isEmpty()) {
         m_logFile->write(m_sensitiveLogFilter.process(data));
+    }
 }
 
 void TerminalTab::maybeScheduleReconnect() {
-    if (m_closing || !m_session.autoReconnect || m_reconnectTimer)
+    if (m_closing || !m_session.autoReconnect || (m_reconnectTimer != nullptr)) {
         return;
+    }
     m_reconnectTimer = new QTimer(this);
     m_reconnectTimer->setSingleShot(true);
     m_reconnectTimer->setInterval(3000);
-    connect(m_reconnectTimer, &QTimer::timeout, this, [this]() { emit reconnectRequested(m_session); });
+    connect(m_reconnectTimer, &QTimer::timeout, this, [this] { emit reconnectRequested(m_session); });
     m_reconnectTimer->start();
 }
 
 void TerminalTab::requestReconnect() {
-    if (m_isActive)
+    if (m_isActive) {
         return;
-    if (m_reconnectTimer) {
+    }
+    if (m_reconnectTimer != nullptr) {
         m_reconnectTimer->stop();
         m_reconnectTimer->deleteLater();
         m_reconnectTimer = nullptr;
     }
-    if (m_reconnectButton)
+    if (m_reconnectButton != nullptr) {
         m_reconnectButton->setEnabled(false);
+    }
     emit reconnectRequested(m_session);
 }
 
 void TerminalTab::showStoppedPrompt() {
-    if (m_stopPromptShown || !m_terminal)
+    if (m_stopPromptShown || (m_terminal == nullptr)) {
         return;
+    }
 
     m_stopPromptShown = true;
     feedTerminalData((QByteArray("\r\n\x1b[38;5;214m") + tr("Session stopped\r\n").toUtf8() +
@@ -1015,25 +1064,39 @@ void TerminalTab::showStoppedPrompt() {
 }
 
 void TerminalTab::saveTerminalOutput() {
-    if (m_outputBuffer.isEmpty())
+    if (!m_outputSpool.isOpen() || m_outputSpool.size() == 0) {
         return;
+    }
 
     QString safeName = m_session.name;
     safeName.replace(QRegularExpression("[^A-Za-z0-9_-]"), "_");
-    if (safeName.isEmpty())
+    if (safeName.isEmpty()) {
         safeName = QStringLiteral("terminal");
+    }
 
     const QString path = QFileDialog::getSaveFileName(
         this, tr("Save Terminal Output"),
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + "/" + safeName + ".log",
         tr("Text files (*.txt *.log);;All files (*)"));
-    if (path.isEmpty())
+    if (path.isEmpty()) {
         return;
+    }
 
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
         return;
-    file.write(m_outputBuffer);
+    }
+    if (!m_outputSpool.flush() || !m_outputSpool.seek(0)) {
+        return;
+    }
+    const auto restorePosition = qScopeGuard([this] { m_outputSpool.seek(m_outputSpool.size()); });
+    while (!m_outputSpool.atEnd()) {
+        const QByteArray block = m_outputSpool.read(128 * 1024);
+        if (block.isEmpty() || file.write(block) != block.size()) {
+            return;
+        }
+    }
+    file.commit();
 }
 
 #ifdef BANCHO_HAVE_RDP_AX
@@ -1142,46 +1205,56 @@ void TerminalTab::setupEmbeddedVnc() {
     vncLayout->setContentsMargins(0, 0, 0, 0);
     vncLayout->addWidget(m_vncWidget);
 
-    const QString password = Keyring::lookupPassword(m_session.id);
-
-    connect(m_vncWidget, &VncClientWidget::connected, this, [this]() {
+    connect(m_vncWidget, &VncClientWidget::connected, this, [this] {
         m_isActive = true;
-        if (m_reconnectButton)
+        if (m_reconnectButton) {
             m_reconnectButton->setVisible(false);
-        if (m_statusLabel)
+        }
+        if (m_statusLabel) {
             m_statusLabel->hide();
-        if (m_embeddedContainer)
+        }
+        if (m_embeddedContainer) {
             m_embeddedContainer->show();
+        }
     });
-    connect(m_vncWidget, &VncClientWidget::disconnected, this, [this]() {
+    connect(m_vncWidget, &VncClientWidget::disconnected, this, [this] {
         m_isActive = false;
-        if (m_embeddedContainer)
+        if (m_embeddedContainer) {
             m_embeddedContainer->hide();
+        }
         if (m_statusLabel) {
             m_statusLabel->show();
             m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
         }
-        if (m_reconnectButton)
+        if (m_reconnectButton) {
             m_reconnectButton->setVisible(true);
+        }
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
         maybeScheduleReconnect();
     });
     connect(m_vncWidget, &VncClientWidget::errorOccurred, this, [this](const QString& msg) {
         m_isActive = false;
-        if (m_embeddedContainer)
+        if (m_embeddedContainer) {
             m_embeddedContainer->hide();
+        }
         if (m_statusLabel) {
             m_statusLabel->show();
             m_statusLabel->setText(tr("VNC error: %1").arg(msg));
         }
-        if (m_reconnectButton)
+        if (m_reconnectButton) {
             m_reconnectButton->setVisible(true);
+        }
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
         maybeScheduleReconnect();
     });
 
     m_embeddedContainer->show();
-    m_vncWidget->start(m_session.host, m_session.port, password);
+    const auto password = std::make_shared<QString>();
+    auto* credentials = QThread::create([password, id = m_session.id] { *password = Keyring::lookupPassword(id); });
+    connect(credentials, &QThread::finished, credentials, &QObject::deleteLater);
+    connect(credentials, &QThread::finished, m_vncWidget,
+            [this, password] { m_vncWidget->start(m_session.host, m_session.port, *password); });
+    credentials->start();
 }
 #endif
 
@@ -1223,8 +1296,9 @@ void TerminalTab::setupEmbeddedRdp() {
         return;
     }
 
-    if (savePassword->isChecked() && !passwordEdit->text().isEmpty())
+    if (savePassword->isChecked() && !passwordEdit->text().isEmpty()) {
         Keyring::storePassword(m_session.id, passwordEdit->text());
+    }
 
     m_nativeRdpWidget = new RdpClientWidget(m_embeddedContainer);
     auto* rdpLayout = new QVBoxLayout(m_embeddedContainer);
@@ -1275,20 +1349,24 @@ void TerminalTab::launchExternalClient() {
         args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
 #else
         program = QStandardPaths::findExecutable(QStringLiteral("xfreerdp3"));
-        if (program.isEmpty())
+        if (program.isEmpty()) {
             program = QStandardPaths::findExecutable(QStringLiteral("xfreerdp"));
+        }
         // Keep the usual launch error when neither FreeRDP executable is installed.
-        if (program.isEmpty())
+        if (program.isEmpty()) {
             program = QStringLiteral("xfreerdp3");
+        }
         separateWindow = QGuiApplication::platformName() != QStringLiteral("xcb");
         args << "/v:" + m_session.host + ":" + QString::number(m_session.port);
-        if (!separateWindow)
+        if (!separateWindow) {
             args << "/parent-window:" + QString::number(m_embeddedContainer->winId());
+        }
         args << "/cert:ignore";
         args << "/dynamic-resolution";
         args << "+decorations";
-        if (!m_session.user.isEmpty())
+        if (!m_session.user.isEmpty()) {
             args << "/u:" + m_session.user;
+        }
 #endif
     } else if (m_session.type == SessionType::VNC) {
         program = "vncviewer";
@@ -1296,46 +1374,52 @@ void TerminalTab::launchExternalClient() {
              << QString::number(m_embeddedContainer->winId());
     }
 
-    if (program.isEmpty())
+    if (program.isEmpty()) {
         return;
+    }
 
     m_externalProcess = new QProcess(this);
     m_externalProcess->setProcessChannelMode(QProcess::ForwardedChannels);
 
-    connect(m_externalProcess, &QProcess::started, this, [this, separateWindow]() {
+    connect(m_externalProcess, &QProcess::started, this, [this, separateWindow] {
         m_isActive = true;
-        if (m_reconnectButton)
+        if (m_reconnectButton) {
             m_reconnectButton->setVisible(false);
+        }
         if (m_statusLabel && separateWindow) {
             m_statusLabel->setText(tr("Remote Desktop is running in a separate window."));
             m_statusLabel->show();
         } else if (m_statusLabel) {
             m_statusLabel->hide();
         }
-        if (m_embeddedContainer)
+        if (m_embeddedContainer) {
             m_embeddedContainer->setVisible(!separateWindow);
+        }
     });
 
     connect(m_externalProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int exitCode, QProcess::ExitStatus) {
                 Q_UNUSED(exitCode);
                 m_isActive = false;
-                if (m_embeddedContainer)
+                if (m_embeddedContainer) {
                     m_embeddedContainer->hide();
+                }
                 if (m_statusLabel) {
                     m_statusLabel->show();
                     m_statusLabel->setText(tr("Session closed. Close this tab to continue."));
                 }
-                if (m_reconnectButton)
+                if (m_reconnectButton) {
                     m_reconnectButton->setVisible(true);
+                }
                 emit titleChanged(tr("[Closed] %1").arg(m_session.name));
                 maybeScheduleReconnect();
             });
 
     connect(m_externalProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         Q_UNUSED(error);
-        if (m_embeddedContainer)
+        if (m_embeddedContainer) {
             m_embeddedContainer->hide();
+        }
         if (m_statusLabel) {
             m_statusLabel->show();
             m_statusLabel->setText(
@@ -1344,8 +1428,9 @@ void TerminalTab::launchExternalClient() {
                                                     : tr("VNC: vncviewer")));
         }
         m_isActive = false;
-        if (m_reconnectButton)
+        if (m_reconnectButton) {
             m_reconnectButton->setVisible(true);
+        }
         emit titleChanged(tr("[Closed] %1").arg(m_session.name));
         maybeScheduleReconnect();
     });
@@ -1354,16 +1439,28 @@ void TerminalTab::launchExternalClient() {
 }
 
 void TerminalTab::closeExternalProcess() {
-    if (m_externalProcess) {
-        m_externalProcess->terminate();
-        if (!m_externalProcess->waitForFinished(3000)) {
-            m_externalProcess->kill();
-        }
+    auto* process = std::exchange(m_externalProcess, nullptr);
+    if (process == nullptr) {
+        return;
     }
+    process->disconnect(this);
+    if (process->state() == QProcess::NotRunning) {
+        process->deleteLater();
+        return;
+    }
+    process->setParent(qApp);
+    connect(process, &QProcess::finished, process, &QObject::deleteLater);
+    connect(process, &QProcess::errorOccurred, process, [process](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) {
+            process->deleteLater();
+        }
+    });
+    QTimer::singleShot(3000, process, [process] { process->kill(); });
+    process->terminate();
 }
 
 void TerminalTab::showSearchFrame() {
-    if (m_searchFrame) {
+    if (m_searchFrame != nullptr) {
         m_searchFrame->show();
         m_searchEdit->setFocus();
         m_searchEdit->selectAll();
@@ -1371,7 +1468,7 @@ void TerminalTab::showSearchFrame() {
 }
 
 void TerminalTab::hideSearchFrame() {
-    if (m_searchFrame) {
+    if (m_searchFrame != nullptr) {
         m_searchFrame->hide();
         doFocusTerminal();
     }
@@ -1386,8 +1483,9 @@ void TerminalTab::onSearchPrev() {
 }
 
 void TerminalTab::setCaptureApplicationShortcuts(bool enabled) {
-    if (!m_terminal || (enabled && m_session.readOnly) || enabled == m_captureApplicationShortcuts)
+    if ((m_terminal == nullptr) || (enabled && m_session.readOnly) || enabled == m_captureApplicationShortcuts) {
         return;
+    }
     m_captureApplicationShortcuts = enabled;
     m_shortcutCaptureBar->setVisible(enabled);
     m_terminal->setFocus();
@@ -1395,22 +1493,24 @@ void TerminalTab::setCaptureApplicationShortcuts(bool enabled) {
 }
 
 bool TerminalTab::eventFilter(QObject* watched, QEvent* event) {
-    if (m_terminal && watched == m_terminal && (event->type() == QEvent::Show || event->type() == QEvent::Resize)) {
+    if ((m_terminal != nullptr) && watched == m_terminal &&
+        (event->type() == QEvent::Show || event->type() == QEvent::Resize)) {
         // Restored background tabs may not resize their parent when activated.
         // Wait until the terminal itself has processed its final geometry.
         QTimer::singleShot(0, this, &TerminalTab::syncTerminalSize);
     }
-    if (m_terminal && m_captureApplicationShortcuts &&
+    if ((m_terminal != nullptr) && m_captureApplicationShortcuts &&
         (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)) {
         auto* widget = qobject_cast<QWidget*>(watched);
         QWidget* display = m_terminal->focusProxy();
         QWidget* focused = QApplication::focusWidget();
         const bool terminalHasFocus =
-            focused && (focused == m_terminal || focused == display || (display && display->isAncestorOf(focused)));
+            (focused != nullptr) &&
+            (focused == m_terminal || focused == display || ((display != nullptr) && display->isAncestorOf(focused)));
         // Only the terminal viewport owns these keys. Search fields, dialogs,
         // menus and other tabs keep their normal application shortcuts.
-        if (terminalHasFocus && widget &&
-            (widget == m_terminal || widget == display || (display && display->isAncestorOf(widget)))) {
+        if (terminalHasFocus && (widget != nullptr) &&
+            (widget == m_terminal || widget == display || ((display != nullptr) && display->isAncestorOf(widget)))) {
             if (event->type() == QEvent::ShortcutOverride) {
                 event->accept();
                 return true;
@@ -1420,7 +1520,7 @@ bool TerminalTab::eventFilter(QObject* watched, QEvent* event) {
             return QWidget::eventFilter(watched, event);
         }
     }
-    if (m_terminal && watched == m_terminal->focusProxy()) {
+    if ((m_terminal != nullptr) && watched == m_terminal->focusProxy()) {
         if (event->type() == QEvent::KeyPress && !m_captureApplicationShortcuts) {
             auto* key = static_cast<QKeyEvent*>(event);
             // Plain Ctrl+V belongs to readline/nano (quoted insert). The
@@ -1433,18 +1533,19 @@ bool TerminalTab::eventFilter(QObject* watched, QEvent* event) {
         if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease) {
             auto* mouse = static_cast<QMouseEvent*>(event);
             auto* display = m_terminal->findChild<Konsole::TerminalDisplay*>();
-            if (mouse->button() == Qt::MiddleButton && display &&
-                (display->usesMouse() || (mouse->modifiers() & Qt::ShiftModifier))) {
-                if (event->type() == QEvent::MouseButtonPress)
+            if (mouse->button() == Qt::MiddleButton && (display != nullptr) &&
+                (display->usesMouse() || ((mouse->modifiers() & Qt::ShiftModifier) != 0u))) {
+                if (event->type() == QEvent::MouseButtonPress) {
                     doPaste(false, true);
+                }
                 return true;
             }
         }
     }
-    if (m_terminal && m_session.readOnly && event->type() == QEvent::KeyPress) {
+    if ((m_terminal != nullptr) && m_session.readOnly && event->type() == QEvent::KeyPress) {
         auto* widget = qobject_cast<QWidget*>(watched);
         QWidget* display = m_terminal->focusProxy();
-        if (widget && (widget == display || (display && display->isAncestorOf(widget)))) {
+        if ((widget != nullptr) && (widget == display || ((display != nullptr) && display->isAncestorOf(widget)))) {
             event->accept();
             return true;
         }
@@ -1466,8 +1567,9 @@ void TerminalTab::sendSensitiveInputText(const QString& text) {
         reportMacroMessage(tr("Session is read-only; input was blocked."));
         return;
     }
-    if (text.isEmpty())
+    if (text.isEmpty()) {
         return;
+    }
     const QByteArray bytes = text.toUtf8();
     m_sensitiveLogFilter.addValue(bytes);
     m_sensitiveOutputFilter.addValue(bytes);
@@ -1490,31 +1592,36 @@ void TerminalTab::sendRaw(const QString& text) {
 }
 
 void TerminalTab::sendBytes(const QByteArray& bytes) {
-    if (m_session.readOnly || !m_isActive || bytes.isEmpty())
+    if (m_session.readOnly || !m_isActive || bytes.isEmpty()) {
         return;
+    }
     const QScopedValueRollback<bool> rawInput(m_sendingRawBytes, true);
-    if (auto* session = m_terminal ? m_terminal->findChild<Konsole::Session*>() : nullptr)
+    if (auto* session = (m_terminal != nullptr) ? m_terminal->findChild<Konsole::Session*>() : nullptr) {
         session->emulation()->sendData(bytes.constData(), bytes.size());
+    }
 }
 
 void TerminalTab::sendSpecialCharacter(const QByteArray& bytes) {
-    if (bytes == QByteArrayLiteral("\r"))
+    if (bytes == QByteArrayLiteral("\r")) {
         sendBytes(m_session.enterSequence.toUtf8());
-    else if (bytes == QByteArrayLiteral("\x7f"))
+    } else if (bytes == QByteArrayLiteral("\x7f")) {
         sendBytes(m_session.backspaceSequence.toUtf8());
-    else
+    } else {
         sendBytes(bytes);
+    }
 }
 
 void TerminalTab::sendTelnetEscape() {
-    if (m_session.type == SessionType::Telnet)
+    if (m_session.type == SessionType::Telnet) {
         sendBytes(QByteArrayLiteral("\x1d"));
+    }
 }
 
 void TerminalTab::sendCiscoEscape() {
     QByteArray sequence = QByteArray::fromHex(m_session.ciscoBreakSequence.toLatin1());
-    if (sequence.isEmpty())
+    if (sequence.isEmpty()) {
         sequence = QByteArrayLiteral("\x1e");
+    }
     sendBytes(sequence);
 }
 
@@ -1523,25 +1630,28 @@ void TerminalTab::sendBreak() {
         reportMacroMessage(tr("Session is read-only; Break was blocked."));
         return;
     }
-    if (!m_isActive)
+    if (!m_isActive) {
         return;
-    if (m_session.type == SessionType::SSH && m_connection) {
+    }
+    if (m_session.type == SessionType::SSH && (m_connection != nullptr)) {
         QMetaObject::invokeMethod(m_connection, "sendBreak", Qt::QueuedConnection);
         return;
     }
     if (m_session.type == SessionType::Telnet) {
         sendTelnetEscape();
         QTimer::singleShot(150, this, [this] {
-            if (m_isActive)
+            if (m_isActive) {
                 sendBytes(QByteArrayLiteral("send brk\r"));
+            }
         });
         return;
     }
-    if (m_serialPort && m_serialPort->isOpen() && m_session.type == SessionType::Serial) {
+    if ((m_serialPort != nullptr) && m_serialPort->isOpen() && m_session.type == SessionType::Serial) {
         m_serialPort->setBreakEnabled(true);
-        QTimer::singleShot(250, this, [this]() {
-            if (m_serialPort && m_serialPort->isOpen())
+        QTimer::singleShot(250, this, [this] {
+            if (m_serialPort && m_serialPort->isOpen()) {
                 m_serialPort->setBreakEnabled(false);
+            }
         });
         return;
     }
@@ -1549,17 +1659,20 @@ void TerminalTab::sendBreak() {
 }
 
 void TerminalTab::sendSerialFile() {
-    if (m_session.readOnly || !m_serialPort || !m_serialPort->isOpen())
+    if (m_session.readOnly || (m_serialPort == nullptr) || !m_serialPort->isOpen()) {
         return;
+    }
     const QStringList protocols = {QStringLiteral("XMODEM"), QStringLiteral("YMODEM"), QStringLiteral("ZMODEM")};
     bool accepted = false;
     const QString protocol =
         QInputDialog::getItem(this, tr("Serial file transfer"), tr("Protocol:"), protocols, 0, false, &accepted);
-    if (!accepted)
+    if (!accepted) {
         return;
+    }
     const QString path = QFileDialog::getOpenFileName(this, tr("Select file for %1").arg(protocol));
-    if (path.isEmpty())
+    if (path.isEmpty()) {
         return;
+    }
 
     if (protocol == QStringLiteral("ZMODEM")) {
         const QString sz = QStandardPaths::findExecutable(QStringLiteral("sz"));
@@ -1571,21 +1684,24 @@ void TerminalTab::sendSerialFile() {
         m_zmodemFileName = path;
         m_zmodemProcess = new QProcess(this);
         m_zmodemProcess->setProcessChannelMode(QProcess::SeparateChannels);
-        connect(m_zmodemProcess, &QProcess::readyReadStandardOutput, this, [this]() {
-            if (m_zmodemProcess && m_serialPort && m_serialPort->isOpen())
+        connect(m_zmodemProcess, &QProcess::readyReadStandardOutput, this, [this] {
+            if (m_zmodemProcess && m_serialPort && m_serialPort->isOpen()) {
                 m_serialPort->write(m_zmodemProcess->readAllStandardOutput());
+            }
         });
-        connect(m_zmodemProcess, &QProcess::readyReadStandardError, this, [this]() {
+        connect(m_zmodemProcess, &QProcess::readyReadStandardError, this, [this] {
             if (m_zmodemProcess) {
                 const QByteArray status = m_zmodemProcess->readAllStandardError();
-                if (!status.isEmpty())
+                if (!status.isEmpty()) {
                     feedTerminalData(QByteArrayLiteral("\r\n[ZMODEM: ") + status.trimmed() +
                                      QByteArrayLiteral("]\r\n"));
+                }
             }
         });
         connect(m_zmodemProcess, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
-            if (error == QProcess::FailedToStart)
+            if (error == QProcess::FailedToStart) {
                 finishZmodem(false, tr("Could not start the 'sz' program."));
+            }
         });
         connect(m_zmodemProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
                 [this](int exitCode, QProcess::ExitStatus status) {
@@ -1614,18 +1730,19 @@ void TerminalTab::sendSerialFile() {
     m_ymodemHeaderPending = m_ymodem;
     m_ymodemFinalHeader = false;
     m_ymodemFileName = QFileInfo(path).fileName();
-    if (!m_xmodemTimer) {
+    if (m_xmodemTimer == nullptr) {
         m_xmodemTimer = new QTimer(this);
         m_xmodemTimer->setInterval(1000);
-        connect(m_xmodemTimer, &QTimer::timeout, this, [this]() {
-            if (!m_xmodemFile)
+        connect(m_xmodemTimer, &QTimer::timeout, this, [this] {
+            if (!m_xmodemFile) {
                 return;
+            }
             if (++m_xmodemRetries > 10) {
                 finishXmodem(false, tr("XMODEM receiver timed out."));
                 return;
             }
             if (m_xmodemWaitingEotAck) {
-                m_serialPort->write(QByteArray(1, char(0x04)));
+                m_serialPort->write(QByteArray(1, static_cast<char>(0x04)));
             } else if (!m_xmodemPacket.isEmpty()) {
                 m_serialPort->write(m_xmodemPacket);
             }
@@ -1636,25 +1753,28 @@ void TerminalTab::sendSerialFile() {
 }
 
 void TerminalTab::cancelSerialFile() {
-    if (m_zmodemProcess)
+    if (m_zmodemProcess != nullptr) {
         finishZmodem(false, tr("ZMODEM transfer cancelled locally."));
-    else if (m_xmodemFile)
+    } else if (m_xmodemFile != nullptr) {
         finishXmodem(false, tr("XMODEM transfer cancelled locally."));
+    }
 }
 
 static quint16 xmodemCrc16(const QByteArray& data) {
     quint16 crc = 0;
     for (const unsigned char byte : data) {
         crc ^= static_cast<quint16>(byte) << 8;
-        for (int bit = 0; bit < 8; ++bit)
-            crc = (crc & 0x8000) ? static_cast<quint16>((crc << 1) ^ 0x1021) : static_cast<quint16>(crc << 1);
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = ((crc & 0x8000) != 0) ? static_cast<quint16>((crc << 1) ^ 0x1021) : static_cast<quint16>(crc << 1);
+        }
     }
     return crc;
 }
 
 void TerminalTab::sendXmodemPacket() {
-    if (!m_xmodemFile || !m_serialPort)
+    if ((m_xmodemFile == nullptr) || (m_serialPort == nullptr)) {
         return;
+    }
     QByteArray payload;
     int block = m_xmodemBlock;
     if (m_ymodem && m_ymodemHeaderPending) {
@@ -1669,31 +1789,33 @@ void TerminalTab::sendXmodemPacket() {
     if (payload.isEmpty()) {
         m_xmodemWaitingEotAck = true;
         m_xmodemRetries = 0;
-        m_serialPort->write(QByteArray(1, char(0x04)));
+        m_serialPort->write(QByteArray(1, static_cast<char>(0x04)));
         return;
     }
-    payload.append(QByteArray(128 - payload.size(), char(0x1a)));
-    m_xmodemPacket = QByteArray(1, char(0x01));
-    m_xmodemPacket.append(char(block & 0xff));
-    m_xmodemPacket.append(char(255 - (block & 0xff)));
+    payload.append(QByteArray(128 - payload.size(), static_cast<char>(0x1a)));
+    m_xmodemPacket = QByteArray(1, static_cast<char>(0x01));
+    m_xmodemPacket.append(static_cast<char>(block & 0xff));
+    m_xmodemPacket.append(static_cast<char>(255 - (block & 0xff)));
     m_xmodemPacket.append(payload);
     if (m_xmodemCrcMode) {
         const quint16 crc = xmodemCrc16(payload);
-        m_xmodemPacket.append(char(crc >> 8));
-        m_xmodemPacket.append(char(crc & 0xff));
+        m_xmodemPacket.append(static_cast<char>(crc >> 8));
+        m_xmodemPacket.append(static_cast<char>(crc & 0xff));
     } else {
         unsigned char checksum = 0;
-        for (const unsigned char byte : payload)
+        for (const unsigned char byte : payload) {
             checksum = static_cast<unsigned char>(checksum + byte);
-        m_xmodemPacket.append(char(checksum));
+        }
+        m_xmodemPacket.append(static_cast<char>(checksum));
     }
     m_xmodemRetries = 0;
     m_serialPort->write(m_xmodemPacket);
 }
 
 void TerminalTab::handleXmodemInput(const QByteArray& data) {
-    if (!m_xmodemFile || !m_serialPort)
+    if ((m_xmodemFile == nullptr) || (m_serialPort == nullptr)) {
         return;
+    }
     for (const unsigned char byte : data) {
         if (byte == 0x18) {
             finishXmodem(false, tr("XMODEM cancelled by receiver."));
@@ -1706,19 +1828,20 @@ void TerminalTab::handleXmodemInput(const QByteArray& data) {
                     m_ymodemFinalHeader = true;
                     m_xmodemPacket.clear();
                     QByteArray payload(128, '\0');
-                    m_xmodemPacket = QByteArray(1, char(0x01));
-                    m_xmodemPacket.append(char(0));
-                    m_xmodemPacket.append(char(0xff));
+                    m_xmodemPacket = QByteArray(1, static_cast<char>(0x01));
+                    m_xmodemPacket.append(static_cast<char>(0));
+                    m_xmodemPacket.append(static_cast<char>(0xff));
                     m_xmodemPacket.append(payload);
                     if (m_xmodemCrcMode) {
                         const quint16 crc = xmodemCrc16(payload);
-                        m_xmodemPacket.append(char(crc >> 8));
-                        m_xmodemPacket.append(char(crc & 0xff));
+                        m_xmodemPacket.append(static_cast<char>(crc >> 8));
+                        m_xmodemPacket.append(static_cast<char>(crc & 0xff));
                     } else {
                         unsigned char checksum = 0;
-                        for (const unsigned char value : payload)
+                        for (const unsigned char value : payload) {
                             checksum = static_cast<unsigned char>(checksum + value);
-                        m_xmodemPacket.append(char(checksum));
+                        }
+                        m_xmodemPacket.append(static_cast<char>(checksum));
                     }
                     m_xmodemRetries = 0;
                     m_serialPort->write(m_xmodemPacket);
@@ -1745,26 +1868,30 @@ void TerminalTab::handleXmodemInput(const QByteArray& data) {
                 m_ymodemHeaderPending = false;
                 m_xmodemBlock = 1;
             }
-            if (!headerAcked)
+            if (!headerAcked) {
                 ++m_xmodemBlock;
+            }
             m_xmodemPacket.clear();
             sendXmodemPacket();
         } else if (byte == 0x15) {
-            if (++m_xmodemRetries > 10)
+            if (++m_xmodemRetries > 10) {
                 finishXmodem(false, tr("XMODEM transfer failed after retries."));
-            else
+            } else {
                 m_serialPort->write(m_xmodemPacket);
+            }
         }
     }
 }
 
 void TerminalTab::finishXmodem(bool success, const QString& message) {
     const QString protocol = m_ymodem ? QStringLiteral("YMODEM") : QStringLiteral("XMODEM");
-    if (m_xmodemTimer)
+    if (m_xmodemTimer != nullptr) {
         m_xmodemTimer->stop();
-    if (!success && m_serialPort && m_serialPort->isOpen())
-        m_serialPort->write(QByteArray(1, char(0x18)));
-    if (m_xmodemFile) {
+    }
+    if (!success && (m_serialPort != nullptr) && m_serialPort->isOpen()) {
+        m_serialPort->write(QByteArray(1, static_cast<char>(0x18)));
+    }
+    if (m_xmodemFile != nullptr) {
         m_xmodemFile->close();
         delete m_xmodemFile;
         m_xmodemFile = nullptr;
@@ -1779,8 +1906,9 @@ void TerminalTab::finishXmodem(bool success, const QString& message) {
 }
 
 void TerminalTab::finishZmodem(bool success, const QString& message) {
-    if (!m_zmodemProcess)
+    if (m_zmodemProcess == nullptr) {
         return;
+    }
 
     QProcess* process = m_zmodemProcess;
     m_zmodemProcess = nullptr;
@@ -1803,8 +1931,9 @@ void TerminalTab::recordTypedInput(const QByteArray& data) {
             recordCommand(QString::fromUtf8(m_commandInputBuffer).trimmed());
             m_commandInputBuffer.clear();
         } else if (byte == '\b' || static_cast<unsigned char>(byte) == 0x7f) {
-            if (!m_commandInputBuffer.isEmpty())
+            if (!m_commandInputBuffer.isEmpty()) {
                 m_commandInputBuffer.chop(1);
+            }
         } else if (byte >= 0x20 && byte != 0x7f) {
             m_commandInputBuffer.append(byte);
         }
@@ -1813,20 +1942,25 @@ void TerminalTab::recordTypedInput(const QByteArray& data) {
 
 void TerminalTab::recordCommand(const QString& command) {
     const QString value = command.trimmed();
-    if (value.isEmpty() || m_sendingSensitiveInput)
+    if (value.isEmpty() || m_sendingSensitiveInput) {
         return;
-    if (m_sensitiveOutputFilter.containsValue(value.toUtf8()))
+    }
+    if (m_sensitiveOutputFilter.containsValue(value.toUtf8())) {
         return;
+    }
 
     QSettings settings;
-    const QStringList keys = {QStringLiteral("commandHistory/global"),
-                              QStringLiteral("commandHistory/session/") + m_session.id};
+    const QStringList keys = {
+        QStringLiteral("commandHistory/global"),
+        QStringLiteral("commandHistory/session/") + m_session.id,
+    };
     for (const QString& key : keys) {
         QStringList history = settings.value(key).toStringList();
         history.removeAll(value);
         history.prepend(value);
-        while (history.size() > 100)
+        while (history.size() > 100) {
             history.removeLast();
+        }
         settings.setValue(key, history);
     }
 }
@@ -1850,17 +1984,19 @@ void TerminalTab::showCommandHistory() {
     auto* sendButton = buttons->addButton(tr("Send"), QDialogButtonBox::AcceptRole);
     layout->addWidget(buttons);
 
-    const auto populate = [list, sessionHistory, globalHistory, filter]() {
+    const auto populate = [list, sessionHistory, globalHistory, filter] {
         list->clear();
         const QString query = filter->text().trimmed();
         QStringList combined = sessionHistory;
         for (const QString& command : globalHistory) {
-            if (!combined.contains(command))
+            if (!combined.contains(command)) {
                 combined.append(command);
+            }
         }
         for (const QString& command : combined) {
-            if (query.isEmpty() || command.contains(query, Qt::CaseInsensitive))
+            if (query.isEmpty() || command.contains(query, Qt::CaseInsensitive)) {
                 list->addItem(command);
+            }
         }
     };
     populate();
@@ -1869,13 +2005,15 @@ void TerminalTab::showCommandHistory() {
     connect(sendButton, &QPushButton::clicked, &dialog, &QDialog::accept);
     connect(list, &QListWidget::itemDoubleClicked, &dialog, &QDialog::accept);
 
-    if (dialog.exec() == QDialog::Accepted && list->currentItem())
+    if (dialog.exec() == QDialog::Accepted && (list->currentItem() != nullptr)) {
         sendInputText(list->currentItem()->text());
+    }
 }
 
 bool TerminalTab::searchText(const QString& str, bool next, bool caseSensitive) {
-    if (!m_terminal || str.isEmpty())
+    if ((m_terminal == nullptr) || str.isEmpty()) {
         return false;
+    }
 
     bool found = false;
     const QMetaObject::Connection connection = connect(
@@ -1906,17 +2044,21 @@ QWidget* TerminalTab::terminalView() const {
 }
 
 bool TerminalTab::hasSelection() const {
-    return m_terminal && !m_terminal->selectedText().isEmpty();
+    return (m_terminal != nullptr) && !m_terminal->selectedText().isEmpty();
 }
 
 void TerminalTab::recordTerminalData(const QByteArray& data) {
     if (!data.isEmpty()) {
-        m_outputBuffer.append(m_sensitiveOutputFilter.process(data));
+        const QByteArray filtered = m_sensitiveOutputFilter.process(data);
+        if ((m_outputSpool.isOpen() || m_outputSpool.open()) && !filtered.isEmpty()) {
+            m_outputSpool.write(filtered);
+        }
         emit terminalDataReceived(data);
         if (m_promptPattern.isValid() && !m_promptPattern.pattern().isEmpty()) {
             m_promptBuffer.append(data);
-            if (m_promptBuffer.size() > 8192)
+            if (m_promptBuffer.size() > 8192) {
                 m_promptBuffer.remove(0, m_promptBuffer.size() - 4096);
+            }
             const QString output = QString::fromUtf8(m_promptBuffer);
             const QRegularExpressionMatch match = m_promptPattern.match(output);
             if (match.hasMatch()) {
@@ -1949,8 +2091,9 @@ void TerminalTab::feedTerminalData(const QByteArray& data) {
             const int st = m_directoryBuffer.indexOf("\x1b\\", 4);
             const int end = bell < 0 ? st : (st < 0 ? bell : qMin(bell, st));
             if (end < 0) {
-                if (m_directoryBuffer.size() > 65536)
+                if (m_directoryBuffer.size() > 65536) {
                     m_directoryBuffer.clear();
+                }
                 break;
             }
             const QUrl url = QUrl::fromEncoded(m_directoryBuffer.mid(4, end - 4));
@@ -1964,7 +2107,7 @@ void TerminalTab::feedTerminalData(const QByteArray& data) {
             }
         }
     }
-    if (m_terminal) {
+    if (m_terminal != nullptr) {
         m_terminal->feedData(data);
     }
 }
@@ -1974,23 +2117,27 @@ void TerminalTab::reportMacroMessage(const QString& message) {
 }
 
 void TerminalTab::doSendText(const QString& text) {
-    if (m_terminal)
+    if (m_terminal != nullptr) {
         m_terminal->sendText(text);
+    }
 }
 
 void TerminalTab::doToggleSearchBar() {
-    if (m_terminal)
+    if (m_terminal != nullptr) {
         m_terminal->toggleShowSearchBar();
+    }
 }
 
 void TerminalTab::doFocusTerminal() {
-    if (m_terminal)
+    if (m_terminal != nullptr) {
         m_terminal->setFocus();
+    }
 }
 
 void TerminalTab::doCopy() {
-    if (m_terminal)
+    if (m_terminal != nullptr) {
         m_terminal->copyClipboard();
+    }
 }
 
 void TerminalTab::doPaste(bool forceReview, bool primarySelection) {
@@ -1998,14 +2145,17 @@ void TerminalTab::doPaste(bool forceReview, bool primarySelection) {
         reportMacroMessage(tr("Session is read-only; paste was blocked."));
         return;
     }
-    if (!m_terminal)
+    if (m_terminal == nullptr) {
         return;
+    }
     auto* display = m_terminal->findChild<Konsole::TerminalDisplay*>();
-    if (!display)
+    if (display == nullptr) {
         return;
+    }
     QString text = QApplication::clipboard()->text(primarySelection ? QClipboard::Selection : QClipboard::Clipboard);
-    if (text.isEmpty())
+    if (text.isEmpty()) {
         return;
+    }
     text.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
     text.replace('\r', '\n');
     const bool activeBeforeReview = m_isActive;
@@ -2038,12 +2188,14 @@ void TerminalTab::doPaste(bool forceReview, bool primarySelection) {
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         layout->addWidget(buttons);
         edit->setFocus();
-        if (dialog.exec() != QDialog::Accepted)
+        if (dialog.exec() != QDialog::Accepted) {
             return;
+        }
         text = edit->toPlainText();
     }
-    if (text.isEmpty() || m_closing || (activeBeforeReview && !m_isActive) || m_session.readOnly)
+    if (text.isEmpty() || m_closing || (activeBeforeReview && !m_isActive) || m_session.readOnly) {
         return;
+    }
     text.replace('\n', '\r');
     // Use the emulator's normal paste path, including bracketed-paste mode,
     // key encoding and the existing synchronized-input signal. No extra Enter.
@@ -2055,16 +2207,19 @@ void TerminalTab::doPaste(bool forceReview, bool primarySelection) {
 }
 
 void TerminalTab::doClear() {
-    if (m_terminal)
+    if (m_terminal != nullptr) {
         m_terminal->clear();
+    }
 }
 
 void TerminalTab::doZoomIn() {
-    if (m_terminal)
+    if (m_terminal != nullptr) {
         m_terminal->zoomIn();
+    }
 }
 
 void TerminalTab::doZoomOut() {
-    if (m_terminal)
+    if (m_terminal != nullptr) {
         m_terminal->zoomOut();
+    }
 }

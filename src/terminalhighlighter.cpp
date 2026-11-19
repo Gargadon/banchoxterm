@@ -19,49 +19,63 @@ QRegularExpression TerminalHighlightRule::expression() const {
                                             : QRegularExpression::CaseInsensitiveOption);
 }
 QJsonArray TerminalHighlighting::defaults() {
-    return {QJsonObject{{"pattern", "\\b(error|failed|fatal|denied)\\b"}, {"regex", true}, {"color", "#f87171"}},
-            QJsonObject{{"pattern", "\\b(warning|warn)\\b"}, {"regex", true}, {"color", "#fbbf24"}},
-            QJsonObject{{"pattern", "\\b(success|passed|ok)\\b"}, {"regex", true}, {"color", "#4ade80"}}};
+    return {
+        QJsonObject{{"pattern", "\\b(error|failed|fatal|denied)\\b"}, {"regex", true}, {"color", "#f87171"}},
+        QJsonObject{{"pattern", "\\b(warning|warn)\\b"}, {"regex", true}, {"color", "#fbbf24"}},
+        QJsonObject{{"pattern", "\\b(success|passed|ok)\\b"}, {"regex", true}, {"color", "#4ade80"}},
+    };
 }
 QJsonArray TerminalHighlighting::load() {
     QSettings settings;
-    if (!settings.contains("terminal/highlightRules"))
+    if (!settings.contains("terminal/highlightRules")) {
         return defaults();
+    }
     return QJsonDocument::fromJson(settings.value("terminal/highlightRules").toByteArray()).array();
 }
 QList<TerminalHighlightRule> TerminalHighlighting::rules(const QJsonArray& json) {
     QList<TerminalHighlightRule> result;
     for (const auto& value : json) {
         const auto o = value.toObject();
-        TerminalHighlightRule rule{o["pattern"].toString(), QColor(o["color"].toString()), o["regex"].toBool(),
-                                   o["caseSensitive"].toBool(), o["enabled"].toBool(true)};
-        if (result.size() >= 32)
+        TerminalHighlightRule rule{
+            o["pattern"].toString(),     QColor(o["color"].toString()), o["regex"].toBool(),
+            o["caseSensitive"].toBool(), o["enabled"].toBool(true),
+        };
+        if (result.size() >= 32) {
             break;
+        }
         if (rule.enabled && !rule.pattern.isEmpty() && rule.pattern.size() <= 256 && rule.color.isValid() &&
-            rule.expression().isValid())
+            rule.expression().isValid()) {
             result.append(rule);
+        }
     }
     return result;
 }
 QString TerminalHighlighting::validate(const QJsonArray& json) {
-    if (json.size() > 32)
+    if (json.size() > 32) {
         return QCoreApplication::translate("TerminalHighlighting", "Use at most 32 highlighting rules.");
+    }
     int row = 0;
     for (const auto& value : json) {
         ++row;
         const auto o = value.toObject();
         const QString pattern = o["pattern"].toString();
-        const auto rule = TerminalHighlightRule{pattern, QColor(o["color"].toString()), o["regex"].toBool(),
-                                                o["caseSensitive"].toBool()};
+        const auto rule = TerminalHighlightRule{
+            pattern,
+            QColor(o["color"].toString()),
+            o["regex"].toBool(),
+            o["caseSensitive"].toBool(),
+        };
         QString reason;
-        if (pattern.isEmpty() || pattern.size() > 256)
+        if (pattern.isEmpty() || pattern.size() > 256) {
             reason = QCoreApplication::translate("TerminalHighlighting", "Enter a pattern of 1–256 characters.");
-        else if (!rule.color.isValid())
+        } else if (!rule.color.isValid()) {
             reason = QCoreApplication::translate("TerminalHighlighting", "Choose a valid color.");
-        else if (!rule.expression().isValid())
+        } else if (!rule.expression().isValid()) {
             reason = rule.expression().errorString();
-        if (!reason.isEmpty())
+        }
+        if (!reason.isEmpty()) {
             return QCoreApplication::translate("TerminalHighlighting", "Rule %1: %2").arg(row).arg(reason);
+        }
     }
     return {};
 }
@@ -87,8 +101,9 @@ void TerminalHighlighter::reload() {
                   ? TerminalHighlighting::rules(TerminalHighlighting::load())
                   : QList<TerminalHighlightRule>{};
     m_expressions.clear();
-    for (const auto& rule : m_rules)
+    for (const auto& rule : m_rules) {
         m_expressions.append(rule.expression());
+    }
     m_dirty = true;
     setGeometry(m_display->rect());
     setVisible(!m_rules.isEmpty());
@@ -107,8 +122,9 @@ void TerminalHighlighter::rebuild() {
     m_markers.clear();
     m_dirty = false;
     auto* window = m_display->screenWindow();
-    if (!window)
+    if (window == nullptr) {
         return;
+    }
     const auto* image = window->getImage();
     const int columns = window->windowColumns();
     const int rows = window->windowLines();
@@ -120,18 +136,21 @@ void TerminalHighlighter::rebuild() {
             const auto& rule = m_rules[ruleIndex];
             auto matches = m_expressions[ruleIndex].globalMatch(text);
             int count = 0;
-            while (matches.hasNext() && ++count <= 1024) {
+            while (count < 1024 && matches.hasNext()) {
+                ++count;
                 const auto match = matches.next();
-                const int end = int(match.capturedEnd());
-                int i = int(match.capturedStart());
+                const int end = static_cast<int>(match.capturedEnd());
+                int i = static_cast<int>(match.capturedStart());
                 while (i < end && i < positions.size()) {
                     const QPoint start = positions[i];
                     QPoint last = start;
-                    while (++i < end && i < positions.size() && positions[i].y() == start.y())
+                    while (++i < end && i < positions.size() && positions[i].y() == start.y()) {
                         last = positions[i];
+                    }
                     int width = 1;
-                    if (last.x() + 1 < columns && image[last.y() * columns + last.x() + 1].character == 0)
+                    if (last.x() + 1 < columns && image[(last.y() * columns) + last.x() + 1].character == 0) {
                         width = 2;
+                    }
                     m_markers.append({QRect(start, QSize(last.x() - start.x() + width, 1)), rule.color});
                 }
             }
@@ -142,41 +161,48 @@ void TerminalHighlighter::rebuild() {
     for (int y = 0; y < rows; ++y) {
         // Double-size DEC lines have a different cell geometry; leave their
         // native rendering intact instead of painting misplaced markers.
-        if (properties.value(y) & (Konsole::LINE_DOUBLEWIDTH | Konsole::LINE_DOUBLEHEIGHT)) {
+        if ((properties.value(y) & (Konsole::LINE_DOUBLEWIDTH | Konsole::LINE_DOUBLEHEIGHT)) != 0) {
             flush();
             continue;
         }
         for (int x = 0; x < columns; ++x) {
-            const auto& cell = image[y * columns + x];
-            if (!cell.character)
+            const auto& cell = image[(y * columns) + x];
+            if (cell.character == 0) {
                 continue; // trailing half of a wide character
+            }
             QString part;
-            if (cell.rendition & RE_EXTENDED_CHAR) {
+            if ((cell.rendition & RE_EXTENDED_CHAR) != 0) {
                 ushort length = 0;
                 const auto* chars = Konsole::ExtendedCharTable::instance.lookupExtendedChar(cell.character, length);
-                if (chars)
+                if (chars != nullptr) {
                     part = QString::fromUcs4(reinterpret_cast<const char32_t*>(chars), length);
+                }
             } else {
                 const char32_t c = cell.character;
                 part = QString::fromUcs4(&c, 1);
             }
-            if (text.size() + part.size() > 8192)
+            if (text.size() + part.size() > 8192) {
                 flush();
+            }
             text += part;
-            for (int i = 0; i < part.size(); ++i)
+            for (int i = 0; i < part.size(); ++i) {
                 positions.append(QPoint(x, y));
+            }
         }
-        if (!(properties.value(y) & Konsole::LINE_WRAPPED))
+        if ((properties.value(y) & Konsole::LINE_WRAPPED) == 0) {
             flush();
+        }
     }
     flush();
 }
 void TerminalHighlighter::paintEvent(QPaintEvent*) {
-    if (m_dirty)
+    if (m_dirty) {
         rebuild();
+    }
     auto* screen = m_display->screenWindow();
-    if (!screen)
+    if (screen == nullptr) {
         return;
+    }
     const int width = m_display->fontWidth();
     const int height = m_display->fontHeight();
     QInputMethodQueryEvent query(Qt::ImCursorRectangle);
@@ -189,9 +215,10 @@ void TerminalHighlighter::paintEvent(QPaintEvent*) {
         QColor color = marker.color;
         color.setAlpha(64);
         for (int x = marker.cells.left(); x <= marker.cells.right(); ++x) {
-            if (!screen->isSelected(x, marker.cells.y()) && QPoint(x, marker.cells.y()) != cursor)
+            if (!screen->isSelected(x, marker.cells.y()) && QPoint(x, marker.cells.y()) != cursor) {
                 painter.fillRect(QRect(origin + QPoint(x * width, marker.cells.y() * height), QSize(width, height)),
                                  color);
+            }
         }
     }
 }

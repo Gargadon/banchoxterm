@@ -90,8 +90,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         m_highlightTable->setItem(row, 4, color);
         m_highlightTable->setCurrentCell(row, 1);
     };
-    for (const auto& rule : TerminalHighlighting::load())
+    for (const auto& rule : TerminalHighlighting::load()) {
         addRule(rule.toObject());
+    }
     highlightLayout->addWidget(m_highlightTable, 1);
     auto* ruleButtons = new QHBoxLayout;
     auto* addHighlight = new QPushButton(tr("Add rule"), highlightTab);
@@ -105,32 +106,39 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     ruleButtons->addWidget(resetHighlight);
     highlightLayout->addLayout(ruleButtons);
     connect(addHighlight, &QPushButton::clicked, this, [this, addRule] {
-        if (m_highlightTable->rowCount() < 32)
+        if (m_highlightTable->rowCount() < 32) {
             addRule(QJsonObject{{"pattern", tr("keyword")}, {"color", "#fbbf24"}});
+        }
     });
     connect(removeHighlight, &QPushButton::clicked, this, [this] {
-        if (m_highlightTable->currentRow() >= 0)
+        if (m_highlightTable->currentRow() >= 0) {
             m_highlightTable->removeRow(m_highlightTable->currentRow());
+        }
     });
     connect(resetHighlight, &QPushButton::clicked, this, [this, addRule] {
         m_highlightTable->setRowCount(0);
-        for (const auto& rule : TerminalHighlighting::defaults())
+        for (const auto& rule : TerminalHighlighting::defaults()) {
             addRule(rule.toObject());
+        }
     });
     connect(m_highlightTable, &QTableWidget::cellDoubleClicked, this, [this](int row, int column) {
-        if (column != 4)
+        if (column != 4) {
             return;
+        }
         auto* item = m_highlightTable->item(row, column);
         const QColor color = QColorDialog::getColor(QColor(item->text()), this, tr("Highlight color"));
-        if (color.isValid())
+        if (color.isValid()) {
             item->setText(color.name());
+        }
     });
     connect(m_highlightTable, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
-        if (item->column() != 4)
+        if (item->column() != 4) {
             return;
+        }
         const QColor color(item->text());
-        if (!color.isValid())
+        if (!color.isValid()) {
             return;
+        }
         const QSignalBlocker blocker(m_highlightTable);
         item->setBackground(color);
         item->setForeground(color.lightness() > 128 ? Qt::black : Qt::white);
@@ -155,7 +163,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto sizeComboPopup = [](QComboBox* combo, int visibleRows) {
         combo->setMaxVisibleItems(visibleRows);
         const int rowHeight = qMax(28, combo->fontMetrics().height() + 10);
-        combo->view()->setMinimumHeight(visibleRows * rowHeight + 2);
+        combo->view()->setMinimumHeight((visibleRows * rowHeight) + 2);
     };
 
     auto* themeLayout = new QHBoxLayout();
@@ -179,12 +187,13 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_langCombo->addItem(tr("Spanish"), "es");
     m_langCombo->addItem(tr("Portuguese"), "pt");
     sizeComboPopup(m_langCombo, 3);
-    if (m_lang == "es")
+    if (m_lang == "es") {
         m_langCombo->setCurrentIndex(1);
-    else if (m_lang == "pt")
+    } else if (m_lang == "pt") {
         m_langCombo->setCurrentIndex(2);
-    else
+    } else {
         m_langCombo->setCurrentIndex(0);
+    }
     langLayout->addWidget(langLabel);
     langLayout->addWidget(m_langCombo);
     appLayout->addLayout(langLayout);
@@ -195,27 +204,30 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_colorSchemeCombo = new QComboBox(appearanceTab);
     QStringList schemes = QTermWidget::availableColorSchemes();
     if (schemes.isEmpty()) {
-        schemes = {"BlackOnLightYellow",
-                   "BlackOnRandomLight",
-                   "BlackOnWhite",
-                   "Breeze",
-                   "BreezeModified",
-                   "DarkPastels",
-                   "Falcon",
-                   "GreenOnBlack",
-                   "Linux",
-                   "Nord",
-                   "Solarized",
-                   "SolarizedLight",
-                   "Tango",
-                   "Ubuntu",
-                   "WhiteOnBlack"};
+        schemes = {
+            "BlackOnLightYellow",
+            "BlackOnRandomLight",
+            "BlackOnWhite",
+            "Breeze",
+            "BreezeModified",
+            "DarkPastels",
+            "Falcon",
+            "GreenOnBlack",
+            "Linux",
+            "Nord",
+            "Solarized",
+            "SolarizedLight",
+            "Tango",
+            "Ubuntu",
+            "WhiteOnBlack",
+        };
     }
     m_colorSchemeCombo->addItems(schemes);
     m_colorSchemeCombo->setMaxVisibleItems(14);
     int schemeIdx = schemes.indexOf(m_colorScheme);
-    if (schemeIdx != -1)
+    if (schemeIdx != -1) {
         m_colorSchemeCombo->setCurrentIndex(schemeIdx);
+    }
     colorSchemeLayout->addWidget(colorSchemeLabel);
     colorSchemeLayout->addWidget(m_colorSchemeCombo);
     appLayout->addLayout(colorSchemeLayout);
@@ -234,7 +246,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     m_backgroundBlurCheck->setChecked(QSettings().value("terminal/backgroundBlur", false).toBool());
     m_backgroundBlurCheck->setToolTip(
         tr("Blur requires Windows 11 or a supported Linux compositor, and a background opacity below 100%."));
-    auto updateBlur = [this]() {
+    auto updateBlur = [this] {
         m_backgroundBlurCheck->setEnabled(TerminalAppearance::blurSupported() &&
                                           m_backgroundOpacitySpin->value() < 100);
     };
@@ -323,11 +335,12 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     logDirLayout->addWidget(logDirBrowseBtn);
     appLayout->addWidget(logDirWidget);
 
-    connect(logDirBrowseBtn, &QPushButton::clicked, this, [this]() {
+    connect(logDirBrowseBtn, &QPushButton::clicked, this, [this] {
         QString dir = QFileDialog::getExistingDirectory(
             this, tr("Select Log Directory"), m_logDirEdit->text().isEmpty() ? QDir::homePath() : m_logDirEdit->text());
-        if (!dir.isEmpty())
+        if (!dir.isEmpty()) {
             m_logDirEdit->setText(dir);
+        }
     });
     connect(m_loggingCheck, &QCheckBox::toggled, this, [this, logDirBrowseBtn](bool checked) {
         m_logDirEdit->setEnabled(checked);
@@ -465,8 +478,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
         // Qt 6.4 has no maximumSequenceLength property. Keep one combination
         // using the signal available in all supported Qt versions.
         connect(editor, &QKeySequenceEdit::keySequenceChanged, editor, [editor](const QKeySequence& sequence) {
-            if (sequence.count() > 1)
+            if (sequence.count() > 1) {
                 editor->setKeySequence(QKeySequence(sequence[0]));
+            }
         });
         editor->setClearButtonEnabled(true);
         editor->setAccessibleName(definition.label);
@@ -477,9 +491,10 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto* resetShortcuts = new QPushButton(tr("Restore default shortcuts"), shortcutsTab);
     resetShortcuts->setObjectName("restoreDefaultShortcutsButton");
     shortcutsLayout->addWidget(resetShortcuts, 0, Qt::AlignLeft);
-    connect(resetShortcuts, &QPushButton::clicked, this, [this]() {
-        for (const auto& definition : KeyboardShortcuts::definitions())
+    connect(resetShortcuts, &QPushButton::clicked, this, [this] {
+        for (const auto& definition : KeyboardShortcuts::definitions()) {
             m_shortcutEditors.value(definition.id)->setKeySequence(definition.defaultSequence);
+        }
     });
     shortcutsLayout->addStretch();
     tabWidget->addTab(shortcutsScroll, tr("Shortcuts"));
@@ -560,8 +575,9 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 void SettingsDialog::loadSettings() {
     QSettings settings;
     m_themeMode = settings.value("theme/mode", "system").toString();
-    if (m_themeMode != "system" && m_themeMode != "light" && m_themeMode != "dark")
+    if (m_themeMode != "system" && m_themeMode != "light" && m_themeMode != "dark") {
         m_themeMode = "system";
+    }
     // Font
     m_font = TerminalAppearance::globalFont();
 
@@ -608,10 +624,12 @@ void SettingsDialog::saveSettings() {
     settings.setValue("terminal/highlightingEnabled", m_highlightingCheck->isChecked());
     settings.setValue("terminal/highlightRules", QJsonDocument(highlightRules()).toJson(QJsonDocument::Compact));
     settings.setValue("terminal/reviewMultilinePaste", m_reviewPasteCheck->isChecked());
-    if (m_rdpClipboardCheck)
+    if (m_rdpClipboardCheck != nullptr) {
         settings.setValue("rdp/clipboardEnabled", m_rdpClipboardCheck->isChecked());
-    if (m_rdpResizeCheck)
+    }
+    if (m_rdpResizeCheck != nullptr) {
         settings.setValue("rdp/dynamicResolution", m_rdpResizeCheck->isChecked());
+    }
     settings.setValue("terminal/shellIntegration", m_enableShellIntegration);
     settings.setValue("terminal/loggingEnabled", m_loggingEnabled);
     settings.setValue("terminal/logDirectory", m_logDir);
@@ -656,8 +674,9 @@ bool SettingsDialog::validateShortcuts() {
     for (const auto& definition : KeyboardShortcuts::definitions()) {
         auto* editor = m_shortcutEditors.value(definition.id);
         const QString sequence = editor->keySequence().toString(QKeySequence::PortableText);
-        if (sequence.isEmpty())
+        if (sequence.isEmpty()) {
             continue;
+        }
         if (assigned.contains(sequence)) {
             QMessageBox::warning(this, tr("Shortcut conflict"),
                                  tr("The shortcut %1 is assigned to both '%2' and '%3'. Choose different shortcuts.")
@@ -674,11 +693,13 @@ bool SettingsDialog::validateShortcuts() {
 QJsonArray SettingsDialog::highlightRules() const {
     QJsonArray rules;
     for (int row = 0; row < m_highlightTable->rowCount(); ++row) {
-        rules.append(QJsonObject{{"enabled", m_highlightTable->item(row, 0)->checkState() == Qt::Checked},
-                                 {"pattern", m_highlightTable->item(row, 1)->text()},
-                                 {"regex", m_highlightTable->item(row, 2)->checkState() == Qt::Checked},
-                                 {"caseSensitive", m_highlightTable->item(row, 3)->checkState() == Qt::Checked},
-                                 {"color", m_highlightTable->item(row, 4)->text()}});
+        rules.append(QJsonObject{
+            {"enabled", m_highlightTable->item(row, 0)->checkState() == Qt::Checked},
+            {"pattern", m_highlightTable->item(row, 1)->text()},
+            {"regex", m_highlightTable->item(row, 2)->checkState() == Qt::Checked},
+            {"caseSensitive", m_highlightTable->item(row, 3)->checkState() == Qt::Checked},
+            {"color", m_highlightTable->item(row, 4)->text()},
+        });
     }
     return rules;
 }
@@ -689,12 +710,14 @@ void SettingsDialog::onAccept() {
         QMessageBox::warning(this, tr("Invalid highlighting rule"), error);
         return;
     }
-    if (!validateShortcuts())
+    if (!validateShortcuts()) {
         return;
+    }
     saveSettings();
     QMap<QString, QKeySequence> shortcuts;
-    for (auto it = m_shortcutEditors.cbegin(); it != m_shortcutEditors.cend(); ++it)
+    for (auto it = m_shortcutEditors.cbegin(); it != m_shortcutEditors.cend(); ++it) {
         shortcuts.insert(it.key(), it.value()->keySequence());
+    }
     KeyboardShortcuts::save(shortcuts);
     accept();
 }
@@ -719,8 +742,9 @@ void SettingsDialog::onManageKnownHosts() {
     QList<int> lineIndexes;
     for (int i = 0; i < lines.size(); ++i) {
         const QString t = lines[i].trimmed();
-        if (t.isEmpty() || t.startsWith('#'))
+        if (t.isEmpty() || t.startsWith('#')) {
             continue;
+        }
         const QStringList parts = t.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
         QString label = parts.size() >= 2 ? QString("%1  (%2)").arg(parts[0], parts[1]) : t;
         list->addItem(label);
@@ -737,10 +761,11 @@ void SettingsDialog::onManageKnownHosts() {
 
     bool changed = false;
     connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
-    connect(delBtn, &QPushButton::clicked, &dlg, [&]() {
+    connect(delBtn, &QPushButton::clicked, &dlg, [&] {
         const int row = list->currentRow();
-        if (row < 0 || row >= lineIndexes.size())
+        if (row < 0 || row >= lineIndexes.size()) {
             return;
+        }
         lines[lineIndexes[row]].clear();
         list->takeItem(row);
         lineIndexes.removeAt(row);
@@ -753,11 +778,14 @@ void SettingsDialog::onManageKnownHosts() {
         QFile out(path);
         if (out.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
             QStringList remaining;
-            for (const QString& l : lines)
-                if (!l.trimmed().isEmpty())
+            for (const QString& l : lines) {
+                if (!l.trimmed().isEmpty()) {
                     remaining.append(l);
-            if (!remaining.isEmpty())
+                }
+            }
+            if (!remaining.isEmpty()) {
                 out.write(remaining.join('\n').toUtf8() + '\n');
+            }
             out.close();
         }
     }

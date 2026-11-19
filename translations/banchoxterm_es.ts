@@ -4,6 +4,18 @@
 <context>
     <name>FtpClient</name>
     <message>
+        <source>Invalid remote path for deletion.</source>
+        <translation>Ruta remota no válida para borrar.</translation>
+    </message>
+    <message>
+        <source>Could not delete %1: %2</source>
+        <translation>No se pudo borrar %1: %2</translation>
+    </message>
+    <message>
+        <source>Could not read every entry in the remote folder.</source>
+        <translation>No se pudieron leer todas las entradas de la carpeta remota.</translation>
+    </message>
+    <message>
         <location filename="../src/ftpclient.cpp" line="49"/>
         <source>FTPS certificate validation failed: %1</source>
         <translation>Falló la validación del certificado FTPS: %1</translation>
@@ -3174,6 +3186,30 @@ App:OtraApp</translation>
 </context>
 <context>
     <name>SftpSidebar</name>
+    <message>
+        <source>Selected folders and all their contents will be deleted.</source>
+        <translation>Se borrarán las carpetas seleccionadas y todo su contenido.</translation>
+    </message>
+    <message>
+        <source>Counting files...</source>
+        <translation>Contando archivos…</translation>
+    </message>
+    <message>
+        <source>%L1 of 1 file transferred</source>
+        <translation>%L1 de 1 archivo transferido</translation>
+    </message>
+    <message>
+        <source>%L1 of %L2 files transferred</source>
+        <translation>%L1 de %L2 archivos transferidos</translation>
+    </message>
+    <message>
+        <source>Reading folder %1...</source>
+        <translation>Leyendo carpeta %1…</translation>
+    </message>
+    <message>
+        <source>Transferring files...</source>
+        <translation>Transfiriendo archivos…</translation>
+    </message>
     <message><source>Connecting to %1 via bastion %2...</source><translation>Conectando a %1 vía bastión %2...</translation></message>
     <message><source>Connected via bastion %1</source><translation>Conectado vía bastión %1</translation></message>
     <message>
@@ -3845,6 +3881,14 @@ App:OtraApp</translation>
 </context>
 <context>
     <name>SshConnection</name>
+    <message>
+        <source>Invalid remote path for deletion.</source>
+        <translation>Ruta remota no válida para borrar.</translation>
+    </message>
+    <message>
+        <source>Could not delete %1 (SFTP error %2).</source>
+        <translation>No se pudo borrar %1 (error SFTP %2).</translation>
+    </message>
     <message><source>The saved bastion session is unavailable or is not a direct SSH session.</source><translation>La sesión guardada del bastión no está disponible o no es una sesión SSH directa.</translation></message>
     <message>
         <location filename="../src/sshconnection.cpp" line="283"/>

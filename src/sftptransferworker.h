@@ -1,5 +1,6 @@
 #pragma once
 #include "transferconflict.h"
+#include "uploadfolderentries.h"
 
 #include <QObject>
 #include <atomic>
@@ -16,22 +17,27 @@ struct SftpTransferRequest {
     QString localPath;
     bool isUpload = false;
     bool isDirUpload = false;
+    std::shared_ptr<const UploadFolderPlan> uploadPlan;
 };
 
 class SftpTransferWorker : public QObject {
     Q_OBJECT
 public:
-    SftpTransferWorker(const Session& session, const SftpTransferRequest& request, QObject* parent = nullptr);
+    SftpTransferWorker(const Session& session, const SftpTransferRequest& request, QObject* parent = nullptr,
+                       bool reusable = false);
     ~SftpTransferWorker() override;
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 public slots:
     void start();
+    void submit(const SftpTransferRequest& request);
     void cancel();
     void pause();
     void resume();
 
 signals:
     void finished(const QString& id, bool success, const QString& message);
+    void fileTransferred(const QString& id, const QString& localPath);
     void progress(const QString& id, const QString& fileName, qint64 bytesDone, qint64 totalBytes);
 
 private slots:
@@ -40,6 +46,7 @@ private slots:
     void onOperationFinished(bool success, const QString& message);
     void onTransferProgress(const QString& fileName, qint64 bytesDone, qint64 totalBytes);
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private:
     void finish(bool success, const QString& message);
 
@@ -47,6 +54,7 @@ private:
     SftpTransferRequest m_request;
     SshConnection* m_connection = nullptr;
     std::atomic_bool m_cancelRequested{false};
+    bool m_reusable = false;
     bool m_started = false;
     bool m_finished = false;
 };

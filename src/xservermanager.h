@@ -17,6 +17,7 @@ public:
     bool isRunning() const;
     QString executablePath() const;
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 public slots:
     void stop();
 

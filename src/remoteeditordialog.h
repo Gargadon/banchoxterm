@@ -17,6 +17,7 @@ public:
 private slots:
     void onSave();
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private:
     void setupUi(const QString& fileName);
     void loadFile();

@@ -8,24 +8,27 @@
 namespace AppPaths {
 
 namespace {
-bool g_portable = false;
-bool g_portableInit = false;
+bool portableMode = false;
+bool portableInitialized = false;
 
 bool detectPortable() {
-    if (g_portableInit)
-        return g_portable;
-    g_portableInit = true;
+    if (portableInitialized) {
+        return portableMode;
+    }
+    portableInitialized = true;
 
     const QString dir = applicationDir();
-    if (QFileInfo::exists(dir + "/portable.ini"))
-        g_portable = true;
-
-    if (!g_portable) {
-        const QStringList args = QCoreApplication::arguments();
-        if (args.contains("--portable"))
-            g_portable = true;
+    if (QFileInfo::exists(dir + "/portable.ini")) {
+        portableMode = true;
     }
-    return g_portable;
+
+    if (!portableMode) {
+        const QStringList args = QCoreApplication::arguments();
+        if (args.contains("--portable")) {
+            portableMode = true;
+        }
+    }
+    return portableMode;
 }
 } // namespace
 
@@ -39,10 +42,12 @@ bool isPortable() {
 
 QString configDir() {
     const QString override = qEnvironmentVariable("BANCHO_CONFIG_DIR").trimmed();
-    if (!override.isEmpty())
+    if (!override.isEmpty()) {
         return override;
-    if (detectPortable())
+    }
+    if (detectPortable()) {
         return applicationDir();
+    }
     return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
 }
 
@@ -55,8 +60,9 @@ void applyPortableSettings() {
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, override);
         return;
     }
-    if (!detectPortable())
+    if (!detectPortable()) {
         return;
+    }
 
     // Store settings as an INI file inside the portable directory instead of
     // the registry / %APPDATA%.

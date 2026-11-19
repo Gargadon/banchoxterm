@@ -71,7 +71,7 @@ public:
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         buttons->button(QDialogButtonBox::Ok)->setIcon(QIcon(QStringLiteral(":/icons/check.svg")));
         buttons->button(QDialogButtonBox::Cancel)->setIcon(QIcon(QStringLiteral(":/icons/close.svg")));
-        connect(buttons, &QDialogButtonBox::accepted, this, [this]() {
+        connect(buttons, &QDialogButtonBox::accepted, this, [this] {
             const bool dynamic = m_typeCombo->currentData().toInt() == static_cast<int>(TunnelConfig::Type::Dynamic);
             const QString host = m_remoteHostEdit->text().trimmed();
             if (!dynamic && host.isEmpty()) {
@@ -199,7 +199,7 @@ void SessionDialog::setupUi() {
     groupTagChoices->setObjectName("groupTagChoices");
     groupTagChoices->setToolTip(tr("Choose a tag defined in this group"));
     identityLayout->addWidget(groupTagChoices);
-    auto updateGroupTags = [this, groupTagChoices]() {
+    auto updateGroupTags = [this, groupTagChoices] {
         groupTagChoices->clear();
         groupTagChoices->addItem(tr("Add a group tag…"), QString());
         const auto metadata = QSettings().value("sessions/groupMetadata").toMap();
@@ -213,8 +213,9 @@ void SessionDialog::setupUi() {
             group = slash < 0 ? QString() : group.left(slash);
         }
         choices.removeDuplicates();
-        for (const QString& choice : choices)
+        for (const QString& choice : choices) {
             groupTagChoices->addItem(choice, choice);
+        }
         groupTagChoices->setEnabled(!choices.isEmpty());
     };
     connect(m_groupEdit, &QLineEdit::textChanged, this, updateGroupTags);
@@ -225,9 +226,11 @@ void SessionDialog::setupUi() {
             const auto added = parseSessionTags(tag);
             for (auto it = added.begin(); it != added.end(); ++it) {
                 auto values = tags.value(it.key()).toArray();
-                for (const auto& value : it.value().toArray())
-                    if (!values.contains(value))
+                for (const auto& value : it.value().toArray()) {
+                    if (!values.contains(value)) {
                         values.append(value);
+                    }
+                }
                 tags.insert(it.key(), values);
             }
             m_tagsEdit->setPlainText(formatSessionTags(tags));
@@ -295,7 +298,7 @@ void SessionDialog::setupUi() {
     keyLayout->addWidget(keyBrowseBtn);
     sshForm->addRow(tr("Private Key:"), keyLayout);
 
-    connect(keyBrowseBtn, &QPushButton::clicked, this, [this]() {
+    connect(keyBrowseBtn, &QPushButton::clicked, this, [this] {
         QString path =
             QFileDialog::getOpenFileName(this, tr("Select Private Key"), QDir::homePath(), tr("All Files (*)"));
         if (!path.isEmpty()) {
@@ -312,13 +315,14 @@ void SessionDialog::setupUi() {
     m_jumpSessionCombo->addItem(tr("Manual bastion configuration"), QString());
     for (const Session& saved : SessionManager::loadSessions()) {
         if (saved.id != m_id && saved.type == SessionType::SSH && saved.jumpHost.trimmed().isEmpty() &&
-            saved.jumpSessionId.isEmpty())
+            saved.jumpSessionId.isEmpty()) {
             m_jumpSessionCombo->addItem(
                 QStringLiteral("%1 (%2@%3:%4)").arg(saved.name, saved.user, saved.host).arg(saved.port), saved.id);
+        }
     }
     const int jumpRows = qMin(8, m_jumpSessionCombo->count());
     const int jumpRowHeight = qMax(28, m_jumpSessionCombo->fontMetrics().height() + 10);
-    m_jumpSessionCombo->view()->setMinimumHeight(jumpRows * jumpRowHeight + 2);
+    m_jumpSessionCombo->view()->setMinimumHeight((jumpRows * jumpRowHeight) + 2);
     sshForm->addRow(tr("Use saved SSH session:"), m_jumpSessionCombo);
 
     m_jumpHostEdit = new QLineEdit(connTab);
@@ -356,8 +360,9 @@ void SessionDialog::setupUi() {
                 const bool manual = id.isEmpty();
                 if (!manual) {
                     for (const Session& saved : SessionManager::loadSessions()) {
-                        if (saved.id != id)
+                        if (saved.id != id) {
                             continue;
+                        }
                         m_jumpHostEdit->setText(saved.host);
                         m_jumpPortSpin->setValue(saved.port);
                         m_jumpUserEdit->setText(saved.user);
@@ -374,11 +379,12 @@ void SessionDialog::setupUi() {
                 m_jumpPasswordEdit->setEnabled(manual && m_saveJumpPasswordCheck->isChecked());
             });
 
-    connect(jumpKeyBrowseBtn, &QPushButton::clicked, this, [this]() {
+    connect(jumpKeyBrowseBtn, &QPushButton::clicked, this, [this] {
         const QString path =
             QFileDialog::getOpenFileName(this, tr("Select Jump Private Key"), QDir::homePath(), tr("All Files (*)"));
-        if (!path.isEmpty())
+        if (!path.isEmpty()) {
             m_jumpKeyEdit->setText(path);
+        }
     });
 
     sshTabs->addTab(connTab, tr("SSH Connection"));
@@ -405,7 +411,7 @@ void SessionDialog::setupUi() {
     tbtnLayout->addWidget(m_deleteTunnelBtn);
     tunnelsLayout->addLayout(tbtnLayout);
 
-    connect(m_addTunnelBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_addTunnelBtn, &QPushButton::clicked, this, [this] {
         TunnelEditDialog dialog(this);
         if (dialog.exec() == QDialog::Accepted) {
             TunnelConfig config = dialog.getTunnelConfig();
@@ -427,7 +433,7 @@ void SessionDialog::setupUi() {
         }
     });
 
-    connect(m_deleteTunnelBtn, &QPushButton::clicked, this, [this]() {
+    connect(m_deleteTunnelBtn, &QPushButton::clicked, this, [this] {
         int row = m_tunnelsTable->currentRow();
         if (row >= 0 && row < m_tunnels.size()) {
             m_tunnels.removeAt(row);
@@ -568,12 +574,14 @@ void SessionDialog::setupUi() {
     for (const QSerialPortInfo& info : QSerialPortInfo::availablePorts()) {
         const QString name = info.portName();
         QString label = name;
-        if (!info.description().isEmpty())
+        if (!info.description().isEmpty()) {
             label += QStringLiteral(" — ") + info.description();
+        }
         m_serialPortCombo->addItem(label, name);
     }
-    if (m_serialPortCombo->count() == 0)
+    if (m_serialPortCombo->count() == 0) {
         m_serialPortCombo->setCurrentText(QStringLiteral("COM3"));
+    }
     serialForm->addRow(tr("Serial Port:"), m_serialPortCombo);
 
     m_serialBaudCombo = new QComboBox(serialWidget);
@@ -662,24 +670,28 @@ void SessionDialog::setupUi() {
     auto* caFileButton = new QPushButton(tr("Browse..."), caFileWidget);
     caFileLayout->addWidget(m_ftpTlsCaFileEdit);
     caFileLayout->addWidget(caFileButton);
-    connect(caFileButton, &QPushButton::clicked, this, [this]() {
+    connect(caFileButton, &QPushButton::clicked, this, [this] {
         const QString path = QFileDialog::getOpenFileName(this, tr("Select CA certificate bundle"));
-        if (!path.isEmpty())
+        if (!path.isEmpty()) {
             m_ftpTlsCaFileEdit->setText(path);
+        }
     });
     ftpForm->addRow(tr("Custom CA bundle:"), caFileWidget);
 
     m_ftpTlsAllowInvalidCheck = new QCheckBox(tr("Allow invalid certificates (unsafe)"), ftpWidget);
     ftpForm->addRow(QString(), m_ftpTlsAllowInvalidCheck);
 
-    auto updateTlsControls = [this]() {
+    auto updateTlsControls = [this] {
         const bool enabled = m_ftpTlsCheck && m_ftpTlsCheck->isChecked();
-        if (m_ftpTlsVersionCombo)
+        if (m_ftpTlsVersionCombo) {
             m_ftpTlsVersionCombo->setEnabled(enabled);
-        if (m_ftpTlsCaFileEdit)
+        }
+        if (m_ftpTlsCaFileEdit) {
             m_ftpTlsCaFileEdit->setEnabled(enabled);
-        if (m_ftpTlsAllowInvalidCheck)
+        }
+        if (m_ftpTlsAllowInvalidCheck) {
             m_ftpTlsAllowInvalidCheck->setEnabled(enabled);
+        }
     };
     connect(m_ftpTlsCheck, &QCheckBox::toggled, this, updateTlsControls);
     updateTlsControls();
@@ -704,8 +716,9 @@ void SessionDialog::setupUi() {
 
     m_colorSchemeCombo = new QComboBox(m_terminalSettingsWidget);
     m_colorSchemeCombo->addItem(tr("Use global setting"), QString());
-    for (const QString& scheme : QTermWidget::availableColorSchemes())
+    for (const QString& scheme : QTermWidget::availableColorSchemes()) {
         m_colorSchemeCombo->addItem(scheme, scheme);
+    }
     termForm->addRow(tr("Color scheme:"), m_colorSchemeCombo);
 
     m_terminalTypeEdit = new QLineEdit(m_terminalSettingsWidget);
@@ -794,7 +807,7 @@ void SessionDialog::setupUi() {
     fontRow->addWidget(chooseFontBtn);
     termForm->addRow(tr("Font:"), fontRow);
 
-    connect(chooseFontBtn, &QPushButton::clicked, this, [this]() {
+    connect(chooseFontBtn, &QPushButton::clicked, this, [this] {
         QFontDialog dialog(m_font, this);
         dialog.setWindowTitle(tr("Select Terminal Font"));
         dialog.setOption(QFontDialog::MonospacedFonts, true);
@@ -815,10 +828,11 @@ void SessionDialog::setupUi() {
         // Reuse the same controls so switching session types preserves edits.
         advancedLayout->removeWidget(m_terminalSettingsWidget);
         contentLayout->removeWidget(m_terminalSettingsWidget);
-        if (index == 0)
+        if (index == 0) {
             advancedLayout->addWidget(m_terminalSettingsWidget);
-        else
+        } else {
             contentLayout->insertWidget(contentLayout->count() - 1, m_terminalSettingsWidget);
+        }
         m_terminalSettingsWidget->setVisible(visible);
     };
     updateTerminalSettingsVisibility(0);
@@ -835,7 +849,7 @@ void SessionDialog::setupUi() {
     saveBtn->setObjectName("primaryButton");
 
     btnLayout->addWidget(cancelBtn);
-    auto updateAction = [this, saveBtn]() {
+    auto updateAction = [this, saveBtn] {
         saveBtn->setText(!m_saveSessionCheck->isEnabled()  ? tr("Save")
                          : m_saveSessionCheck->isChecked() ? tr("Save and connect")
                                                            : tr("Connect"));
@@ -864,14 +878,18 @@ void SessionDialog::loadSession(const Session& session) {
         m_portSpin->setValue(session.port);
         m_userEdit->setText(session.user);
         m_keyEdit->setText(session.keyPath);
-        if (m_jumpHostEdit)
+        if (m_jumpHostEdit != nullptr) {
             m_jumpHostEdit->setText(session.jumpHost);
-        if (m_jumpPortSpin)
+        }
+        if (m_jumpPortSpin != nullptr) {
             m_jumpPortSpin->setValue(session.jumpPort > 0 ? session.jumpPort : 22);
-        if (m_jumpUserEdit)
+        }
+        if (m_jumpUserEdit != nullptr) {
             m_jumpUserEdit->setText(session.jumpUser);
-        if (m_jumpKeyEdit)
+        }
+        if (m_jumpKeyEdit != nullptr) {
             m_jumpKeyEdit->setText(session.jumpKeyPath);
+        }
         if (!session.jumpSessionId.isEmpty()) {
             int index = m_jumpSessionCombo->findData(session.jumpSessionId);
             if (index < 0) {
@@ -880,10 +898,12 @@ void SessionDialog::loadSession(const Session& session) {
             }
             m_jumpSessionCombo->setCurrentIndex(index);
         }
-        if (m_x11ForwardCheck)
+        if (m_x11ForwardCheck != nullptr) {
             m_x11ForwardCheck->setChecked(session.x11Forwarding);
-        if (m_autoReconnectCheck)
+        }
+        if (m_autoReconnectCheck != nullptr) {
             m_autoReconnectCheck->setChecked(session.autoReconnect);
+        }
 
         m_tunnels = session.tunnels;
         m_tunnelsTable->setRowCount(0);
@@ -941,17 +961,19 @@ void SessionDialog::loadSession(const Session& session) {
         m_vncPortSpin->setValue(session.port > 0 ? session.port : 5900);
         {
             QString password = Keyring::lookupPassword(session.id);
-            if (m_vncPasswordEdit && !password.isEmpty())
+            if ((m_vncPasswordEdit != nullptr) && !password.isEmpty()) {
                 m_vncPasswordEdit->setText(password);
+            }
         }
         break;
     case SessionType::Serial: {
         m_typeCombo->setCurrentIndex(5);
         const int portIndex = m_serialPortCombo->findData(session.serialPort);
-        if (portIndex >= 0)
+        if (portIndex >= 0) {
             m_serialPortCombo->setCurrentIndex(portIndex);
-        else
+        } else {
             m_serialPortCombo->setCurrentText(session.serialPort);
+        }
         m_serialBaudCombo->setCurrentText(QString::number(session.baudRate));
         m_serialCmdCombo->setCurrentText(session.serialCmd);
         m_serialDataBitsCombo->setCurrentText(QString::number(session.serialDataBits));
@@ -968,18 +990,21 @@ void SessionDialog::loadSession(const Session& session) {
         m_ftpPortSpin->setValue(session.port > 0 ? session.port : 21);
         m_ftpUserEdit->setText(session.user);
         m_ftpTlsCheck->setChecked(session.ftpTls);
-        if (m_ftpTlsVersionCombo) {
+        if (m_ftpTlsVersionCombo != nullptr) {
             const int versionIndex = m_ftpTlsVersionCombo->findData(session.ftpTlsMinimumVersion);
             m_ftpTlsVersionCombo->setCurrentIndex(versionIndex >= 0 ? versionIndex : 0);
         }
-        if (m_ftpTlsCaFileEdit)
+        if (m_ftpTlsCaFileEdit != nullptr) {
             m_ftpTlsCaFileEdit->setText(session.ftpTlsCaFile);
-        if (m_ftpTlsAllowInvalidCheck)
+        }
+        if (m_ftpTlsAllowInvalidCheck != nullptr) {
             m_ftpTlsAllowInvalidCheck->setChecked(session.ftpTlsAllowInvalidCertificates);
+        }
         {
             QString password = Keyring::lookupPassword(session.id);
-            if (m_ftpPasswordEdit && !password.isEmpty())
+            if ((m_ftpPasswordEdit != nullptr) && !password.isEmpty()) {
                 m_ftpPasswordEdit->setText(password);
+            }
         }
         break;
     }
@@ -1004,14 +1029,15 @@ void SessionDialog::loadSession(const Session& session) {
     const int encodingIndex =
         m_encodingCombo->findData(session.encoding.isEmpty() ? QStringLiteral("UTF-8") : session.encoding);
     m_encodingCombo->setCurrentIndex(encodingIndex >= 0 ? encodingIndex : 0);
-    if (m_readOnlyCheck)
+    if (m_readOnlyCheck != nullptr) {
         m_readOnlyCheck->setChecked(session.readOnly);
+    }
     const int backspaceIndex = m_backspaceCombo->findData(session.backspaceSequence);
     m_backspaceCombo->setCurrentIndex(backspaceIndex >= 0 ? backspaceIndex : 0);
     const int enterIndex = m_enterCombo->findData(session.enterSequence);
     m_enterCombo->setCurrentIndex(enterIndex >= 0 ? enterIndex : 0);
     m_ciscoBreakEdit->setText(session.ciscoBreakSequence.isEmpty() ? QStringLiteral("1E") : session.ciscoBreakSequence);
-    if (m_manufacturerCombo) {
+    if (m_manufacturerCombo != nullptr) {
         const QSignalBlocker blocker(m_manufacturerCombo);
         const int profileIndex = m_manufacturerCombo->findData(session.manufacturerProfile);
         m_manufacturerCombo->setCurrentIndex(profileIndex >= 0 ? profileIndex : 0);
@@ -1020,7 +1046,7 @@ void SessionDialog::loadSession(const Session& session) {
     m_initialColumnsSpin->setValue(session.initialColumns > 0 ? session.initialColumns : 80);
 
     // SSH advanced options
-    if (m_keepAliveSpin) {
+    if (m_keepAliveSpin != nullptr) {
         m_keepAliveSpin->setValue(qMax(0, session.keepAliveSeconds));
         m_cipherEdit->setText(session.cryptCipher);
         m_kexEdit->setText(session.kexAlgo);
@@ -1061,6 +1087,8 @@ Session SessionDialog::getSession() const {
         case 6:
             s.name = QString("FTP: %1").arg(m_ftpHostEdit->text());
             break;
+        default:
+            break;
         }
     }
 
@@ -1071,13 +1099,13 @@ Session SessionDialog::getSession() const {
         s.port = m_portSpin->value();
         s.user = m_userEdit->text().trimmed();
         s.keyPath = m_keyEdit->text().trimmed();
-        s.jumpHost = m_jumpHostEdit ? m_jumpHostEdit->text().trimmed() : QString();
-        s.jumpPort = m_jumpPortSpin ? m_jumpPortSpin->value() : 22;
-        s.jumpUser = m_jumpUserEdit ? m_jumpUserEdit->text().trimmed() : QString();
-        s.jumpKeyPath = m_jumpKeyEdit ? m_jumpKeyEdit->text().trimmed() : QString();
+        s.jumpHost = (m_jumpHostEdit != nullptr) ? m_jumpHostEdit->text().trimmed() : QString();
+        s.jumpPort = (m_jumpPortSpin != nullptr) ? m_jumpPortSpin->value() : 22;
+        s.jumpUser = (m_jumpUserEdit != nullptr) ? m_jumpUserEdit->text().trimmed() : QString();
+        s.jumpKeyPath = (m_jumpKeyEdit != nullptr) ? m_jumpKeyEdit->text().trimmed() : QString();
         s.jumpSessionId = m_jumpSessionCombo->currentData().toString();
-        s.x11Forwarding = m_x11ForwardCheck ? m_x11ForwardCheck->isChecked() : false;
-        s.autoReconnect = m_autoReconnectCheck ? m_autoReconnectCheck->isChecked() : false;
+        s.x11Forwarding = (m_x11ForwardCheck != nullptr) ? m_x11ForwardCheck->isChecked() : false;
+        s.autoReconnect = (m_autoReconnectCheck != nullptr) ? m_autoReconnectCheck->isChecked() : false;
         s.tunnels = m_tunnels;
         break;
     case 1:
@@ -1104,10 +1132,12 @@ Session SessionDialog::getSession() const {
         s.type = SessionType::Serial;
         const QString visiblePort = m_serialPortCombo->currentText().trimmed();
         const int selectedPort = m_serialPortCombo->currentIndex();
-        if (selectedPort >= 0 && m_serialPortCombo->itemText(selectedPort) == visiblePort)
+        if (selectedPort >= 0 && m_serialPortCombo->itemText(selectedPort) == visiblePort) {
             s.serialPort = m_serialPortCombo->itemData(selectedPort).toString().trimmed();
-        if (s.serialPort.isEmpty())
+        }
+        if (s.serialPort.isEmpty()) {
             s.serialPort = visiblePort;
+        }
         s.baudRate = m_serialBaudCombo->currentText().toInt();
         s.serialCmd = m_serialCmdCombo->currentText();
         s.serialDataBits = m_serialDataBitsCombo->currentData().toInt();
@@ -1123,10 +1153,13 @@ Session SessionDialog::getSession() const {
         s.host = m_ftpHostEdit->text().trimmed();
         s.port = m_ftpPortSpin->value();
         s.user = m_ftpUserEdit->text().trimmed();
-        s.ftpTls = m_ftpTlsCheck && m_ftpTlsCheck->isChecked();
-        s.ftpTlsMinimumVersion = m_ftpTlsVersionCombo ? m_ftpTlsVersionCombo->currentData().toInt() : 12;
-        s.ftpTlsCaFile = m_ftpTlsCaFileEdit ? m_ftpTlsCaFileEdit->text().trimmed() : QString();
-        s.ftpTlsAllowInvalidCertificates = m_ftpTlsAllowInvalidCheck && m_ftpTlsAllowInvalidCheck->isChecked();
+        s.ftpTls = (m_ftpTlsCheck != nullptr) && m_ftpTlsCheck->isChecked();
+        s.ftpTlsMinimumVersion = (m_ftpTlsVersionCombo != nullptr) ? m_ftpTlsVersionCombo->currentData().toInt() : 12;
+        s.ftpTlsCaFile = (m_ftpTlsCaFileEdit != nullptr) ? m_ftpTlsCaFileEdit->text().trimmed() : QString();
+        s.ftpTlsAllowInvalidCertificates =
+            (m_ftpTlsAllowInvalidCheck != nullptr) && m_ftpTlsAllowInvalidCheck->isChecked();
+        break;
+    default:
         break;
     }
 
@@ -1141,22 +1174,23 @@ Session SessionDialog::getSession() const {
     }
     s.colorScheme = m_colorSchemeCombo->currentData().toString();
     s.terminalType = m_terminalTypeEdit->text().trimmed();
-    if (s.terminalType.isEmpty())
+    if (s.terminalType.isEmpty()) {
         s.terminalType = QStringLiteral("xterm-256color");
+    }
     s.language = m_languageEdit->text().trimmed();
     s.promptPattern = m_promptPatternEdit->text().trimmed();
     s.encoding = m_encodingCombo->currentData().toString();
-    s.readOnly = m_readOnlyCheck && m_readOnlyCheck->isChecked();
+    s.readOnly = (m_readOnlyCheck != nullptr) && m_readOnlyCheck->isChecked();
     s.backspaceSequence = m_backspaceCombo->currentData().toString();
     s.enterSequence = m_enterCombo->currentData().toString();
     s.ciscoBreakSequence = m_ciscoBreakEdit->text().remove(' ').trimmed().toUpper();
     s.initialRows = m_initialRowsSpin->value();
     s.initialColumns = m_initialColumnsSpin->value();
     s.manufacturerProfile =
-        m_manufacturerCombo ? m_manufacturerCombo->currentData().toString() : QStringLiteral("generic");
+        (m_manufacturerCombo != nullptr) ? m_manufacturerCombo->currentData().toString() : QStringLiteral("generic");
 
     // SSH advanced options
-    if (m_keepAliveSpin) {
+    if (m_keepAliveSpin != nullptr) {
         s.keepAliveSeconds = m_keepAliveSpin->value();
         s.cryptCipher = m_cipherEdit->text().trimmed();
         s.kexAlgo = m_kexEdit->text().trimmed();
@@ -1213,25 +1247,27 @@ void SessionDialog::accept() {
         }
         for (int i = 0; i < m_tunnels.size(); ++i) {
             const QString key = QStringLiteral("%1:socks:%2").arg(m_id).arg(i);
-            if (!m_tunnels.at(i).socksPassword.isEmpty())
+            if (!m_tunnels.at(i).socksPassword.isEmpty()) {
                 Keyring::storePassword(key, m_tunnels.at(i).socksPassword);
-            else
+            } else {
                 Keyring::deletePassword(key);
+            }
         }
     } else if (m_typeCombo->currentIndex() == 3) {
-        if (m_rdpSavePasswordCheck->isChecked() && !m_rdpPasswordEdit->text().isEmpty())
+        if (m_rdpSavePasswordCheck->isChecked() && !m_rdpPasswordEdit->text().isEmpty()) {
             Keyring::storePassword(m_id, m_rdpPasswordEdit->text());
-        else
+        } else {
             Keyring::deletePassword(m_id);
+        }
     } else if (m_typeCombo->currentIndex() == 4) {
-        QString pwd = m_vncPasswordEdit ? m_vncPasswordEdit->text() : QString();
+        QString pwd = (m_vncPasswordEdit != nullptr) ? m_vncPasswordEdit->text() : QString();
         if (!pwd.isEmpty()) {
             Keyring::storePassword(m_id, pwd);
         } else {
             Keyring::deletePassword(m_id);
         }
     } else if (m_typeCombo->currentIndex() == 6) {
-        QString pwd = m_ftpPasswordEdit ? m_ftpPasswordEdit->text() : QString();
+        QString pwd = (m_ftpPasswordEdit != nullptr) ? m_ftpPasswordEdit->text() : QString();
         if (!pwd.isEmpty()) {
             Keyring::storePassword(m_id, pwd);
         } else {
@@ -1249,8 +1285,9 @@ void SessionDialog::accept() {
                 break;
             }
         }
-        if (!found)
+        if (!found) {
             sessions.append(session);
+        }
         SessionManager::saveSessions(sessions);
     }
     QDialog::accept();

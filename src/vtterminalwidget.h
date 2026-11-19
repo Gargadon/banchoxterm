@@ -43,9 +43,10 @@ public:
         return m_cols;
     }
     QChar cellChar(int col, int row) const {
-        if (col < 0 || col >= m_cols || row < 0 || row >= m_rows)
+        if (col < 0 || col >= m_cols || row < 0 || row >= m_rows) {
             return QChar(' ');
-        return QChar(m_cells[row * m_cols + col].ch);
+        }
+        return QChar(m_cells[(row * m_cols) + col].ch);
     }
 
 signals:

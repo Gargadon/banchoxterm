@@ -89,6 +89,8 @@ private:
     QMutex m_instanceMutex;
     QMutex m_channelMutex;
     QImage m_frame;
+    QImage m_displayFrame;
+    QRect m_dirtyFrame;
     QList<Input> m_inputs;
     QSet<UINT32> m_pressedKeys;
     Qt::MouseButtons m_pressedButtons;

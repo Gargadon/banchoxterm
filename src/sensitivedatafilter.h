@@ -9,20 +9,24 @@
 class SensitiveDataFilter {
 public:
     void addValue(const QByteArray& value) {
-        if (!value.isEmpty() && !m_values.contains(value))
+        if (!value.isEmpty() && !m_values.contains(value)) {
             m_values.append(value);
+        }
     }
 
     bool containsValue(const QByteArray& data) const {
-        for (const QByteArray& value : m_values)
-            if (data.contains(value))
+        for (const QByteArray& value : m_values) {
+            if (data.contains(value)) {
                 return true;
+            }
+        }
         return false;
     }
 
     QByteArray process(const QByteArray& data) {
-        if (m_values.isEmpty())
+        if (m_values.isEmpty()) {
             return data;
+        }
         m_pending.append(data);
         QByteArray result;
         qsizetype offset = 0;
@@ -31,15 +35,17 @@ public:
             qsizetype matched = 0;
             bool partial = false;
             for (const QByteArray& value : m_values) {
-                if (remaining.startsWith(value))
+                if (remaining.startsWith(value)) {
                     matched = qMax(matched, value.size());
-                else if (QByteArrayView(value).startsWith(remaining))
+                } else if (QByteArrayView(value).startsWith(remaining)) {
                     partial = true;
+                }
             }
             // Hold a possible prefix across packets. On close it is discarded,
             // as flushing it could expose part of a sensitive value.
-            if (partial)
+            if (partial) {
                 break;
+            }
             if (matched > 0) {
                 result.append("[redacted]");
                 offset += matched;

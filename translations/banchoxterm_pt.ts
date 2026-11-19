@@ -4,6 +4,18 @@
 <context>
     <name>FtpClient</name>
     <message>
+        <source>Invalid remote path for deletion.</source>
+        <translation>Caminho remoto inválido para exclusão.</translation>
+    </message>
+    <message>
+        <source>Could not delete %1: %2</source>
+        <translation>Não foi possível excluir %1: %2</translation>
+    </message>
+    <message>
+        <source>Could not read every entry in the remote folder.</source>
+        <translation>Não foi possível ler todas as entradas da pasta remota.</translation>
+    </message>
+    <message>
         <location filename="../src/ftpclient.cpp" line="49"/>
         <source>FTPS certificate validation failed: %1</source>
         <translation>Falha na validação do certificado FTPS: %1</translation>
@@ -3174,6 +3186,30 @@ App:OutroApp</translation>
 </context>
 <context>
     <name>SftpSidebar</name>
+    <message>
+        <source>Selected folders and all their contents will be deleted.</source>
+        <translation>As pastas selecionadas e todo o seu conteúdo serão excluídos.</translation>
+    </message>
+    <message>
+        <source>Counting files...</source>
+        <translation>Contando arquivos…</translation>
+    </message>
+    <message>
+        <source>%L1 of 1 file transferred</source>
+        <translation>%L1 de 1 arquivo transferido</translation>
+    </message>
+    <message>
+        <source>%L1 of %L2 files transferred</source>
+        <translation>%L1 de %L2 arquivos transferidos</translation>
+    </message>
+    <message>
+        <source>Reading folder %1...</source>
+        <translation>Lendo pasta %1…</translation>
+    </message>
+    <message>
+        <source>Transferring files...</source>
+        <translation>Transferindo arquivos…</translation>
+    </message>
     <message><source>Connecting to %1 via bastion %2...</source><translation>Conectando a %1 via bastião %2...</translation></message>
     <message><source>Connected via bastion %1</source><translation>Conectado via bastião %1</translation></message>
     <message>
@@ -3845,6 +3881,14 @@ App:OutroApp</translation>
 </context>
 <context>
     <name>SshConnection</name>
+    <message>
+        <source>Invalid remote path for deletion.</source>
+        <translation>Caminho remoto inválido para exclusão.</translation>
+    </message>
+    <message>
+        <source>Could not delete %1 (SFTP error %2).</source>
+        <translation>Não foi possível excluir %1 (erro SFTP %2).</translation>
+    </message>
     <message><source>The saved bastion session is unavailable or is not a direct SSH session.</source><translation>A sessão salva do bastião está indisponível ou não é uma sessão SSH direta.</translation></message>
     <message>
         <location filename="../src/sshconnection.cpp" line="283"/>

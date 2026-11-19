@@ -20,10 +20,12 @@ XServerManager::XServerManager(QObject* parent) : QObject(parent) {
 QString XServerManager::findVcXsrv() const {
     QSettings settings;
     QString configured = settings.value(QStringLiteral("x11/vcxsrvPath")).toString().trimmed();
-    if (configured.isEmpty())
+    if (configured.isEmpty()) {
         configured = qEnvironmentVariable("BANCHOTERM_VCXSRV").trimmed();
-    if (!configured.isEmpty() && QFileInfo::exists(configured))
+    }
+    if (!configured.isEmpty() && QFileInfo::exists(configured)) {
         return QFileInfo(configured).absoluteFilePath();
+    }
 
     const QString appDir = QCoreApplication::applicationDirPath();
     QStringList candidates;
@@ -41,8 +43,9 @@ QString XServerManager::findVcXsrv() const {
                                              QStringLiteral("/VcXsrv/vcxsrv.exe"));
 
     for (const QString& candidate : candidates) {
-        if (QFileInfo::exists(candidate))
+        if (QFileInfo::exists(candidate)) {
             return QFileInfo(candidate).absoluteFilePath();
+        }
     }
     return {};
 }
@@ -101,7 +104,7 @@ bool XServerManager::ensureVcXsrvRunning(QString* error) {
 }
 
 bool XServerManager::isRunning() const {
-    return m_process && m_process->state() == QProcess::Running;
+    return (m_process != nullptr) && m_process->state() == QProcess::Running;
 }
 
 QString XServerManager::executablePath() const {
@@ -109,9 +112,11 @@ QString XServerManager::executablePath() const {
 }
 
 void XServerManager::stop() {
-    if (!m_process || m_process->state() == QProcess::NotRunning)
+    if ((m_process == nullptr) || m_process->state() == QProcess::NotRunning) {
         return;
+    }
     m_process->terminate();
-    if (!m_process->waitForFinished(1000))
+    if (!m_process->waitForFinished(1000)) {
         m_process->kill();
+    }
 }

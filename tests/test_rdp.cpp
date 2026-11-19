@@ -81,8 +81,9 @@ private slots:
         };
         clipboard.ClientFormatDataRequest = [](CliprdrClientContext*,
                                                const CLIPRDR_FORMAT_DATA_REQUEST* request) -> UINT {
-            if (request->requestedFormatId == CF_UNICODETEXT)
+            if (request->requestedFormatId == CF_UNICODETEXT) {
                 ++recorder.requests;
+            }
             return CHANNEL_RC_OK;
         };
         clipboard.ClientFormatDataResponse = [](CliprdrClientContext*,
@@ -199,8 +200,9 @@ private slots:
     }
     void connectionFailure() {
         QTcpServer server;
-        if (!server.listen(QHostAddress::LocalHost, 0))
+        if (!server.listen(QHostAddress::LocalHost, 0)) {
             QSKIP("Local TCP sockets are unavailable");
+        }
         const int port = server.serverPort();
         server.close();
         RdpClientWidget widget;

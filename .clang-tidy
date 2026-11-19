@@ -29,5 +29,3 @@ CheckOptions:
     value: camelBack
   - key: readability-identifier-naming.EnumConstantCase
     value: CamelCase
-  - key: modernize-use-nullptr
-    value: true

@@ -1,4 +1,5 @@
 #pragma once
+#include <QTemporaryFile>
 #include <QWidget>
 #include <QProcess>
 #include <QByteArray>
@@ -110,6 +111,7 @@ private slots:
     void onSearchNext();
     void onSearchPrev();
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private:
     bool m_sendingRawBytes = false;
     void launchExternalClient();
@@ -179,7 +181,7 @@ private:
     bool m_isActive = true;
     bool m_closing = false;
     bool m_stopPromptShown = false;
-    QByteArray m_outputBuffer;
+    QTemporaryFile m_outputSpool;
     QByteArray m_directoryBuffer;
     QByteArray m_promptBuffer;
     QRegularExpression m_promptPattern;

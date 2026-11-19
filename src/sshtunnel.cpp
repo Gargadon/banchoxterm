@@ -1,3 +1,4 @@
+#include <QTimer>
 #include "sshtunnel.h"
 #include <QHostAddress>
 #include <QtEndian>
@@ -35,13 +36,13 @@ bool SshTunnel::start() {
 }
 
 void SshTunnel::stop() {
-    if (m_tcpServer) {
+    if (m_tcpServer != nullptr) {
         m_tcpServer->close();
         m_tcpServer->deleteLater();
         m_tcpServer = nullptr;
     }
 
-    if (m_listener) {
+    if (m_listener != nullptr) {
         libssh2_session_set_blocking(m_sshSession, 1);
         libssh2_channel_forward_cancel(m_listener);
         libssh2_session_set_blocking(m_sshSession, 0);
@@ -56,13 +57,16 @@ void SshTunnel::stop() {
 }
 
 void SshTunnel::onNewConnection() {
-    while (m_tcpServer && m_tcpServer->hasPendingConnections()) {
+    while ((m_tcpServer != nullptr) && m_tcpServer->hasPendingConnections()) {
         QTcpSocket* socket = m_tcpServer->nextPendingConnection();
-        if (!socket)
+        if (socket == nullptr) {
             continue;
+        }
 
         ChannelBridge* bridge = new ChannelBridge();
         bridge->socket = socket;
+        socket->setReadBufferSize(256 * 1024);
+        connect(socket, &QTcpSocket::bytesWritten, this, [this](qint64) { schedulePoll(); });
 
         connect(socket, &QTcpSocket::readyRead, this, &SshTunnel::onSocketReadyRead);
         connect(socket, &QTcpSocket::disconnected, this, &SshTunnel::onSocketDisconnected);
@@ -74,7 +78,7 @@ void SshTunnel::onNewConnection() {
                 m_sshSession, m_config.remoteHost.toLatin1().constData(), m_config.remotePort);
             libssh2_session_set_blocking(m_sshSession, 0);
 
-            if (channel) {
+            if (channel != nullptr) {
                 bridge->channel = channel;
                 bridge->socksHandshakeDone = true;
                 m_bridges.append(bridge);
@@ -96,8 +100,9 @@ void SshTunnel::onNewConnection() {
 
 void SshTunnel::onSocketReadyRead() {
     QTcpSocket* socket = qobject_cast<QTcpSocket*>(sender());
-    if (!socket)
+    if (socket == nullptr) {
         return;
+    }
 
     ChannelBridge* bridge = nullptr;
     for (ChannelBridge* b : m_bridges) {
@@ -107,29 +112,31 @@ void SshTunnel::onSocketReadyRead() {
         }
     }
 
-    if (!bridge)
+    if (bridge == nullptr) {
         return;
+    }
 
     if (!bridge->socksHandshakeDone) {
         handleSocksHandshake(bridge);
         return;
     }
 
-    if (!bridge->channel)
+    if (bridge->channel == nullptr) {
         return;
-
-    QByteArray data = socket->readAll();
-    if (!data.isEmpty()) {
-        libssh2_session_set_blocking(m_sshSession, 1);
-        int written = 0;
-        while (written < data.size()) {
-            int w = libssh2_channel_write(bridge->channel, data.constData() + written, data.size() - written);
-            if (w <= 0)
-                break;
-            written += w;
-        }
-        libssh2_session_set_blocking(m_sshSession, 0);
     }
+
+    schedulePoll();
+}
+
+void SshTunnel::schedulePoll() {
+    if (m_pollScheduled) {
+        return;
+    }
+    m_pollScheduled = true;
+    QTimer::singleShot(0, this, [this] {
+        m_pollScheduled = false;
+        emit activityRequested();
+    });
 }
 
 void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
@@ -137,8 +144,9 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
 
     if (bridge->socksStep == 0) {
         // 1. Saludo SOCKS5: [VER, NMETHODS, METHODS...]
-        if (socket->bytesAvailable() < 2)
+        if (socket->bytesAvailable() < 2) {
             return;
+        }
 
         char verAndMethods[2];
         socket->peek(verAndMethods, 2);
@@ -150,8 +158,9 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
         }
 
         int numMethods = static_cast<unsigned char>(verAndMethods[1]);
-        if (socket->bytesAvailable() < 2 + numMethods)
+        if (socket->bytesAvailable() < 2 + numMethods) {
             return;
+        }
 
         socket->read(2);          // Descartar los dos primeros bytes ya leídos
         socket->read(numMethods); // Descartar métodos
@@ -165,19 +174,23 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
     }
 
     if (bridge->socksStep == 2) {
-        if (socket->bytesAvailable() < 2)
+        if (socket->bytesAvailable() < 2) {
             return;
+        }
         const QByteArray header = socket->peek(2);
-        if (static_cast<unsigned char>(header[0]) != 0x01)
+        if (static_cast<unsigned char>(header[0]) != 0x01) {
             return;
+        }
         const int usernameLength = static_cast<unsigned char>(header[1]);
-        if (socket->bytesAvailable() < 2 + usernameLength + 1)
+        if (socket->bytesAvailable() < 2 + usernameLength + 1) {
             return;
+        }
         const QByteArray authHeader = socket->peek(2 + usernameLength + 1);
         const int passwordLength = static_cast<unsigned char>(authHeader.at(2 + usernameLength));
         const int packetLength = 2 + usernameLength + 1 + passwordLength;
-        if (socket->bytesAvailable() < packetLength)
+        if (socket->bytesAvailable() < packetLength) {
             return;
+        }
         const QByteArray packet = socket->read(packetLength);
         const QByteArray username = packet.mid(2, usernameLength);
         const QByteArray password = packet.mid(3 + usernameLength, passwordLength);
@@ -196,8 +209,9 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
 
     if (bridge->socksStep == 1) {
         // 2. Solicitud SOCKS5: [VER, CMD, RSV, ATYP, DST.ADDR, DST.PORT]
-        if (socket->bytesAvailable() < 4)
+        if (socket->bytesAvailable() < 4) {
             return;
+        }
 
         char header[4];
         socket->peek(header, 4);
@@ -217,8 +231,9 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
         if (atyp == 0x01) { // IPv4
             expectedBytes += 4 + 2;
         } else if (atyp == 0x03) { // Nombre de dominio
-            if (socket->bytesAvailable() < 5)
+            if (socket->bytesAvailable() < 5) {
                 return;
+            }
             char domainLenChar;
             // Peek de longitud de dominio (byte 4)
             socket->peek(&domainLenChar, 1);
@@ -238,8 +253,9 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
             return;
         }
 
-        if (socket->bytesAvailable() < expectedBytes)
+        if (socket->bytesAvailable() < expectedBytes) {
             return;
+        }
 
         socket->read(4); // Descartar cabecera
 
@@ -269,7 +285,7 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
         LIBSSH2_CHANNEL* channel = libssh2_channel_direct_tcpip(m_sshSession, host.toLatin1().constData(), port);
         libssh2_session_set_blocking(m_sshSession, 0);
 
-        if (channel) {
+        if (channel != nullptr) {
             bridge->channel = channel;
             bridge->socksHandshakeDone = true;
             // Responder éxito de conexión SOCKS5
@@ -289,8 +305,9 @@ void SshTunnel::handleSocksHandshake(ChannelBridge* bridge) {
 
 void SshTunnel::onSocketDisconnected() {
     QTcpSocket* socket = qobject_cast<QTcpSocket*>(sender());
-    if (!socket)
+    if (socket == nullptr) {
         return;
+    }
 
     for (int i = 0; i < m_bridges.size(); ++i) {
         if (m_bridges[i]->socket == socket) {
@@ -303,7 +320,7 @@ void SshTunnel::onSocketDisconnected() {
 }
 
 void SshTunnel::closeBridge(ChannelBridge* bridge) {
-    if (bridge->socket) {
+    if (bridge->socket != nullptr) {
         // QTcpSocket::close() may synchronously emit disconnected(). Prevent
         // the slot from removing and freeing this bridge while it is already
         // being torn down by the caller.
@@ -311,7 +328,7 @@ void SshTunnel::closeBridge(ChannelBridge* bridge) {
         bridge->socket->close();
         bridge->socket->deleteLater();
     }
-    if (bridge->channel) {
+    if (bridge->channel != nullptr) {
         libssh2_session_set_blocking(m_sshSession, 1);
         libssh2_channel_close(bridge->channel);
         libssh2_channel_free(bridge->channel);
@@ -322,55 +339,75 @@ void SshTunnel::closeBridge(ChannelBridge* bridge) {
 
 void SshTunnel::poll() {
     // 1. Aceptar conexiones en Remote forwarding (si aplica)
-    if (m_listener) {
+    if (m_listener != nullptr) {
         LIBSSH2_CHANNEL* channel = libssh2_channel_forward_accept(m_listener);
-        if (channel) {
+        if (channel != nullptr) {
             QTcpSocket* socket = new QTcpSocket(this);
             // For remote forwarding, remotePort is the listener on the
             // SSH server and localPort is the destination on this host.
+            auto* bridge = new ChannelBridge();
+            bridge->socket = socket;
+            bridge->channel = channel;
+            bridge->socksHandshakeDone = true;
+            socket->setReadBufferSize(256 * 1024);
+            connect(socket, &QTcpSocket::readyRead, this, &SshTunnel::onSocketReadyRead);
+            connect(socket, &QTcpSocket::disconnected, this, &SshTunnel::onSocketDisconnected);
+            connect(socket, &QTcpSocket::errorOccurred, this, &SshTunnel::onSocketDisconnected);
+            connect(socket, &QTcpSocket::connected, this, &SshTunnel::schedulePoll);
+            connect(socket, &QTcpSocket::bytesWritten, this, [this](qint64) { schedulePoll(); });
+            m_bridges.append(bridge);
+            emit connectionCountChanged(m_bridges.size());
             socket->connectToHost(m_config.remoteHost, m_config.localPort);
-
-            // Esperar conexión brevemente de forma bloqueante
-            if (socket->waitForConnected(100)) {
-                ChannelBridge* bridge = new ChannelBridge();
-                bridge->socket = socket;
-                bridge->channel = channel;
-                bridge->socksHandshakeDone = true;
-
-                connect(socket, &QTcpSocket::readyRead, this, &SshTunnel::onSocketReadyRead);
-                connect(socket, &QTcpSocket::disconnected, this, &SshTunnel::onSocketDisconnected);
-
-                m_bridges.append(bridge);
-                emit connectionCountChanged(m_bridges.size());
-            } else {
-                socket->deleteLater();
-                libssh2_session_set_blocking(m_sshSession, 1);
-                libssh2_channel_close(channel);
-                libssh2_channel_free(channel);
-                libssh2_session_set_blocking(m_sshSession, 0);
-            }
         }
     }
 
     // 2. Transferir datos de los canales SSH a los Sockets locales de los puentes activos
     for (auto it = m_bridges.begin(); it != m_bridges.end();) {
         ChannelBridge* bridge = *it;
-        if (!bridge->channel || !bridge->socksHandshakeDone) {
+        if ((bridge->channel == nullptr) || !bridge->socksHandshakeDone ||
+            bridge->socket->state() != QAbstractSocket::ConnectedState) {
             ++it;
             continue;
         }
 
+        constexpr qint64 quantum = 64 * 1024;
+        if (bridge->pendingWrite.isEmpty() && !bridge->socketEof) {
+            bridge->pendingWrite = bridge->socket->read(quantum);
+        }
+        if (!bridge->pendingWrite.isEmpty()) {
+            const auto sent = libssh2_channel_write(bridge->channel, bridge->pendingWrite.constData() + bridge->written,
+                                                    bridge->pendingWrite.size() - bridge->written);
+            if (sent > 0) {
+                bridge->written += sent;
+                if (bridge->written == bridge->pendingWrite.size()) {
+                    bridge->pendingWrite.clear();
+                    bridge->written = 0;
+                }
+                if (!bridge->pendingWrite.isEmpty() || bridge->socket->bytesAvailable() > 0) {
+                    schedulePoll();
+                }
+            } else if (sent < 0 && sent != LIBSSH2_ERROR_EAGAIN) {
+                bridge->socketEof = true;
+            }
+        }
+
         char buf[8192];
-        ssize_t n;
-        while ((n = libssh2_channel_read(bridge->channel, buf, sizeof(buf))) > 0) {
+        ssize_t n = 0;
+        qint64 received = 0;
+        while (received < quantum && bridge->socket->bytesToWrite() < 256 * 1024 &&
+               (n = libssh2_channel_read(bridge->channel, buf, sizeof(buf))) > 0) {
+            received += n;
             bridge->socket->write(buf, n);
+        }
+        if (received >= quantum) {
+            schedulePoll();
         }
 
         if (n < 0 && n != LIBSSH2_ERROR_EAGAIN) {
             bridge->socketEof = true;
         }
 
-        if (libssh2_channel_eof(bridge->channel)) {
+        if (libssh2_channel_eof(bridge->channel) != 0) {
             bridge->socketEof = true;
         }
 

@@ -20,6 +20,7 @@ public:
     void poll(); // Invocado periódicamente para leer de los canales SSH y escribir en los sockets
 
 signals:
+    void activityRequested();
     void connectionCountChanged(int count);
 
 private slots:
@@ -27,6 +28,7 @@ private slots:
     void onSocketReadyRead();
     void onSocketDisconnected();
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private:
     struct ChannelBridge {
         QTcpSocket* socket = nullptr;
@@ -35,6 +37,8 @@ private:
         int socksStep = 0; // 0 = wait greeting, 1 = wait request
         bool channelCloseSent = false;
         bool socketEof = false;
+        QByteArray pendingWrite;
+        qsizetype written = 0;
     };
 
     LIBSSH2_SESSION* m_sshSession;
@@ -45,4 +49,6 @@ private:
 
     void handleSocksHandshake(ChannelBridge* bridge);
     void closeBridge(ChannelBridge* bridge);
+    void schedulePoll();
+    bool m_pollScheduled = false;
 };

@@ -1,4 +1,5 @@
 #pragma once
+#include "uploadfolderentries.h"
 #include "transferconflict.h"
 #include <QObject>
 #include <QByteArray>
@@ -38,6 +39,7 @@ public:
         return m_connected;
     }
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 public slots:
     void connectToHost(const QString& host, int port, const QString& user, const QString& keyPath,
                        const QString& password, const QList<TunnelConfig>& tunnels, const QString& jumpHost = QString(),
@@ -65,6 +67,8 @@ public slots:
     void renamePath(const QString& oldPath, const QString& newPath);
     void chmodPath(const QString& path, int mode);
     void uploadDirectory(const QString& localPath, const QString& remoteBasePath);
+    void uploadPreparedDirectory(const QString& localPath, const QString& remoteBasePath,
+                                 const std::shared_ptr<const UploadFolderPlan>& plan);
     void cancelTransfer();
     void pauseTransfer();
     void resumeTransfer();
@@ -79,6 +83,7 @@ signals:
     void shellClosed();
     void directoryListed(const QString& path, const QList<SftpFile>& files);
     void operationFinished(bool success, const QString& error);
+    void fileTransferred(const QString& localPath);
     void transferProgress(const QString& fileName, qint64 bytesDone, qint64 totalBytes);
     void tunnelStatus(const QString& message, bool active);
     void tunnelStateChanged(int index, bool active);
@@ -92,6 +97,7 @@ private slots:
     void onStatsTimer();
     void pollRemoteDirectory();
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private:
     bool interrupted() const;
     void checkTransport();
@@ -110,15 +116,19 @@ private:
         deadline.start();
         while (!interrupted() && !m_transportFailed && deadline.elapsed() < 15000) {
             auto result = fn();
-            if (result)
+            if (result) {
                 return result;
-            if (libssh2_session_last_errno(m_session) != LIBSSH2_ERROR_EAGAIN)
+            }
+            if (libssh2_session_last_errno(m_session) != LIBSSH2_ERROR_EAGAIN) {
                 return nullptr;
-            if (!waitSocket(15000))
+            }
+            if (!waitSocket(15000)) {
                 return nullptr;
+            }
         }
-        if (m_connected && !interrupted())
+        if (m_connected && !interrupted()) {
             handleShellClosed();
+        }
         return nullptr;
     }
 
@@ -141,7 +151,8 @@ private:
                             QString& error);
     bool ensureRemoteDirectory(const QString& remotePath, QString& error);
     bool uploadOneFile(const QString& localPath, const QString& remotePath, QString& error);
-    bool uploadDirRecursive(const QString& localDir, const QString& remoteDir, QString& error);
+    bool uploadDirectoryContents(const QString& localDir, const QString& remoteDir, QString& error,
+                                 const UploadFolderPlan* plan);
     bool transferCancelled() const {
         return m_transferCancelRequested.load(std::memory_order_relaxed);
     }

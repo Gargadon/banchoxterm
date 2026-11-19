@@ -36,11 +36,14 @@ QKeySequence KeyboardShortcuts::sequence(const QString& id) {
     QSettings settings;
     const QString key = "shortcuts/" + id;
     // An explicit empty value disables a shortcut; absence means the default.
-    if (settings.contains(key))
+    if (settings.contains(key)) {
         return QKeySequence::fromString(settings.value(key).toString(), QKeySequence::PortableText);
-    for (const auto& definition : definitions())
-        if (definition.id == id)
+    }
+    for (const auto& definition : definitions()) {
+        if (definition.id == id) {
             return definition.defaultSequence;
+        }
+    }
     return {};
 }
 
@@ -51,14 +54,17 @@ void KeyboardShortcuts::bindAction(QAction* action, const QString& id, Qt::Short
         // Menus/ribbon pages may be hidden. Associate window actions with the
         // owning window too, so their shortcuts do not depend on page visibility.
         QWidget* window = nullptr;
-        for (QObject* owner = action->parent(); owner; owner = owner->parent())
-            if (auto* widget = qobject_cast<QWidget*>(owner); widget && widget->isWindow())
+        for (QObject* owner = action->parent(); owner != nullptr; owner = owner->parent()) {
+            if (auto* widget = qobject_cast<QWidget*>(owner); (widget != nullptr) && widget->isWindow()) {
                 window = widget;
-        if (window)
+            }
+        }
+        if (window != nullptr) {
             window->addAction(action);
+        }
     }
     const QString tooltip = action->toolTip().remove('&');
-    const auto update = [action, id, tooltip]() {
+    const auto update = [action, id, tooltip] {
         const QKeySequence keys = sequence(id);
         action->setShortcut(keys);
         action->setToolTip(keys.isEmpty() ? tooltip : tooltip + " (" + keys.toString(QKeySequence::NativeText) + ")");
@@ -70,14 +76,16 @@ void KeyboardShortcuts::bindAction(QAction* action, const QString& id, Qt::Short
 void KeyboardShortcuts::save(const QMap<QString, QKeySequence>& sequences) {
     QSettings settings;
     for (const auto& definition : definitions()) {
-        if (!sequences.contains(definition.id))
+        if (!sequences.contains(definition.id)) {
             continue;
+        }
         const QString key = "shortcuts/" + definition.id;
         const QKeySequence keys = sequences.value(definition.id);
-        if (keys == definition.defaultSequence)
+        if (keys == definition.defaultSequence) {
             settings.remove(key);
-        else
+        } else {
             settings.setValue(key, keys.toString(QKeySequence::PortableText));
+        }
     }
     emit instance().changed();
 }

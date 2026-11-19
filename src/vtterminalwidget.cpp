@@ -15,118 +15,420 @@ namespace {
 
 VtPalette getPalette(const QString& schemeName) {
     static const QMap<QString, VtPalette> palettes = {
-        {"DarkPastels",
-         {QColor("#c0caf5"),
-          QColor("#16161e"),
-          {QColor("#15161e"), QColor("#f7768e"), QColor("#9ece6a"), QColor("#e0af68"), QColor("#7aa2f7"),
-           QColor("#bb9af7"), QColor("#7dcfff"), QColor("#a9b1d6")},
-          {QColor("#414868"), QColor("#ff8998"), QColor("#b9f27c"), QColor("#ff9e64"), QColor("#89b4fa"),
-           QColor("#cba6f7"), QColor("#89ddff"), QColor("#c0caf5")}}},
-        {"Tango",
-         {QColor("#d3d7cf"),
-          QColor("#2e3436"),
-          {QColor("#2e3436"), QColor("#cc0000"), QColor("#4e9a06"), QColor("#c4a000"), QColor("#3465a4"),
-           QColor("#75507b"), QColor("#06989a"), QColor("#d3d7cf")},
-          {QColor("#555753"), QColor("#ef2929"), QColor("#8ae234"), QColor("#fce94f"), QColor("#729fcf"),
-           QColor("#ad7fa8"), QColor("#34e2e2"), QColor("#eeeeec")}}},
-        {"Breeze",
-         {QColor("#fcfcfc"),
-          QColor("#232629"),
-          {QColor("#232629"), QColor("#ed1515"), QColor("#11d116"), QColor("#f67400"), QColor("#1d99f3"),
-           QColor("#9b59b6"), QColor("#1abc9c"), QColor("#fcfcfc")},
-          {QColor("#7f8c8d"), QColor("#c0392b"), QColor("#27ae60"), QColor("#f39c12"), QColor("#2980b9"),
-           QColor("#8e44ad"), QColor("#16a085"), QColor("#ffffff")}}},
-        {"Linux",
-         {QColor("#b2b2b2"),
-          QColor("#000000"),
-          {QColor("#000000"), QColor("#aa0000"), QColor("#00aa00"), QColor("#aa5500"), QColor("#00aa00"),
-           QColor("#aa00aa"), QColor("#00aaaa"), QColor("#aaaaaa")},
-          {QColor("#555555"), QColor("#ff5555"), QColor("#55ff55"), QColor("#ffff55"), QColor("#5555ff"),
-           QColor("#ff55ff"), QColor("#55ffff"), QColor("#ffffff")}}},
-        {"Solarized",
-         {QColor("#839496"),
-          QColor("#002b36"),
-          {QColor("#073642"), QColor("#dc322f"), QColor("#859900"), QColor("#b58900"), QColor("#268bd2"),
-           QColor("#d33682"), QColor("#2aa198"), QColor("#eee8d5")},
-          {QColor("#002b36"), QColor("#cb4b16"), QColor("#586e75"), QColor("#657b83"), QColor("#839496"),
-           QColor("#6c71c4"), QColor("#93a1a1"), QColor("#fdf6e3")}}},
-        {"Ubuntu",
-         {QColor("#eeeeec"),
-          QColor("#300a24"),
-          {QColor("#2e3436"), QColor("#cc0000"), QColor("#4e9a06"), QColor("#c4a000"), QColor("#3465a4"),
-           QColor("#75507b"), QColor("#06989a"), QColor("#d3d7cf")},
-          {QColor("#555753"), QColor("#ef2929"), QColor("#8ae234"), QColor("#fce94f"), QColor("#729fcf"),
-           QColor("#ad7fa8"), QColor("#34e2e2"), QColor("#eeeeec")}}},
-        {"WhiteOnBlack",
-         {QColor("#ffffff"),
-          QColor("#000000"),
-          {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"),
-           QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
-          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
-           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
-        {"BlackOnWhite",
-         {QColor("#000000"),
-          QColor("#ffffff"),
-          {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"),
-           QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
-          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
-           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
-        {"GreenOnBlack",
-         {QColor("#18f018"),
-          QColor("#000000"),
-          {QColor("#000000"), QColor("#fa4b4b"), QColor("#18b218"), QColor("#b26818"), QColor("#5ca7fb"),
-           QColor("#e11ee1"), QColor("#18b2b2"), QColor("#b2b2b2")},
-          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
-           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
-        {"Nord",
-         {QColor("#d8dee9"),
-          QColor("#2e3440"),
-          {QColor("#3b4252"), QColor("#bf616a"), QColor("#a3be8c"), QColor("#ebcb8b"), QColor("#81a1c1"),
-           QColor("#b48ead"), QColor("#88c0d0"), QColor("#e5e9f0")},
-          {QColor("#4c566a"), QColor("#bf616a"), QColor("#a3be8c"), QColor("#ebcb8b"), QColor("#81a1c1"),
-           QColor("#b48ead"), QColor("#8fbcbb"), QColor("#eceff4")}}},
-        {"SolarizedLight",
-         {QColor("#657b83"),
-          QColor("#fdf6e3"),
-          {QColor("#073642"), QColor("#dc322f"), QColor("#859900"), QColor("#b58900"), QColor("#268bd2"),
-           QColor("#d33682"), QColor("#2aa198"), QColor("#eee8d5")},
-          {QColor("#002b36"), QColor("#cb4b16"), QColor("#586e75"), QColor("#657b83"), QColor("#839496"),
-           QColor("#6c71c4"), QColor("#93a1a1"), QColor("#fdf6e3")}}},
-        {"Falcon",
-         {QColor("#c2c2c2"),
-          QColor("#223333"),
-          {QColor("#959595"), QColor("#ff6565"), QColor("#84c24e"), QColor("#cfbf29"), QColor("#6ed7ff"),
-           QColor("#fcaf3e"), QColor("#b7b0e8"), QColor("#ffffff")},
-          {QColor("#959595"), QColor("#ff6565"), QColor("#84c24e"), QColor("#cfbf29"), QColor("#6ed7ff"),
-           QColor("#fcaf3e"), QColor("#b7b0e8"), QColor("#ffffff")}}},
-        {"BlackOnLightYellow",
-         {QColor("#000000"),
-          QColor("#ffffdd"),
-          {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"),
-           QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
-          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
-           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
-        {"BlackOnRandomLight",
-         {QColor("#000000"),
-          QColor("#f7f7d6"),
-          {QColor("#000000"), QColor("#b21818"), QColor("#18b218"), QColor("#b26818"), QColor("#1818b2"),
-           QColor("#b218b2"), QColor("#18b2b2"), QColor("#b2b2b2")},
-          {QColor("#686868"), QColor("#ff5454"), QColor("#54ff54"), QColor("#ffff54"), QColor("#5454ff"),
-           QColor("#ff54ff"), QColor("#54ffff"), QColor("#ffffff")}}},
-        {"BreezeModified",
-         {QColor("#eff0f1"),
-          QColor("#31363b"),
-          {QColor("#073642"), QColor("#ed1515"), QColor("#11d116"), QColor("#f67400"), QColor("#1d99f3"),
-           QColor("#9b59b6"), QColor("#1abc9c"), QColor("#eff0f1")},
-          {QColor("#ff5500"), QColor("#c0392b"), QColor("#1cdc9a"), QColor("#fdbc4b"), QColor("#3daee9"),
-           QColor("#8e44ad"), QColor("#16a085"), QColor("#fcfcfc")}}}};
+        {
+            "DarkPastels",
+            {
+                QColor("#c0caf5"),
+                QColor("#16161e"),
+                {
+                    QColor("#15161e"),
+                    QColor("#f7768e"),
+                    QColor("#9ece6a"),
+                    QColor("#e0af68"),
+                    QColor("#7aa2f7"),
+                    QColor("#bb9af7"),
+                    QColor("#7dcfff"),
+                    QColor("#a9b1d6"),
+                },
+                {
+                    QColor("#414868"),
+                    QColor("#ff8998"),
+                    QColor("#b9f27c"),
+                    QColor("#ff9e64"),
+                    QColor("#89b4fa"),
+                    QColor("#cba6f7"),
+                    QColor("#89ddff"),
+                    QColor("#c0caf5"),
+                },
+            },
+        },
+        {
+            "Tango",
+            {
+                QColor("#d3d7cf"),
+                QColor("#2e3436"),
+                {
+                    QColor("#2e3436"),
+                    QColor("#cc0000"),
+                    QColor("#4e9a06"),
+                    QColor("#c4a000"),
+                    QColor("#3465a4"),
+                    QColor("#75507b"),
+                    QColor("#06989a"),
+                    QColor("#d3d7cf"),
+                },
+                {
+                    QColor("#555753"),
+                    QColor("#ef2929"),
+                    QColor("#8ae234"),
+                    QColor("#fce94f"),
+                    QColor("#729fcf"),
+                    QColor("#ad7fa8"),
+                    QColor("#34e2e2"),
+                    QColor("#eeeeec"),
+                },
+            },
+        },
+        {
+            "Breeze",
+            {
+                QColor("#fcfcfc"),
+                QColor("#232629"),
+                {
+                    QColor("#232629"),
+                    QColor("#ed1515"),
+                    QColor("#11d116"),
+                    QColor("#f67400"),
+                    QColor("#1d99f3"),
+                    QColor("#9b59b6"),
+                    QColor("#1abc9c"),
+                    QColor("#fcfcfc"),
+                },
+                {
+                    QColor("#7f8c8d"),
+                    QColor("#c0392b"),
+                    QColor("#27ae60"),
+                    QColor("#f39c12"),
+                    QColor("#2980b9"),
+                    QColor("#8e44ad"),
+                    QColor("#16a085"),
+                    QColor("#ffffff"),
+                },
+            },
+        },
+        {
+            "Linux",
+            {
+                QColor("#b2b2b2"),
+                QColor("#000000"),
+                {
+                    QColor("#000000"),
+                    QColor("#aa0000"),
+                    QColor("#00aa00"),
+                    QColor("#aa5500"),
+                    QColor("#00aa00"),
+                    QColor("#aa00aa"),
+                    QColor("#00aaaa"),
+                    QColor("#aaaaaa"),
+                },
+                {
+                    QColor("#555555"),
+                    QColor("#ff5555"),
+                    QColor("#55ff55"),
+                    QColor("#ffff55"),
+                    QColor("#5555ff"),
+                    QColor("#ff55ff"),
+                    QColor("#55ffff"),
+                    QColor("#ffffff"),
+                },
+            },
+        },
+        {
+            "Solarized",
+            {
+                QColor("#839496"),
+                QColor("#002b36"),
+                {
+                    QColor("#073642"),
+                    QColor("#dc322f"),
+                    QColor("#859900"),
+                    QColor("#b58900"),
+                    QColor("#268bd2"),
+                    QColor("#d33682"),
+                    QColor("#2aa198"),
+                    QColor("#eee8d5"),
+                },
+                {
+                    QColor("#002b36"),
+                    QColor("#cb4b16"),
+                    QColor("#586e75"),
+                    QColor("#657b83"),
+                    QColor("#839496"),
+                    QColor("#6c71c4"),
+                    QColor("#93a1a1"),
+                    QColor("#fdf6e3"),
+                },
+            },
+        },
+        {
+            "Ubuntu",
+            {
+                QColor("#eeeeec"),
+                QColor("#300a24"),
+                {
+                    QColor("#2e3436"),
+                    QColor("#cc0000"),
+                    QColor("#4e9a06"),
+                    QColor("#c4a000"),
+                    QColor("#3465a4"),
+                    QColor("#75507b"),
+                    QColor("#06989a"),
+                    QColor("#d3d7cf"),
+                },
+                {
+                    QColor("#555753"),
+                    QColor("#ef2929"),
+                    QColor("#8ae234"),
+                    QColor("#fce94f"),
+                    QColor("#729fcf"),
+                    QColor("#ad7fa8"),
+                    QColor("#34e2e2"),
+                    QColor("#eeeeec"),
+                },
+            },
+        },
+        {
+            "WhiteOnBlack",
+            {
+                QColor("#ffffff"),
+                QColor("#000000"),
+                {
+                    QColor("#000000"),
+                    QColor("#b21818"),
+                    QColor("#18b218"),
+                    QColor("#b26818"),
+                    QColor("#1818b2"),
+                    QColor("#b218b2"),
+                    QColor("#18b2b2"),
+                    QColor("#b2b2b2"),
+                },
+                {
+                    QColor("#686868"),
+                    QColor("#ff5454"),
+                    QColor("#54ff54"),
+                    QColor("#ffff54"),
+                    QColor("#5454ff"),
+                    QColor("#ff54ff"),
+                    QColor("#54ffff"),
+                    QColor("#ffffff"),
+                },
+            },
+        },
+        {
+            "BlackOnWhite",
+            {
+                QColor("#000000"),
+                QColor("#ffffff"),
+                {
+                    QColor("#000000"),
+                    QColor("#b21818"),
+                    QColor("#18b218"),
+                    QColor("#b26818"),
+                    QColor("#1818b2"),
+                    QColor("#b218b2"),
+                    QColor("#18b2b2"),
+                    QColor("#b2b2b2"),
+                },
+                {
+                    QColor("#686868"),
+                    QColor("#ff5454"),
+                    QColor("#54ff54"),
+                    QColor("#ffff54"),
+                    QColor("#5454ff"),
+                    QColor("#ff54ff"),
+                    QColor("#54ffff"),
+                    QColor("#ffffff"),
+                },
+            },
+        },
+        {
+            "GreenOnBlack",
+            {
+                QColor("#18f018"),
+                QColor("#000000"),
+                {
+                    QColor("#000000"),
+                    QColor("#fa4b4b"),
+                    QColor("#18b218"),
+                    QColor("#b26818"),
+                    QColor("#5ca7fb"),
+                    QColor("#e11ee1"),
+                    QColor("#18b2b2"),
+                    QColor("#b2b2b2"),
+                },
+                {
+                    QColor("#686868"),
+                    QColor("#ff5454"),
+                    QColor("#54ff54"),
+                    QColor("#ffff54"),
+                    QColor("#5454ff"),
+                    QColor("#ff54ff"),
+                    QColor("#54ffff"),
+                    QColor("#ffffff"),
+                },
+            },
+        },
+        {
+            "Nord",
+            {
+                QColor("#d8dee9"),
+                QColor("#2e3440"),
+                {
+                    QColor("#3b4252"),
+                    QColor("#bf616a"),
+                    QColor("#a3be8c"),
+                    QColor("#ebcb8b"),
+                    QColor("#81a1c1"),
+                    QColor("#b48ead"),
+                    QColor("#88c0d0"),
+                    QColor("#e5e9f0"),
+                },
+                {
+                    QColor("#4c566a"),
+                    QColor("#bf616a"),
+                    QColor("#a3be8c"),
+                    QColor("#ebcb8b"),
+                    QColor("#81a1c1"),
+                    QColor("#b48ead"),
+                    QColor("#8fbcbb"),
+                    QColor("#eceff4"),
+                },
+            },
+        },
+        {
+            "SolarizedLight",
+            {
+                QColor("#657b83"),
+                QColor("#fdf6e3"),
+                {
+                    QColor("#073642"),
+                    QColor("#dc322f"),
+                    QColor("#859900"),
+                    QColor("#b58900"),
+                    QColor("#268bd2"),
+                    QColor("#d33682"),
+                    QColor("#2aa198"),
+                    QColor("#eee8d5"),
+                },
+                {
+                    QColor("#002b36"),
+                    QColor("#cb4b16"),
+                    QColor("#586e75"),
+                    QColor("#657b83"),
+                    QColor("#839496"),
+                    QColor("#6c71c4"),
+                    QColor("#93a1a1"),
+                    QColor("#fdf6e3"),
+                },
+            },
+        },
+        {
+            "Falcon",
+            {
+                QColor("#c2c2c2"),
+                QColor("#223333"),
+                {
+                    QColor("#959595"),
+                    QColor("#ff6565"),
+                    QColor("#84c24e"),
+                    QColor("#cfbf29"),
+                    QColor("#6ed7ff"),
+                    QColor("#fcaf3e"),
+                    QColor("#b7b0e8"),
+                    QColor("#ffffff"),
+                },
+                {
+                    QColor("#959595"),
+                    QColor("#ff6565"),
+                    QColor("#84c24e"),
+                    QColor("#cfbf29"),
+                    QColor("#6ed7ff"),
+                    QColor("#fcaf3e"),
+                    QColor("#b7b0e8"),
+                    QColor("#ffffff"),
+                },
+            },
+        },
+        {
+            "BlackOnLightYellow",
+            {
+                QColor("#000000"),
+                QColor("#ffffdd"),
+                {
+                    QColor("#000000"),
+                    QColor("#b21818"),
+                    QColor("#18b218"),
+                    QColor("#b26818"),
+                    QColor("#1818b2"),
+                    QColor("#b218b2"),
+                    QColor("#18b2b2"),
+                    QColor("#b2b2b2"),
+                },
+                {
+                    QColor("#686868"),
+                    QColor("#ff5454"),
+                    QColor("#54ff54"),
+                    QColor("#ffff54"),
+                    QColor("#5454ff"),
+                    QColor("#ff54ff"),
+                    QColor("#54ffff"),
+                    QColor("#ffffff"),
+                },
+            },
+        },
+        {
+            "BlackOnRandomLight",
+            {
+                QColor("#000000"),
+                QColor("#f7f7d6"),
+                {
+                    QColor("#000000"),
+                    QColor("#b21818"),
+                    QColor("#18b218"),
+                    QColor("#b26818"),
+                    QColor("#1818b2"),
+                    QColor("#b218b2"),
+                    QColor("#18b2b2"),
+                    QColor("#b2b2b2"),
+                },
+                {
+                    QColor("#686868"),
+                    QColor("#ff5454"),
+                    QColor("#54ff54"),
+                    QColor("#ffff54"),
+                    QColor("#5454ff"),
+                    QColor("#ff54ff"),
+                    QColor("#54ffff"),
+                    QColor("#ffffff"),
+                },
+            },
+        },
+        {
+            "BreezeModified",
+            {
+                QColor("#eff0f1"),
+                QColor("#31363b"),
+                {
+                    QColor("#073642"),
+                    QColor("#ed1515"),
+                    QColor("#11d116"),
+                    QColor("#f67400"),
+                    QColor("#1d99f3"),
+                    QColor("#9b59b6"),
+                    QColor("#1abc9c"),
+                    QColor("#eff0f1"),
+                },
+                {
+                    QColor("#ff5500"),
+                    QColor("#c0392b"),
+                    QColor("#1cdc9a"),
+                    QColor("#fdbc4b"),
+                    QColor("#3daee9"),
+                    QColor("#8e44ad"),
+                    QColor("#16a085"),
+                    QColor("#fcfcfc"),
+                },
+            },
+        },
+    };
 
     return palettes.value(schemeName, palettes.value("DarkPastels"));
 }
 
 QColor color256(int idx, const VtPalette& pal) {
-    if (idx < 16)
+    if (idx < 16) {
         return pal.basic[idx % 8];
+    }
     if (idx < 232) {
         int n = idx - 16;
         int r = n / 36;
@@ -135,7 +437,7 @@ QColor color256(int idx, const VtPalette& pal) {
         const int vals[6] = {0, 95, 135, 175, 215, 255};
         return QColor(vals[r], vals[g], vals[b]);
     }
-    int v = 8 + (idx - 232) * 10;
+    int v = 8 + ((idx - 232) * 10);
     return QColor(v, v, v);
 }
 
@@ -188,7 +490,7 @@ VtTerminalWidget::VtTerminalWidget(QWidget* parent) : QWidget(parent) {
 
     m_cursorBlinkTimer = new QTimer(this);
     m_cursorBlinkTimer->setInterval(500);
-    connect(m_cursorBlinkTimer, &QTimer::timeout, this, [this]() {
+    connect(m_cursorBlinkTimer, &QTimer::timeout, this, [this] {
         m_cursorBlinkState = !m_cursorBlinkState;
         update();
     });
@@ -198,8 +500,7 @@ VtTerminalWidget::VtTerminalWidget(QWidget* parent) : QWidget(parent) {
     ensureSize();
 }
 
-VtTerminalWidget::~VtTerminalWidget() {
-}
+VtTerminalWidget::~VtTerminalWidget() = default;
 
 QSize VtTerminalWidget::sizeHint() const {
     return QSize(m_charWidth * m_cols, m_charHeight * m_rows);
@@ -232,7 +533,7 @@ void VtTerminalWidget::setTerminalFont(const QFont& font) {
             int copyCols = qMin(oldCols, m_cols);
             for (int r = 0; r < copyRows; ++r) {
                 for (int c = 0; c < copyCols; ++c) {
-                    m_cells[r * m_cols + c] = old[r * oldCols + c];
+                    m_cells[(r * m_cols) + c] = old[(r * oldCols) + c];
                 }
             }
             m_cursorX = qBound(0, m_cursorX, m_cols - 1);
@@ -255,9 +556,11 @@ void VtTerminalWidget::resizeEvent(QResizeEvent* e) {
         m_cols = newCols;
         m_rows = newRows;
         m_cells.fill(Cell{}, m_cols * m_rows);
-        for (int y = 0; y < qMin(oldRows, m_rows); y++)
-            for (int x = 0; x < qMin(oldCols, m_cols); x++)
-                m_cells[y * m_cols + x] = old[y * oldCols + x];
+        for (int y = 0; y < qMin(oldRows, m_rows); y++) {
+            for (int x = 0; x < qMin(oldCols, m_cols); x++) {
+                m_cells[(y * m_cols) + x] = old[(y * oldCols) + x];
+            }
+        }
         m_cursorX = qMin(m_cursorX, m_cols - 1);
         m_cursorY = qMin(m_cursorY, m_rows - 1);
         m_scrollback.clear();
@@ -270,10 +573,12 @@ void VtTerminalWidget::resizeEvent(QResizeEvent* e) {
 
 void VtTerminalWidget::ensureSize() {
     m_cells.fill({}, m_cols * m_rows);
-    if (m_cursorX >= m_cols)
+    if (m_cursorX >= m_cols) {
         m_cursorX = m_cols - 1;
-    if (m_cursorY >= m_rows)
+    }
+    if (m_cursorY >= m_rows) {
         m_cursorY = m_rows - 1;
+    }
 }
 
 void VtTerminalWidget::resetAttributes() {
@@ -286,12 +591,14 @@ void VtTerminalWidget::resetAttributes() {
 
 void VtTerminalWidget::scrollUp() {
     m_scrollback.append(m_cells.mid(0, m_cols));
-    while (m_scrollback.size() > m_scrollbackMax)
+    while (m_scrollback.size() > m_scrollbackMax) {
         m_scrollback.removeFirst();
+    }
     m_cells.remove(0, m_cols);
     m_cells.append(QVector<Cell>(m_cols, Cell{}));
-    if (m_scrollOffset > 0)
+    if (m_scrollOffset > 0) {
         m_scrollOffset = qMin(m_scrollOffset + 1, m_scrollback.size());
+    }
 }
 
 void VtTerminalWidget::newLine() {
@@ -304,9 +611,10 @@ void VtTerminalWidget::newLine() {
 }
 
 void VtTerminalWidget::setChar(int x, int y, ushort ch) {
-    if (x < 0 || x >= m_cols || y < 0 || y >= m_rows)
+    if (x < 0 || x >= m_cols || y < 0 || y >= m_rows) {
         return;
-    Cell& cell = m_cells[y * m_cols + x];
+    }
+    Cell& cell = m_cells[(y * m_cols) + x];
     cell.ch = ch;
     cell.fg = m_attrs.fg;
     cell.bg = m_attrs.bg;
@@ -436,12 +744,13 @@ void VtTerminalWidget::parseBuffer() {
         } else {
             // Check UTF-8 character length completeness
             int neededBytes = 1;
-            if (c >= 0xC0 && c < 0xE0)
+            if (c >= 0xC0 && c < 0xE0) {
                 neededBytes = 2;
-            else if (c >= 0xE0 && c < 0xF0)
+            } else if (c >= 0xE0 && c < 0xF0) {
                 neededBytes = 3;
-            else if (c >= 0xF0)
+            } else if (c >= 0xF0) {
                 neededBytes = 4;
+            }
 
             if (i + neededBytes > m_parseBuffer.size()) {
                 // Partial UTF-8 byte sequence at end of buffer, wait for next chunk
@@ -482,8 +791,9 @@ void VtTerminalWidget::parseCsi(const QByteArray& data, int& i) {
                 for (const QString& p : parts) {
                     bool ok = false;
                     int v = p.toInt(&ok);
-                    if (ok)
+                    if (ok) {
                         nums.append(v);
+                    }
                 }
             }
             switch (c) {
@@ -524,36 +834,47 @@ void VtTerminalWidget::parseCsi(const QByteArray& data, int& i) {
             case 'J': {
                 int mode = nums.isEmpty() ? 0 : nums[0];
                 if (mode == 2 || mode == 3) {
-                    for (int y = 0; y < m_rows; y++)
-                        for (int x = 0; x < m_cols; x++)
-                            m_cells[y * m_cols + x] = Cell{};
+                    for (int y = 0; y < m_rows; y++) {
+                        for (int x = 0; x < m_cols; x++) {
+                            m_cells[(y * m_cols) + x] = Cell{};
+                        }
+                    }
                     m_scrollback.clear();
                 } else if (mode == 0) {
-                    for (int x = m_cursorX; x < m_cols; x++)
-                        m_cells[m_cursorY * m_cols + x] = Cell{};
-                    for (int y = m_cursorY + 1; y < m_rows; y++)
-                        for (int x = 0; x < m_cols; x++)
-                            m_cells[y * m_cols + x] = Cell{};
+                    for (int x = m_cursorX; x < m_cols; x++) {
+                        m_cells[(m_cursorY * m_cols) + x] = Cell{};
+                    }
+                    for (int y = m_cursorY + 1; y < m_rows; y++) {
+                        for (int x = 0; x < m_cols; x++) {
+                            m_cells[(y * m_cols) + x] = Cell{};
+                        }
+                    }
                 } else if (mode == 1) {
-                    for (int y = 0; y < m_cursorY; y++)
-                        for (int x = 0; x < m_cols; x++)
-                            m_cells[y * m_cols + x] = Cell{};
-                    for (int x = 0; x <= m_cursorX; x++)
-                        m_cells[m_cursorY * m_cols + x] = Cell{};
+                    for (int y = 0; y < m_cursorY; y++) {
+                        for (int x = 0; x < m_cols; x++) {
+                            m_cells[(y * m_cols) + x] = Cell{};
+                        }
+                    }
+                    for (int x = 0; x <= m_cursorX; x++) {
+                        m_cells[(m_cursorY * m_cols) + x] = Cell{};
+                    }
                 }
                 break;
             }
             case 'K': {
                 int mode = nums.isEmpty() ? 0 : nums[0];
                 if (mode == 0) {
-                    for (int x = m_cursorX; x < m_cols; x++)
-                        m_cells[m_cursorY * m_cols + x] = Cell{};
+                    for (int x = m_cursorX; x < m_cols; x++) {
+                        m_cells[(m_cursorY * m_cols) + x] = Cell{};
+                    }
                 } else if (mode == 1) {
-                    for (int x = 0; x <= m_cursorX; x++)
-                        m_cells[m_cursorY * m_cols + x] = Cell{};
+                    for (int x = 0; x <= m_cursorX; x++) {
+                        m_cells[(m_cursorY * m_cols) + x] = Cell{};
+                    }
                 } else if (mode == 2) {
-                    for (int x = 0; x < m_cols; x++)
-                        m_cells[m_cursorY * m_cols + x] = Cell{};
+                    for (int x = 0; x < m_cols; x++) {
+                        m_cells[(m_cursorY * m_cols) + x] = Cell{};
+                    }
                 }
                 break;
             }
@@ -578,18 +899,22 @@ void VtTerminalWidget::parseCsi(const QByteArray& data, int& i) {
             }
             case 'P': {
                 int n = nums.isEmpty() ? 1 : qMax(1, nums[0]);
-                for (int x = m_cursorX; x < m_cols - n; x++)
-                    m_cells[m_cursorY * m_cols + x] = m_cells[m_cursorY * m_cols + x + n];
-                for (int x = m_cols - n; x < m_cols; x++)
-                    m_cells[m_cursorY * m_cols + x] = Cell{};
+                for (int x = m_cursorX; x < m_cols - n; x++) {
+                    m_cells[(m_cursorY * m_cols) + x] = m_cells[(m_cursorY * m_cols) + x + n];
+                }
+                for (int x = m_cols - n; x < m_cols; x++) {
+                    m_cells[(m_cursorY * m_cols) + x] = Cell{};
+                }
                 break;
             }
             case '@': {
                 int n = nums.isEmpty() ? 1 : qMax(1, nums[0]);
-                for (int x = m_cols - 1; x >= m_cursorX + n; x--)
-                    m_cells[m_cursorY * m_cols + x] = m_cells[m_cursorY * m_cols + x - n];
-                for (int x = m_cursorX; x < m_cursorX + n && x < m_cols; x++)
-                    m_cells[m_cursorY * m_cols + x] = Cell{};
+                for (int x = m_cols - 1; x >= m_cursorX + n; x--) {
+                    m_cells[(m_cursorY * m_cols) + x] = m_cells[(m_cursorY * m_cols) + x - n];
+                }
+                for (int x = m_cursorX; x < m_cursorX + n && x < m_cols; x++) {
+                    m_cells[(m_cursorY * m_cols) + x] = Cell{};
+                }
                 break;
             }
             case 'h':
@@ -597,20 +922,21 @@ void VtTerminalWidget::parseCsi(const QByteArray& data, int& i) {
                 bool enable = (c == 'h');
                 if (params.startsWith('?')) {
                     for (int n : nums) {
-                        if (n == 1000)
+                        if (n == 1000) {
                             m_mouseTrackingNormal = enable;
-                        else if (n == 1002)
+                        } else if (n == 1002) {
                             m_mouseTrackingButton = enable;
-                        else if (n == 1003)
+                        } else if (n == 1003) {
                             m_mouseTrackingAny = enable;
-                        else if (n == 1006)
+                        } else if (n == 1006) {
                             m_mouseTrackingSgr = enable;
-                        else if (n == 1015)
+                        } else if (n == 1015) {
                             m_mouseTrackingUrxvt = enable;
-                        else if (n == 25)
+                        } else if (n == 25) {
                             m_cursorVisible = enable;
-                        else if (n == 2004)
+                        } else if (n == 2004) {
                             m_bracketedPaste = enable;
+                        }
                     }
                     setMouseTracking(m_mouseTrackingAny || m_mouseTrackingButton || m_mouseTrackingNormal);
                 }
@@ -658,8 +984,9 @@ void VtTerminalWidget::parseOsc(const QByteArray& data, int& i) {
         if (uri.startsWith(prefix)) {
             QString path = uri.mid(prefix.size());
             int slash = path.indexOf('/');
-            if (slash >= 0)
+            if (slash >= 0) {
                 path = path.mid(slash);
+            }
             emit workingDirectoryChanged(path);
         }
     }
@@ -748,30 +1075,34 @@ void VtTerminalWidget::applySgr(const QVector<int>& params) {
 void VtTerminalWidget::focusInEvent(QFocusEvent* e) {
     QWidget::focusInEvent(e);
     m_cursorBlinkState = true;
-    if (m_cursorBlinkTimer)
+    if (m_cursorBlinkTimer != nullptr) {
         m_cursorBlinkTimer->start(500);
+    }
     update();
 }
 
 void VtTerminalWidget::focusOutEvent(QFocusEvent* e) {
     QWidget::focusOutEvent(e);
-    if (m_cursorBlinkTimer)
+    if (m_cursorBlinkTimer != nullptr) {
         m_cursorBlinkTimer->stop();
+    }
     m_cursorBlinkState = false;
     update();
 }
 
 void VtTerminalWidget::keyPressEvent(QKeyEvent* e) {
     m_cursorBlinkState = true;
-    if (m_cursorBlinkTimer)
+    if (m_cursorBlinkTimer != nullptr) {
         m_cursorBlinkTimer->start(500);
+    }
 
     // Handle terminal clipboard shortcuts before translating Ctrl+key into
     // control characters.  Otherwise Ctrl+Shift+C/V are reduced to Ctrl+C/V
     // and reach the shell as ^C/^V instead of performing the UI action.
     const Qt::KeyboardModifiers modifiers = e->modifiers();
-    const bool clipboardShortcut = (modifiers & Qt::ControlModifier) && (modifiers & Qt::ShiftModifier) &&
-                                   !(modifiers & Qt::AltModifier) && !(modifiers & Qt::MetaModifier);
+    const bool clipboardShortcut = ((modifiers & Qt::ControlModifier) != 0u) &&
+                                   ((modifiers & Qt::ShiftModifier) != 0u) && !(modifiers & Qt::AltModifier) &&
+                                   !(modifiers & Qt::MetaModifier);
     if (clipboardShortcut && e->key() == Qt::Key_C) {
         copyClipboard();
         e->accept();
@@ -828,9 +1159,10 @@ void VtTerminalWidget::keyPressEvent(QKeyEvent* e) {
         // AltGr is reported as Ctrl+Alt on Windows and as GroupSwitchModifier
         // on X11. We must not treat it as a Ctrl shortcut, otherwise layouts
         // that use AltGr for symbols (e.g. '\', '@', '#', '~') produce nothing.
-        const bool altGr = (e->modifiers() & Qt::GroupSwitchModifier) ||
-                           ((e->modifiers() & Qt::ControlModifier) && (e->modifiers() & Qt::AltModifier));
-        if ((e->modifiers() & Qt::ControlModifier) && !altGr) {
+        const bool altGr =
+            ((e->modifiers() & Qt::GroupSwitchModifier) != 0u) ||
+            (((e->modifiers() & Qt::ControlModifier) != 0u) && ((e->modifiers() & Qt::AltModifier) != 0u));
+        if (((e->modifiers() & Qt::ControlModifier) != 0u) && !altGr) {
             int k = e->key();
             if (k >= Qt::Key_A && k <= Qt::Key_Z) {
                 out.append(static_cast<char>(k - Qt::Key_A + 1));
@@ -884,15 +1216,25 @@ static QVector<HighlightRule> getHighlightRules() {
     static QVector<HighlightRule> rules = {
         {QRegularExpression(R"(\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b)"), QColor("#9ece6a"), true},
         {QRegularExpression(R"(\b\d+\b)"), QColor("#ff9e64"), false},
-        {QRegularExpression(R"(\b(error|failed|failure|critical|fatal|exception)\b)",
-                            QRegularExpression::CaseInsensitiveOption),
-         QColor("#f7768e"), true},
-        {QRegularExpression(R"(\b(success|ok|connected|accepted|established|online)\b)",
-                            QRegularExpression::CaseInsensitiveOption),
-         QColor("#9ece6a"), true},
-        {QRegularExpression(R"(\b(warning|warn|attention)\b)", QRegularExpression::CaseInsensitiveOption),
-         QColor("#e0af68"), true},
-        {QRegularExpression(R"(\b(https?://\S+|/[a-zA-Z0-9_\-\./]+)\b)"), QColor("#7dcfff"), false}};
+        {
+            QRegularExpression(R"(\b(error|failed|failure|critical|fatal|exception)\b)",
+                               QRegularExpression::CaseInsensitiveOption),
+            QColor("#f7768e"),
+            true,
+        },
+        {
+            QRegularExpression(R"(\b(success|ok|connected|accepted|established|online)\b)",
+                               QRegularExpression::CaseInsensitiveOption),
+            QColor("#9ece6a"),
+            true,
+        },
+        {
+            QRegularExpression(R"(\b(warning|warn|attention)\b)", QRegularExpression::CaseInsensitiveOption),
+            QColor("#e0af68"),
+            true,
+        },
+        {QRegularExpression(R"(\b(https?://\S+|/[a-zA-Z0-9_\-\./]+)\b)"), QColor("#7dcfff"), false},
+    };
     return rules;
 }
 
@@ -917,8 +1259,9 @@ void VtTerminalWidget::rebuildHighlightCache(int firstLine) {
                 const int end = match.capturedEnd();
                 for (int x = start; x < end && x < m_cols; ++x) {
                     m_overrideFg[y][x] = rule.fgColor;
-                    if (rule.bold)
+                    if (rule.bold) {
                         m_overrideBold[y][x] = true;
+                    }
                 }
             }
         }
@@ -932,12 +1275,13 @@ void VtTerminalWidget::paintEvent(QPaintEvent* event) {
     QPainter painter(this);
     painter.setFont(m_font);
 
-    const QRect dirtyRect = event ? event->rect() : rect();
+    const QRect dirtyRect = (event != nullptr) ? event->rect() : rect();
     painter.fillRect(dirtyRect, currentPalette().bg);
 
     int firstLine = firstVisibleLine();
-    if (m_highlightDirty || m_highlightFirstLine != firstLine)
+    if (m_highlightDirty || m_highlightFirstLine != firstLine) {
         rebuildHighlightCache(firstLine);
+    }
 
     int startY = qBound(0, dirtyRect.top() / m_charHeight, m_rows - 1);
     int endY = qBound(0, (dirtyRect.bottom() + m_charHeight - 1) / m_charHeight, m_rows);
@@ -957,8 +1301,9 @@ void VtTerminalWidget::paintEvent(QPaintEvent* event) {
                 c.bg = QColor("#264f78");
                 c.bgSet = true;
             }
-            if (c.ch != u' ' || c.bgSet || c.inverse || c.underline || c.fgSet)
+            if (c.ch != u' ' || c.bgSet || c.inverse || c.underline || c.fgSet) {
                 drawCell(painter, x, y, c);
+            }
         }
     }
 
@@ -1019,12 +1364,15 @@ void VtTerminalWidget::drawCell(QPainter& painter, int x, int y, const Cell& c) 
         bg = c.bg;
     }
 
-    if (c.inverse)
+    if (c.inverse) {
         std::swap(fg, bg);
-    if (c.bold && c.fgSet)
+    }
+    if (c.bold && c.fgSet) {
         fg = fg.lighter(130);
-    if (c.dim)
+    }
+    if (c.dim) {
         fg = QColor((fg.red() + bg.red()) / 2, (fg.green() + bg.green()) / 2, (fg.blue() + bg.blue()) / 2);
+    }
 
     if (bg != currentPalette().bg) {
         painter.fillRect(x * m_charWidth, y * m_charHeight, m_charWidth, m_charHeight, bg);
@@ -1047,8 +1395,8 @@ void VtTerminalWidget::drawCell(QPainter& painter, int x, int y, const Cell& c) 
     }
 
     if (c.underline) {
-        painter.drawLine(x * m_charWidth, (y + 1) * m_charHeight - 1, (x + 1) * m_charWidth,
-                         (y + 1) * m_charHeight - 1);
+        painter.drawLine(x * m_charWidth, ((y + 1) * m_charHeight) - 1, (x + 1) * m_charWidth,
+                         ((y + 1) * m_charHeight) - 1);
     }
 
     if (c.bold || c.italic) {
@@ -1065,16 +1413,18 @@ int VtTerminalWidget::firstVisibleLine() const {
 }
 
 VtTerminalWidget::Cell VtTerminalWidget::cellAt(int x, int fullLine) const {
-    if (x < 0 || x >= m_cols)
+    if (x < 0 || x >= m_cols) {
         return Cell{};
+    }
     if (fullLine < m_scrollback.size()) {
-        if (fullLine < 0)
+        if (fullLine < 0) {
             return Cell{};
+        }
         return m_scrollback[fullLine][x];
     }
     int screenLine = fullLine - m_scrollback.size();
     if (screenLine >= 0 && screenLine < m_rows) {
-        return m_cells[screenLine * m_cols + x];
+        return m_cells[(screenLine * m_cols) + x];
     }
     return Cell{};
 }
@@ -1095,17 +1445,22 @@ bool VtTerminalWidget::inSelection(int x, int fullLine) const {
         std::swap(sx, ex);
         std::swap(sy, ey);
     }
-    if (sx == ex && sy == ey)
+    if (sx == ex && sy == ey) {
         return false;
+    }
 
-    if (fullLine < sy || fullLine > ey)
+    if (fullLine < sy || fullLine > ey) {
         return false;
-    if (fullLine == sy && fullLine == ey)
+    }
+    if (fullLine == sy && fullLine == ey) {
         return x >= sx && x <= ex;
-    if (fullLine == sy)
+    }
+    if (fullLine == sy) {
         return x >= sx;
-    if (fullLine == ey)
+    }
+    if (fullLine == ey) {
         return x <= ex;
+    }
     return true;
 }
 
@@ -1118,13 +1473,15 @@ QString VtTerminalWidget::selectedText() const {
         std::swap(sx, ex);
         std::swap(sy, ey);
     }
-    if (sx == ex && sy == ey)
+    if (sx == ex && sy == ey) {
         return QString();
+    }
 
     QString result;
     for (int line = sy; line <= ey; line++) {
-        if (line != sy)
+        if (line != sy) {
             result += '\n';
+        }
         int startX = (line == sy) ? sx : 0;
         int endX = (line == ey) ? ex : m_cols - 1;
         QString lineText;
@@ -1132,8 +1489,9 @@ QString VtTerminalWidget::selectedText() const {
             Cell c = cellAt(x, line);
             lineText += QChar(c.ch);
         }
-        while (lineText.endsWith(u' '))
+        while (lineText.endsWith(u' ')) {
             lineText.chop(1);
+        }
         result += lineText;
     }
     return result;
@@ -1146,10 +1504,11 @@ void VtTerminalWidget::mousePressEvent(QMouseEvent* e) {
     // If mouse tracking is enabled by remote app (e.g. htop/mc/vim), send VT mouse report
     if (m_mouseTrackingNormal || m_mouseTrackingButton) {
         int btn = 0;
-        if (e->button() == Qt::RightButton)
+        if (e->button() == Qt::RightButton) {
             btn = 2;
-        else if (e->button() == Qt::MiddleButton)
+        } else if (e->button() == Qt::MiddleButton) {
             btn = 1;
+        }
         if (m_mouseTrackingSgr) {
             // SGR format: ESC [ < btn ; col ; row M
             QByteArray report = QString("\x1b[<%1;%2;%3M").arg(btn).arg(col + 1).arg(row + 1).toUtf8();
@@ -1187,15 +1546,17 @@ void VtTerminalWidget::mouseDoubleClickEvent(QMouseEvent* e) {
         int startX = col;
         while (startX > 0) {
             QChar ch = cellAt(startX - 1, line).ch;
-            if (ch.isSpace() || ch.isPunct())
+            if (ch.isSpace() || ch.isPunct()) {
                 break;
+            }
             startX--;
         }
         int endX = col;
         while (endX < m_cols - 1) {
             QChar ch = cellAt(endX + 1, line).ch;
-            if (ch.isSpace() || ch.isPunct())
+            if (ch.isSpace() || ch.isPunct()) {
                 break;
+            }
             endX++;
         }
 
@@ -1216,14 +1577,15 @@ void VtTerminalWidget::mouseMoveEvent(QMouseEvent* e) {
 
     if (m_mouseTrackingAny || (m_mouseTrackingButton && (e->buttons() != Qt::NoButton))) {
         int btn = 32; // motion flag
-        if (e->buttons() & Qt::LeftButton)
+        if (e->buttons().testFlag(Qt::LeftButton)) {
             btn += 0;
-        else if (e->buttons() & Qt::RightButton)
+        } else if (e->buttons().testFlag(Qt::RightButton)) {
             btn += 2;
-        else if (e->buttons() & Qt::MiddleButton)
+        } else if (e->buttons().testFlag(Qt::MiddleButton)) {
             btn += 1;
-        else
+        } else {
             btn = 35; // motion without button
+        }
 
         if (m_mouseTrackingSgr) {
             QByteArray report = QString("\x1b[<%1;%2;%3M").arg(btn).arg(col + 1).arg(row + 1).toUtf8();
@@ -1251,10 +1613,11 @@ void VtTerminalWidget::mouseReleaseEvent(QMouseEvent* e) {
         if (m_mouseTrackingSgr) {
             // SGR release format uses 'm' instead of 'M'
             int btn = 0;
-            if (e->button() == Qt::RightButton)
+            if (e->button() == Qt::RightButton) {
                 btn = 2;
-            else if (e->button() == Qt::MiddleButton)
+            } else if (e->button() == Qt::MiddleButton) {
                 btn = 1;
+            }
             QByteArray report = QString("\x1b[<%1;%2;%3m").arg(btn).arg(col + 1).arg(row + 1).toUtf8();
             emit dataReady(report);
         } else {
@@ -1318,16 +1681,18 @@ void VtTerminalWidget::copyClipboard() {
 void VtTerminalWidget::pasteClipboard() {
     QString text = QApplication::clipboard()->text();
     if (!text.isEmpty()) {
-        if (m_bracketedPaste)
+        if (m_bracketedPaste) {
             emit dataReady("\x1b[200~" + text.toUtf8() + "\x1b[201~");
-        else
+        } else {
             emit dataReady(text.toUtf8());
+        }
     }
 }
 
 bool VtTerminalWidget::findText(const QString& str, bool next, bool caseSensitive) {
-    if (str.isEmpty())
+    if (str.isEmpty()) {
         return false;
+    }
 
     int total = totalLines();
     int startLine = 0;
@@ -1377,8 +1742,9 @@ bool VtTerminalWidget::findText(const QString& str, bool next, bool caseSensitiv
         for (int line = startLine; line < total; ++line) {
             QString lineText = getLineText(line);
             int col = (line == startLine) ? startCol : 0;
-            if (col >= lineText.size())
+            if (col >= lineText.size()) {
                 continue;
+            }
 
             int idx = lineText.indexOf(str, col, cs);
             if (idx != -1) {
@@ -1396,8 +1762,9 @@ bool VtTerminalWidget::findText(const QString& str, bool next, bool caseSensitiv
         for (int line = 0; line <= startLine; ++line) {
             QString lineText = getLineText(line);
             int idx = lineText.indexOf(str, 0, cs);
-            if (line == startLine && idx >= startCol)
+            if (line == startLine && idx >= startCol) {
                 continue;
+            }
             if (idx != -1) {
                 m_selStartX = idx;
                 m_selStartY = line;

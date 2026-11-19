@@ -1,5 +1,6 @@
 #pragma once
 #include <QWidget>
+#include <QSet>
 #include <QFileSystemWatcher>
 #include <QMap>
 #include <QPointer>
@@ -12,16 +13,19 @@ class QTreeWidgetItem;
 class QLineEdit;
 class QPushButton;
 class QLabel;
-class QProgressBar;
+class SftpTransferProgress;
 class QSplitter;
+class QStackedWidget;
+class QStatusBar;
 class FtpClient;
 class QThread;
+class QTimer;
 class SftpProgressLabel;
 
 class SftpSidebar : public QWidget {
     Q_OBJECT
 public:
-    explicit SftpSidebar(QWidget* parent = nullptr);
+    explicit SftpSidebar(QWidget* parent = nullptr, QStatusBar* statusBar = nullptr);
     ~SftpSidebar() override;
 
     void setConnection(SshConnection* connection);
@@ -34,9 +38,15 @@ public:
     void stopSession();
     void saveLayout();
     bool hasActiveTransfers() const {
-        return m_transferActive || !m_parallelTransfers.isEmpty() || !m_transferQueue.isEmpty();
+        return m_transferActive || !m_parallelTransfers.isEmpty() || !m_transferQueue.isEmpty() ||
+               !m_downloadFolders.isEmpty() || m_preparingUploads > 0;
     }
 
+    bool hasPendingFileOperations() const {
+        return hasActiveTransfers() || m_deleteActive;
+    }
+
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 public slots:
     void navigateTo(const QString& path);
 
@@ -45,6 +55,7 @@ private slots:
     void onConnectionFailed(const QString& error);
     void onDirectoryListed(const QString& path, const QList<SftpFile>& files);
     void onOperationFinished(bool success, const QString& error);
+    void onFileTransferred(const QString& localPath);
     void onTransferProgress(const QString& fileName, qint64 bytesDone, qint64 totalBytes);
     void onPasswordRequired(const QString& prompt);
 
@@ -98,6 +109,8 @@ private:
     void populateFileTree(QTreeWidget* tree, const QString& path, const QList<SftpFile>& files, bool hasParent);
     QStringList selectedRemotePaths() const;
     void startDirectoryDownload();
+    void deleteNextRemoteItem();
+    bool startPendingDirectoryDownload();
     void setFtpClient(FtpClient* client);
     void detachFtp();
     bool eventFilter(QObject* watched, QEvent* event) override;
@@ -110,8 +123,14 @@ private:
         bool isDirUpload = false;
         int attempts = 0;
         bool isDirDownload = false;
+        std::shared_ptr<const UploadFolderPlan> uploadPlan;
+        QSet<QString> completedPaths;
     };
+    void queueDownloadItem(const TransferItem& item);
+    QString transferCountText() const;
+    void recordTransferredFile(TransferItem& item, const QString& localPath);
     void enqueueUpload(const QStringList& localPaths);
+    void queuePreparedUploads(const QList<TransferItem>& items, int count);
     void enqueueDownload(const QStringList& remotePaths);
     void enqueueDownloadTo(const QStringList& remotePaths, const QString& destinationDir);
     void startNextTransfer();
@@ -120,6 +139,7 @@ private:
     void stopParallelTransfers();
     void finishTransferQueue(bool success, const QString& error);
     void setTransferUi(bool active);
+    void showTransferStatus(bool active);
 
     QLineEdit* m_pathEdit;
     QPushButton* m_upBtn;
@@ -133,21 +153,26 @@ private:
     QPushButton* m_chmodBtn;
     QTreeWidget* m_treeWidget;
     QTreeWidget* m_localTree = nullptr;
+    QTimer* m_localRefreshTimer = nullptr;
     QFileSystemWatcher* m_localWatcher = nullptr;
     QString m_localPath;
     QLineEdit* m_localPathEdit = nullptr;
     QPushButton* m_downloadToLocalBtn = nullptr;
+    bool m_deleteActive = false;
+    QList<QPair<QString, bool>> m_deleteQueue;
     bool m_directoryDownloadActive = false;
     bool m_directoryDownloadCancelled = false;
     QSplitter* m_fileSplitter = nullptr;
-    QLabel* m_statusLabel;
-    QProgressBar* m_progressBar;
+    QStackedWidget* m_remoteStatus;
+    SftpProgressLabel* m_statusLabel;
+    SftpTransferProgress* m_progressBar;
     SftpProgressLabel* m_progressLabel;
     QPushButton* m_cancelTransferBtn;
     QPushButton* m_pauseTransferBtn;
 
     QPointer<SshConnection> m_connection;
     QPointer<FtpClient> m_ftp;
+    QThread* m_ftpThread = nullptr;
 
     std::shared_ptr<TransferConflict> m_conflict = std::make_shared<TransferConflict>();
     void beginTransferBatch();
@@ -160,6 +185,11 @@ private:
     QList<TransferItem> m_transferQueue;
     bool m_transferActive = false;
     bool m_transferPaused = false;
+    int m_transferFileCount = 0;
+    int m_transferredFiles = 0;
+    int m_preparingUploads = 0;
+    quint64 m_uploadGeneration = 0;
+    QList<TransferItem> m_downloadFolders;
     QString m_transferCurrentName;
     TransferItem m_activeTransfer;
 
@@ -170,6 +200,7 @@ private:
         SftpTransferWorker* worker = nullptr;
     };
     QList<ParallelTransfer> m_parallelTransfers;
+    QList<ParallelTransfer> m_idleTransferWorkers;
     int m_maxParallelTransfers = 1;
 
     void startNextEdit();

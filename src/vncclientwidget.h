@@ -67,6 +67,9 @@ private:
 
     rfbClient* m_client = nullptr;
     QImage m_framebuffer;
+    QImage m_displayFrame;
+    QRect m_dirtyFrame;
+    std::atomic<bool> m_updatePending{false};
     QMutex m_framebufferMutex;
     QMutex m_inputMutex;
     QList<PendingInput> m_pendingInputs;

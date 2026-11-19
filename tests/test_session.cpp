@@ -19,6 +19,8 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QStatusBar>
+#include <QStackedWidget>
 #include <QTimer>
 #include <QDialog>
 #include <QLineEdit>
@@ -31,7 +33,6 @@
 #include <QFrame>
 #include <QPushButton>
 #include <QPointer>
-#include <QStandardPaths>
 #include <memory>
 #include <cmath>
 #include <vector>
@@ -128,6 +129,7 @@ private:
         return QDir(QDir::tempPath()).filePath("banchoxterm-test-settings");
     }
 
+    // NOLINTNEXTLINE(readability-redundant-access-specifiers) Qt MOC uses this section.
 private slots:
     void testTransferContinuesWhenChangingTabs() {
         MainWindow window;
@@ -149,21 +151,43 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(&window, "onCurrentTabChanged", Qt::DirectConnection,
                                           Q_ARG(QTabWidget*, pane), Q_ARG(int, -1)));
         QVERIFY(sidebar->hasActiveTransfers());
-        auto* monitor = window.findChild<QDialog*>("transferMonitor");
+        window.show();
+        auto* monitor = window.findChild<QWidget*>("transferMonitor");
         QVERIFY(monitor);
+        QVERIFY(!monitor->isWindow());
         QTRY_VERIFY(monitor->isVisible());
-        monitor->grab().save("build/transfer-monitor-preview.png");
-        auto* toggle = monitor->findChild<QPushButton*>("transferMonitorToggle");
-        QVERIFY(toggle);
-        const int expanded = monitor->height();
-        toggle->click();
-        QVERIFY(monitor->height() < expanded);
+        auto* progress = monitor->findChild<QProgressBar*>("sftpTransferProgress");
+        QVERIFY(progress);
+        QCOMPARE(progress->text(), QString("Counting files..."));
         QVERIFY(sidebar->hasActiveTransfers());
+        QCOMPARE(monitor->window(), &window);
+        auto* toggle = monitor->findChild<QPushButton*>("transferPopupToggle");
+        auto* actions = monitor->findChild<QWidget*>("transferPopupActions");
+        QVERIFY(toggle && actions);
+        const int expandedHeight = monitor->height();
         toggle->click();
-        QVERIFY(monitor->height() >= expanded);
+        QTRY_VERIFY(monitor->height() < expandedHeight);
+        QVERIFY(actions->isHidden());
+        QVERIFY(progress->isVisible());
+        QVERIFY(sidebar->hasActiveTransfers());
+        window.resize(window.width() + 32, window.height() + 24);
+        QTRY_VERIFY(window.rect().contains(QRect(monitor->mapTo(&window, QPoint()), monitor->size())));
+        const QList<SftpFile> files{{"first.txt", false}, {"second.txt", false}};
         QVERIFY(QMetaObject::invokeMethod(sidebar, "onDirectoryListed", Qt::DirectConnection,
-                                          Q_ARG(QString, "/remote/folder"), Q_ARG(QList<SftpFile>, QList<SftpFile>())));
+                                          Q_ARG(QString, "/remote/folder"), Q_ARG(QList<SftpFile>, files)));
+        QTRY_COMPARE(progress->text(), QString("0 of 2 files transferred"));
+        QVERIFY(
+            QMetaObject::invokeMethod(sidebar, "onFileTransferred", Q_ARG(QString, dir.filePath("folder/first.txt"))));
+        QTRY_COMPARE(progress->text(), QString("1 of 2 files transferred"));
+        toggle->click();
+        QTRY_VERIFY(actions->isVisible());
+        QTRY_COMPARE(monitor->height(), expandedHeight);
+        QVERIFY(
+            QMetaObject::invokeMethod(sidebar, "onOperationFinished", Q_ARG(bool, true), Q_ARG(QString, QString())));
+        QVERIFY(QMetaObject::invokeMethod(sidebar, "onOperationFinished", Q_ARG(bool, true),
+                                          Q_ARG(QString, QString("File skipped"))));
         QVERIFY(!sidebar->hasActiveTransfers());
+        QTRY_VERIFY(!monitor->isVisible());
     }
 
     void testSftpDeleteSelection_data() {
@@ -203,15 +227,23 @@ private slots:
             }
             box->button(confirm ? QMessageBox::Yes : QMessageBox::No)->click();
         });
-        // Simulate an immediate refresh after the first deletion. The rest of
-        // the batch must retain the paths and file types confirmed by the user.
         connect(&sidebar, &SftpSidebar::requestDelete, tree, [tree] { tree->clear(); });
         QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDeleteClicked", Qt::DirectConnection));
+        QCOMPARE(deleted.count(), confirm ? 1 : 0);
+        if (confirm) {
+            const int count = multiple ? 3 : 1;
+            for (int i = 0; i < count; ++i) {
+                QCOMPARE(deleted.count(), i + 1);
+                QVERIFY(QMetaObject::invokeMethod(&sidebar, "onOperationFinished", Q_ARG(bool, true),
+                                                  Q_ARG(QString, QString())));
+            }
+        }
         QCOMPARE(confirmations, 1);
         QCOMPARE(deleted.count(), confirm ? (multiple ? 3 : 1) : 0);
         QMap<QString, bool> targets;
-        for (const auto& args : deleted)
+        for (const auto& args : deleted) {
             targets.insert(args.at(0).toString(), args.at(1).toBool());
+        }
         if (confirm) {
             QVERIFY(targets.contains("/remote/first.txt"));
             QVERIFY(!targets.value("/remote/first.txt"));
@@ -258,8 +290,9 @@ private slots:
         int prompts = 0;
         connect(&responder, &QTimer::timeout, &sidebar, [&] {
             auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
-            if (!dialog)
+            if (!dialog) {
                 return;
+            }
             ++prompts;
             dialog->setTextValue("renamed-" + dialog->textValue());
             dialog->accept();
@@ -279,8 +312,9 @@ private slots:
         disconnect(&responder, nullptr, &sidebar, nullptr);
         connect(&responder, &QTimer::timeout, &sidebar, [&] {
             auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
-            if (!dialog)
+            if (!dialog) {
                 return;
+            }
             if (++prompts == 1) {
                 dialog->setTextValue("changed.txt");
                 dialog->accept();
@@ -297,18 +331,22 @@ private slots:
 
     void testSftpEditSelectionQueue() {
         const QString editor = QStandardPaths::findExecutable("true");
-        if (editor.isEmpty())
+        if (editor.isEmpty()) {
             QSKIP("A noninteractive editor stub is required.");
+        }
         QSettings settings;
         const QVariant oldCustom = settings.value("editor/useCustom");
         const QVariant oldPath = settings.value("editor/customPath");
         const auto restore = qScopeGuard([&] {
-            for (const auto& entry : {qMakePair(QString("editor/useCustom"), oldCustom),
-                                      qMakePair(QString("editor/customPath"), oldPath)}) {
-                if (entry.second.isValid())
+            for (const auto& entry : {
+                     qMakePair(QString("editor/useCustom"), oldCustom),
+                     qMakePair(QString("editor/customPath"), oldPath),
+                 }) {
+                if (entry.second.isValid()) {
                     settings.setValue(entry.first, entry.second);
-                else
+                } else {
                     settings.remove(entry.first);
+                }
             }
         });
         settings.setValue("editor/useCustom", true);
@@ -316,7 +354,10 @@ private slots:
         SftpSidebar sidebar;
         const QString prefix = QUuid::createUuid().toString(QUuid::WithoutBraces);
         const QList<SftpFile> files = {
-            {prefix + "-first.txt", false}, {prefix + "-second.txt", false}, {"folder", true}};
+            {prefix + "-first.txt", false},
+            {prefix + "-second.txt", false},
+            {"folder", true},
+        };
         QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDirectoryListed", Qt::DirectConnection,
                                           Q_ARG(QString, "/remote"), Q_ARG(QList<SftpFile>, files)));
         auto* tree = sidebar.findChild<QTreeWidget*>("sftpTree");
@@ -324,8 +365,9 @@ private slots:
         QSignalSpy downloads(&sidebar, &SftpSidebar::requestDownload);
         QStringList localFiles;
         const auto cleanup = qScopeGuard([&] {
-            for (const QString& path : localFiles)
+            for (const QString& path : localFiles) {
                 QFile::remove(path);
+            }
         });
         connect(&sidebar, &SftpSidebar::requestDownload, &sidebar, [&](const QString&, const QString& local) {
             QFile file(local);
@@ -344,8 +386,9 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(downloads.count(), 2);
         QSet<QString> paths;
-        for (const auto& args : downloads)
+        for (const auto& args : downloads) {
             paths.insert(args.at(0).toString());
+        }
         QCOMPARE(paths, QSet<QString>({"/remote/" + files.at(0).name, "/remote/" + files.at(1).name}));
     }
 
@@ -353,10 +396,11 @@ private slots:
         QSettings settings;
         const QVariant original = settings.value("sftp/existingFilePolicy");
         auto restore = qScopeGuard([&] {
-            if (original.isValid())
+            if (original.isValid()) {
                 settings.setValue("sftp/existingFilePolicy", original);
-            else
+            } else {
                 settings.remove("sftp/existingFilePolicy");
+            }
         });
         settings.setValue("sftp/existingFilePolicy", 0);
         TransferConflict batch;
@@ -365,9 +409,11 @@ private slots:
             QVERIFY(box);
             box->checkBox()->setChecked(true);
             box->grab().save("build/transfer-conflict-preview.png");
-            for (auto* button : box->buttons())
-                if (box->buttonRole(button) == QMessageBox::ActionRole)
+            for (auto* button : box->buttons()) {
+                if (box->buttonRole(button) == QMessageBox::ActionRole) {
                     button->click();
+                }
+            }
         });
         QCOMPARE(batch.resolve("/remote/existing.txt"), int(TransferConflict::Skip));
         QCOMPARE(batch.resolve("/remote/second.txt"), int(TransferConflict::Skip));
@@ -376,11 +422,14 @@ private slots:
         QTimer::singleShot(0, [] {
             auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
             QVERIFY(box);
-            for (auto* check : box->findChildren<QCheckBox*>())
+            for (auto* check : box->findChildren<QCheckBox*>()) {
                 check->setChecked(true);
-            for (auto* button : box->buttons())
-                if (box->buttonRole(button) == QMessageBox::AcceptRole)
+            }
+            for (auto* button : box->buttons()) {
+                if (box->buttonRole(button) == QMessageBox::AcceptRole) {
                     button->click();
+                }
+            }
         });
         QCOMPARE(permanent.resolve("existing.txt"), int(TransferConflict::Overwrite));
         TransferConflict later;
@@ -443,8 +492,10 @@ private slots:
         auto* bar = sidebar->findChild<QProgressBar*>("sftpTransferProgress");
         auto* status = sidebar->findChild<QLabel*>("sftpStatus");
         QVERIFY(progress && bar && status);
-        progress->show();
-        bar->show();
+        auto* statusStrip = sidebar->findChild<QStackedWidget*>("sftpRemoteStatus");
+        QVERIFY(statusStrip);
+        QCOMPARE(statusStrip->currentWidget(), status);
+        statusStrip->setCurrentWidget(bar);
         QCoreApplication::processEvents();
         const int width = sidebar->width();
         const QString name = QString(400, 'a') + ".zip";
@@ -489,11 +540,12 @@ private slots:
     void testRemoteDirectoryAnnouncements() {
         QSettings settings;
         const auto previous = settings.value("terminal/shellIntegration");
-        const auto restore = qScopeGuard([&]() {
-            if (previous.isValid())
+        const auto restore = qScopeGuard([&] {
+            if (previous.isValid()) {
                 settings.setValue("terminal/shellIntegration", previous);
-            else
+            } else {
                 settings.remove("terminal/shellIntegration");
+            }
         });
         settings.setValue("terminal/shellIntegration", true);
         Session session;
@@ -574,11 +626,12 @@ private slots:
         QSettings settings;
         const QVariant previous = settings.value("terminal/font");
         const bool existed = settings.contains("terminal/font");
-        const auto restore = qScopeGuard([&]() {
-            if (existed)
+        const auto restore = qScopeGuard([&] {
+            if (existed) {
                 settings.setValue("terminal/font", previous);
-            else
+            } else {
                 settings.remove("terminal/font");
+            }
         });
         settings.remove("terminal/font");
         const QFont fallback = TerminalAppearance::defaultFont();
@@ -607,7 +660,7 @@ private slots:
 
     void testTerminalFontSurvivesStyleRefresh() {
         const QString previousStyle = qApp->styleSheet();
-        const auto restore = qScopeGuard([&]() { qApp->setStyleSheet(previousStyle); });
+        const auto restore = qScopeGuard([&] { qApp->setStyleSheet(previousStyle); });
         QTermWidget terminal(0);
         QFont chosen(QStringLiteral("Consolas"), 17);
         chosen.setStyleHint(QFont::Monospace);
@@ -660,7 +713,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(path, "returnPressed"));
         QCOMPARE(path->text(), QDir::toNativeSeparators(dir.path()));
 
-        QTimer::singleShot(0, []() {
+        QTimer::singleShot(0, [] {
             auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             dialog->setTextValue("created");
@@ -670,7 +723,7 @@ private slots:
         QVERIFY(QFileInfo(dir.filePath("created")).isDir());
         QCOMPARE(tree->findItems("created", Qt::MatchExactly).size(), 1);
         tree->setCurrentItem(tree->findItems("created", Qt::MatchExactly).first());
-        QTimer::singleShot(0, []() {
+        QTimer::singleShot(0, [] {
             auto* dialog = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             dialog->setTextValue("renamed");
@@ -710,6 +763,12 @@ private slots:
         QVERIFY(dir.isValid());
         QVERIFY(QDir(dir.path()).mkdir("folder"));
         SftpSidebar sidebar;
+        auto* statusStrip = sidebar.findChild<QStackedWidget*>("sftpRemoteStatus");
+        auto* status = sidebar.findChild<QLabel*>("sftpStatus");
+        auto* count = sidebar.findChild<QProgressBar*>("sftpTransferProgress");
+        QVERIFY(statusStrip && status && count);
+        QCOMPARE(statusStrip->currentWidget(), status);
+        QSignalSpy downloads(&sidebar, &SftpSidebar::requestDownload);
         auto* path = sidebar.findChild<QLineEdit*>("localPathEdit");
         path->setText(dir.path());
         QVERIFY(QMetaObject::invokeMethod(path, "returnPressed"));
@@ -724,23 +783,44 @@ private slots:
         auto* download = sidebar.findChild<QPushButton*>("localDownloadButton");
         QVERIFY(download->isEnabled());
         QSignalSpy listings(&sidebar, &SftpSidebar::requestList);
-        if (remoteAction)
+        if (remoteAction) {
             QVERIFY(QMetaObject::invokeMethod(&sidebar, "onDownloadClicked"));
-        else
+        } else {
             download->click();
+        }
         QCOMPARE(listings.last().first().toString(), QString("/remote/folder"));
         QVERIFY(QFileInfo(dir.filePath("folder")).isDir());
         QVERIFY(!remoteTree->isEnabled());
-        if (cancel)
+        QCOMPARE(statusStrip->currentWidget(), count);
+        QCOMPARE(count->text(), QString("Counting files..."));
+        if (cancel) {
             QVERIFY(QMetaObject::invokeMethod(&sidebar, "onCancelQueuedTransfers"));
-        QVERIFY(list("/remote/folder", {{"nested", true}, {".", true}, {"..", true}}));
+        }
+        QVERIFY(list("/remote/folder", {{"nested", true}, {"top.txt", false}, {".", true}, {"..", true}}));
         if (cancel) {
             QVERIFY(!QFileInfo::exists(dir.filePath("folder/nested")));
         } else {
             QCOMPARE(listings.last().first().toString(), QString("/remote/folder/nested"));
             QVERIFY(QFileInfo(dir.filePath("folder/nested")).isDir());
-            QVERIFY(list("/remote/folder/nested", {}));
+            QVERIFY(downloads.isEmpty());
+            QVERIFY(list("/remote/folder/nested", {{"inside.txt", false}}));
+            QCOMPARE(count->text(), QString("0 of 2 files transferred"));
+            QCOMPARE(downloads.size(), 1);
+            const QString firstFile = downloads.first().at(1).toString();
+            for (int i = 0; i < 2; ++i) {
+                QVERIFY(QMetaObject::invokeMethod(&sidebar, "onFileTransferred", Q_ARG(QString, firstFile)));
+            }
+            QCOMPARE(count->text(), QString("1 of 2 files transferred"));
+            QVERIFY(QMetaObject::invokeMethod(&sidebar, "onOperationFinished", Q_ARG(bool, true),
+                                              Q_ARG(QString, QString())));
+            QCOMPARE(downloads.size(), 2);
+            QVERIFY(QMetaObject::invokeMethod(&sidebar, "onFileTransferred",
+                                              Q_ARG(QString, downloads.last().at(1).toString())));
+            QCOMPARE(count->text(), QString("2 of 2 files transferred"));
+            QVERIFY(QMetaObject::invokeMethod(&sidebar, "onOperationFinished", Q_ARG(bool, true),
+                                              Q_ARG(QString, QString())));
         }
+        QCOMPARE(statusStrip->currentWidget(), status);
         QVERIFY(remoteTree->isEnabled());
         QCOMPARE(sidebar.findChild<QLineEdit*>("remotePathEdit")->text(), QString("/remote"));
         QCOMPARE(listings.last().first().toString(), QString("/remote"));
@@ -752,13 +832,14 @@ private slots:
                 Session session;
                 session.type = static_cast<SessionType>(type);
                 SessionDialog dialog(session);
-                QTimer::singleShot(0, &dialog, [&dialog, action]() {
-                    if (action == 0)
+                QTimer::singleShot(0, &dialog, [&dialog, action] {
+                    if (action == 0) {
                         QTest::keyClick(&dialog, Qt::Key_Escape);
-                    else if (action == 1)
+                    } else if (action == 1) {
                         dialog.findChild<QPushButton*>("cancelButton")->click();
-                    else
+                    } else {
                         dialog.close();
+                    }
                 });
                 QCOMPARE(dialog.exec(), int(QDialog::Rejected));
             }
@@ -804,7 +885,7 @@ private slots:
 
     void testSessionSaveChoice() {
         const auto previous = SessionManager::loadSessions();
-        const auto restore = qScopeGuard([&]() { SessionManager::saveSessions(previous); });
+        const auto restore = qScopeGuard([&] { SessionManager::saveSessions(previous); });
         SessionManager::saveSessions({});
         SessionDialog temporary;
         temporary.findChild<QComboBox*>()->setCurrentIndex(1);
@@ -829,16 +910,17 @@ private slots:
 
     void testNewSessionConnectsWithOptionalSave() {
         const auto previous = SessionManager::loadSessions();
-        const auto restore = qScopeGuard([&]() { SessionManager::saveSessions(previous); });
+        const auto restore = qScopeGuard([&] { SessionManager::saveSessions(previous); });
         SessionManager::saveSessions({});
         SessionsSidebar sidebar;
         QSignalSpy connections(&sidebar, &SessionsSidebar::connectSession);
         for (bool save : {false, true}) {
             bool savingInitiallyDisabled = false;
-            QTimer::singleShot(0, &sidebar, [&]() {
+            QTimer::singleShot(0, &sidebar, [&] {
                 auto* dialog = qobject_cast<SessionDialog*>(QApplication::activeModalWidget());
-                if (!dialog)
+                if (!dialog) {
                     return;
+                }
                 savingInitiallyDisabled = !dialog->savesSession();
                 dialog->findChild<QComboBox*>()->setCurrentIndex(1);
                 dialog->setSaveSession(save);
@@ -850,14 +932,16 @@ private slots:
             const auto session = qvariant_cast<Session>(connections.last().first());
             const auto stored = SessionManager::loadSessions();
             QCOMPARE(stored.size(), save ? 1 : 0);
-            if (save)
+            if (save) {
                 QCOMPARE(stored.first().id, session.id);
+            }
         }
         auto* tree = sidebar.findChild<QTreeWidget*>("sessionTree");
         QCOMPARE(tree->topLevelItemCount(), 1);
-        QTimer::singleShot(0, &sidebar, []() {
-            if (auto* dialog = qobject_cast<SessionDialog*>(QApplication::activeModalWidget()))
+        QTimer::singleShot(0, &sidebar, [] {
+            if (auto* dialog = qobject_cast<SessionDialog*>(QApplication::activeModalWidget())) {
                 dialog->reject();
+            }
         });
         sidebar.onNewSession();
         QCOMPARE(connections.count(), 2);
@@ -871,7 +955,7 @@ private slots:
         const auto oldCollapsed = settings.value("sessions/collapsedGroups");
         const auto oldMetadata = settings.value("sessions/groupMetadata");
         const auto oldOrder = settings.value("sessions/treeOrder");
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             SessionManager::saveSessions(previous);
             settings.setValue("sessions/groups", oldGroups);
             settings.setValue("sessions/collapsedGroups", oldCollapsed);
@@ -935,7 +1019,7 @@ private slots:
         const auto previousGroups = settings.value("sessions/groups");
         const auto previousCollapsed = settings.value("sessions/collapsedGroups");
         const auto previousOrder = settings.value("sessions/treeOrder");
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             SessionManager::saveSessions(previous);
             settings.setValue("sessions/groupMetadata", previousSettings);
             settings.setValue("sessions/groups", previousGroups);
@@ -1006,7 +1090,7 @@ private slots:
         const auto previousGroups = settings.value("sessions/groups");
         const auto previousCollapsed = settings.value("sessions/collapsedGroups");
         const auto previousOrder = settings.value("sessions/treeOrder");
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             SessionManager::saveSessions(previous);
             settings.setValue("sessions/groups", previousGroups);
             settings.setValue("sessions/collapsedGroups", previousCollapsed);
@@ -1019,8 +1103,9 @@ private slots:
         for (const QString& name : {"Loose1", "Grouped1", "Loose2", "Grouped2"}) {
             Session session;
             session.id = session.name = name;
-            if (name.startsWith("Grouped"))
+            if (name.startsWith("Grouped")) {
                 session.group = "G";
+            }
             sessions.append(session);
         }
         SessionManager::saveSessions(sessions);
@@ -1038,13 +1123,15 @@ private slots:
         sidebar.saveCurrentOrder();
         auto verifyOrder = [&](QTreeWidget* current) {
             QStringList top;
-            for (int i = 0; i < current->topLevelItemCount(); ++i)
+            for (int i = 0; i < current->topLevelItemCount(); ++i) {
                 top.append(current->topLevelItem(i)->text(0));
+            }
             QCOMPARE(top, (QStringList{"Loose2", "Empty", "G", "Loose1"}));
             auto* g = current->topLevelItem(2);
             QStringList inner;
-            for (int i = 0; i < g->childCount(); ++i)
+            for (int i = 0; i < g->childCount(); ++i) {
                 inner.append(g->child(i)->text(0));
+            }
             QCOMPARE(inner, (QStringList{"Grouped2", "Nested", "Grouped1"}));
             QVERIFY(!g->isExpanded());
         };
@@ -1080,7 +1167,7 @@ private slots:
         const auto oldCollapsed = settings.value("sessions/collapsedGroups");
         const auto oldMetadata = settings.value("sessions/groupMetadata");
         const auto oldOrder = settings.value("sessions/treeOrder");
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             SessionManager::saveSessions(previous);
             settings.setValue("sessions/groups", oldGroups);
             settings.setValue("sessions/collapsedGroups", oldCollapsed);
@@ -1100,23 +1187,27 @@ private slots:
         sidebar.show();
         auto* tree = sidebar.findChild<QTreeWidget*>("sessionTree");
         auto runAction = [&](const QString& name, const QString& text, bool deleting = false) {
-            QTimer::singleShot(0, &sidebar, [&, name, text, deleting]() {
+            QTimer::singleShot(0, &sidebar, [&, name, text, deleting] {
                 auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
-                if (!menu)
+                if (!menu) {
                     return;
+                }
                 QAction* selected = nullptr;
-                for (auto* action : menu->actions())
-                    if (action->text() == name)
+                for (auto* action : menu->actions()) {
+                    if (action->text() == name) {
                         selected = action;
+                    }
+                }
                 if (!selected) {
                     menu->close();
                     return;
                 }
-                QTimer::singleShot(0, &sidebar, [text, deleting]() {
+                QTimer::singleShot(0, &sidebar, [text, deleting] {
                     if (deleting) {
                         auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
-                        if (box)
+                        if (box) {
                             box->button(QMessageBox::Yes)->click();
+                        }
                     } else {
                         auto* input = qobject_cast<QInputDialog*>(QApplication::activeModalWidget());
                         if (input) {
@@ -1233,7 +1324,7 @@ private slots:
 
     void testSavedBastionSelection() {
         const QList<Session> previous = SessionManager::loadSessions();
-        const auto restore = qScopeGuard([&]() { SessionManager::saveSessions(previous); });
+        const auto restore = qScopeGuard([&] { SessionManager::saveSessions(previous); });
         Session bastion;
         bastion.id = "bastion-profile";
         bastion.name = "Bastion";
@@ -1404,7 +1495,7 @@ private slots:
         const bool nativeDialogsDisabled = QApplication::testAttribute(Qt::AA_DontUseNativeDialogs);
         QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
         const auto restore =
-            qScopeGuard([&]() { QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, nativeDialogsDisabled); });
+            qScopeGuard([&] { QApplication::setAttribute(Qt::AA_DontUseNativeDialogs, nativeDialogsDisabled); });
         Session session;
         session.id = "local-exit-test";
         session.name = "Local shell";
@@ -1421,7 +1512,7 @@ private slots:
         auto* display = terminal->focusProxy();
         QVERIFY(display);
         QVERIFY(display->isVisible());
-        auto history = [&]() {
+        auto history = [&] {
             QBuffer buffer;
             buffer.open(QIODevice::WriteOnly);
             terminal->saveHistory(&buffer);
@@ -1439,7 +1530,7 @@ private slots:
         QCOMPARE(reconnect.count(), 1);
         QCOMPARE(qvariant_cast<Session>(reconnect.first().first()).id, session.id);
         const QString savedPath = directory.filePath("output.log");
-        QTimer::singleShot(0, &tab, [&]() {
+        QTimer::singleShot(0, &tab, [&] {
             if (auto* dialog = qobject_cast<QFileDialog*>(QApplication::activeModalWidget())) {
                 dialog->selectFile(savedPath);
                 QMetaObject::invokeMethod(dialog, "accept");
@@ -1452,8 +1543,9 @@ private slots:
         QVERIFY(contents.contains("local-output-café"));
         QVERIFY(contents.contains("Session stopped"));
         QByteArray captured;
-        for (const auto& args : output)
+        for (const auto& args : output) {
             captured += args.first().toByteArray();
+        }
         QCOMPARE(captured.count("Session stopped"), 1);
         QTest::keyClick(display, Qt::Key_Return);
         QCOMPARE(close.count(), 1);
@@ -1496,9 +1588,9 @@ private slots:
     void testSerialConnectionThroughVirtualPort_data() {
         QTest::addColumn<int>("baud");
         QTest::addColumn<int>("flow");
-        QTest::newRow("9600-8N1") << 9600 << int(QSerialPort::NoFlowControl);
-        QTest::newRow("115200-8N1") << 115200 << int(QSerialPort::NoFlowControl);
-        QTest::newRow("driver-controls-RTS") << 115200 << int(QSerialPort::HardwareControl);
+        QTest::newRow("9600-8N1") << 9600 << static_cast<int>(QSerialPort::NoFlowControl);
+        QTest::newRow("115200-8N1") << 115200 << static_cast<int>(QSerialPort::NoFlowControl);
+        QTest::newRow("driver-controls-RTS") << 115200 << static_cast<int>(QSerialPort::HardwareControl);
     }
 
     void testSerialConnectionThroughVirtualPort() {
@@ -1510,8 +1602,9 @@ private slots:
         int peer = posix_openpt(O_RDWR | O_NOCTTY | O_NONBLOCK);
         QVERIFY2(peer >= 0, "Could not create a virtual serial port");
         const auto closePeer = qScopeGuard([&] {
-            if (peer >= 0)
+            if (peer >= 0) {
                 ::close(peer);
+            }
         });
         QVERIFY(grantpt(peer) == 0);
         QVERIFY(unlockpt(peer) == 0);
@@ -1541,8 +1634,9 @@ private slots:
             QByteArray bytes;
             char buffer[4096];
             ssize_t count;
-            while ((count = ::read(peer, buffer, sizeof(buffer))) > 0)
+            while ((count = ::read(peer, buffer, sizeof(buffer))) > 0) {
                 bytes.append(buffer, count);
+            }
             return bytes;
         };
         auto* display = tab.getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
@@ -1554,15 +1648,16 @@ private slots:
         QTRY_COMPARE((wire += readPeer()), QByteArray("show\b\r\n"));
         // Raw binary data must bypass newline/backspace translation and survive buffering.
         QByteArray binary;
-        for (int i = 0; i < 65536; ++i)
-            binary.append(char(i & 0xff));
+        for (int i = 0; i < 65536; ++i) {
+            binary.append(static_cast<char>(i & 0xff));
+        }
         tab.sendBytes(binary);
         wire.clear();
         QTRY_COMPARE_WITH_TIMEOUT((wire += readPeer()), binary, 3000);
         QByteArray received;
         connect(&tab, &TerminalTab::terminalDataReceived, &tab, [&](const QByteArray& bytes) { received += bytes; });
         const QByteArray reply = QString::fromUtf8("device: conexión correcta 界\r\n").toUtf8();
-        const qsizetype split = reply.indexOf(char(0xc3)) + 1;
+        const qsizetype split = reply.indexOf(static_cast<char>(0xc3)) + 1;
         QVERIFY(split > 0);
         QCOMPARE(::write(peer, reply.constData(), split), ssize_t(split));
         QTRY_VERIFY(!received.isEmpty());
@@ -1738,67 +1833,76 @@ private slots:
         QFETCH(bool, earlyCompletionReply);
         QTcpServer controlServer;
         QTcpServer dataServer;
-        if (!controlServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
+        if (!controlServer.listen(QHostAddress(QStringLiteral("127.0.0.1")))) {
             QSKIP(qPrintable(QStringLiteral("Local TCP sockets are unavailable: %1").arg(controlServer.errorString())));
+        }
 
-        QTcpSocket* controlSocket = nullptr;
-        QTcpSocket* dataSocket = nullptr;
+        QPointer<QTcpSocket> controlSocket;
+        QPointer<QTcpSocket> dataSocket;
         QByteArray controlBuffer;
         QByteArray uploadedData;
+        QList<QByteArray> deletionCommands;
         QByteArray pendingDataCommand;
         bool completionSent = false;
-        auto sendPendingData = [&]() {
-            if (!dataSocket || pendingDataCommand.isEmpty() || pendingDataCommand.startsWith("STOR"))
+        auto sendPendingData = [&] {
+            if (!dataSocket || pendingDataCommand.isEmpty() || pendingDataCommand.startsWith("STOR")) {
                 return;
+            }
             const QByteArray command = pendingDataCommand;
             pendingDataCommand.clear();
-            if (command.startsWith("RETR"))
+            if (command.startsWith("RETR")) {
                 dataSocket->write("hello");
-            else if (command == "LIST /tree")
+            } else if (command == "LIST /tree") {
                 dataSocket->write("drwxr-xr-x 1 user group 0 Jan 01 00:00 folder\r\n");
-            else if (command == "LIST /tree/folder")
+            } else if (command == "LIST /tree/folder") {
                 dataSocket->write("drwxr-xr-x 1 user group 0 Jan 01 00:00 empty\r\n"
                                   "-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
-            else if (command != "LIST /tree/folder/empty")
+            } else if (command != "LIST /tree/folder/empty") {
                 dataSocket->write("-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
+            }
             if (earlyCompletionReply) {
                 completionSent = true;
                 controlSocket->write("226 Transfer complete\r\n");
-                QTimer::singleShot(100, dataSocket, &QTcpSocket::disconnectFromHost);
+                QTimer::singleShot(100, dataSocket.data(), &QTcpSocket::disconnectFromHost);
             } else {
                 dataSocket->disconnectFromHost();
             }
         };
 
-        connect(&controlServer, &QTcpServer::newConnection, this, [&]() {
+        connect(&controlServer, &QTcpServer::newConnection, this, [&] {
             controlSocket = controlServer.nextPendingConnection();
-            connect(controlSocket, &QTcpSocket::readyRead, this, [&]() {
-                controlBuffer += controlSocket->readAll();
+            connect(controlSocket, &QTcpSocket::readyRead, controlSocket, [&, socket = controlSocket.data()] {
+                controlBuffer += socket->readAll();
                 while (true) {
                     const qsizetype end = controlBuffer.indexOf("\r\n");
-                    if (end < 0)
+                    if (end < 0) {
                         return;
+                    }
                     const QByteArray command = controlBuffer.left(end);
                     controlBuffer.remove(0, end + 2);
                     const QByteArray upper = command.toUpper();
                     if (upper.startsWith("USER")) {
-                        controlSocket->write("331 Password required\r\n");
+                        socket->write("331 Password required\r\n");
                     } else if (upper.startsWith("PASS")) {
-                        controlSocket->write("230 Logged in\r\n");
+                        socket->write("230 Logged in\r\n");
                     } else if (upper.startsWith("TYPE")) {
-                        controlSocket->write("200 Type set\r\n");
+                        socket->write("200 Type set\r\n");
                     } else if (upper.startsWith("SIZE ")) {
-                        controlSocket->write("213 14\r\n");
+                        socket->write(upper.startsWith("SIZE /TREE/") ? "550 File not found\r\n" : "213 14\r\n");
+                    } else if (upper.startsWith("DELE ") || upper.startsWith("RMD ")) {
+                        deletionCommands.append(command);
+                        socket->write("250 Deleted\r\n");
+                    } else if (upper.startsWith("MKD ")) {
+                        socket->write("257 Directory created\r\n");
                     } else if (upper == "PASV") {
                         completionSent = false;
                         QVERIFY(dataServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))));
                         const quint16 port = dataServer.serverPort();
-                        controlSocket->write(QByteArray("227 Entering Passive Mode (127,0,0,1,") +
-                                             QByteArray::number(port / 256) + "," + QByteArray::number(port % 256) +
-                                             ")\r\n");
+                        socket->write(QByteArray("227 Entering Passive Mode (127,0,0,1,") +
+                                      QByteArray::number(port / 256) + "," + QByteArray::number(port % 256) + ")\r\n");
                     } else if (upper.startsWith("LIST") || upper.startsWith("RETR") || upper.startsWith("STOR")) {
                         pendingDataCommand = command;
-                        controlSocket->write("150 Opening data connection\r\n");
+                        socket->write("150 Opening data connection\r\n");
                         sendPendingData();
                     }
                 }
@@ -1807,26 +1911,29 @@ private slots:
             controlSocket->write("220 Local test FTP server\r\n");
         });
 
-        connect(&dataServer, &QTcpServer::newConnection, &dataServer, [&]() {
+        connect(&dataServer, &QTcpServer::newConnection, &dataServer, [&] {
             auto* socket = dataServer.nextPendingConnection();
-            connect(socket, &QTcpSocket::readyRead, &dataServer, [&, socket]() { uploadedData += socket->readAll(); });
-            connect(socket, &QTcpSocket::disconnected, &dataServer, [&, socket]() {
-                if (controlSocket && !completionSent)
-                    controlSocket->write("226 Transfer complete\r\n");
+            connect(socket, &QTcpSocket::readyRead, &dataServer, [&, socket] { uploadedData += socket->readAll(); });
+            connect(socket, &QTcpSocket::disconnected, &dataServer, [&, socket, control = controlSocket] {
+                if (control && !completionSent) {
+                    control->write("226 Transfer complete\r\n");
+                }
                 pendingDataCommand.clear();
-                if (dataSocket == socket)
+                if (dataSocket == socket) {
                     dataSocket = nullptr;
+                }
                 socket->deleteLater();
                 dataServer.close();
             });
-            auto acceptDataConnection = [&, socket]() {
+            auto acceptDataConnection = [&, socket] {
                 dataSocket = socket;
                 sendPendingData();
             };
-            if (dataAcceptDelay)
+            if (dataAcceptDelay) {
                 QTimer::singleShot(dataAcceptDelay, socket, acceptDataConnection);
-            else
+            } else {
                 acceptDataConnection();
+            }
         });
 
         FtpClient client;
@@ -1865,6 +1972,15 @@ private slots:
         QVERIFY(operationSpy.first().at(0).toBool());
         QCOMPARE(uploadedData, QByteArrayLiteral("upload payload"));
 
+        QVERIFY(QDir(transferDir.path()).mkpath("upload-folder/nested"));
+        QVERIFY(QFile::copy(uploadPath, transferDir.filePath("upload-folder/nested/upload.txt")));
+        uploadedData.clear();
+        operationSpy.clear();
+        client.uploadDirectory(transferDir.filePath("upload-folder"), QStringLiteral("/"));
+        QTRY_COMPARE_WITH_TIMEOUT(operationSpy.count(), 1, 2000);
+        QVERIFY(operationSpy.first().first().toBool());
+        QCOMPARE(uploadedData, QByteArrayLiteral("upload payload"));
+
         client.transferConflict = std::make_shared<TransferConflict>();
         client.transferConflict->decision = TransferConflict::Skip;
         operationSpy.clear();
@@ -1879,6 +1995,17 @@ private slots:
         QVERIFY(!operationSpy.first().first().toBool());
         QVERIFY(operationSpy.first().at(1).toString().startsWith("Transfer cancelled"));
         QCOMPARE(uploadedData, QByteArrayLiteral("upload payload"));
+
+        operationSpy.clear();
+        client.deleteFile("/tree/folder", true);
+        QTRY_COMPARE_WITH_TIMEOUT(operationSpy.count(), 1, 3000);
+        QVERIFY2(operationSpy.first().first().toBool(), qPrintable(operationSpy.first().at(1).toString()));
+        const QList<QByteArray> expectedDeletion{
+            "DELE /tree/folder/test.txt",
+            "RMD /tree/folder/empty",
+            "RMD /tree/folder",
+        };
+        QCOMPARE(deletionCommands, expectedDeletion);
 
         client.disconnectFromHost();
         QTest::qWait(50);
@@ -1904,37 +2031,52 @@ private slots:
         QVERIFY(recursiveDownload.open(QIODevice::ReadOnly));
         QCOMPARE(recursiveDownload.readAll(), QByteArrayLiteral("hello"));
         QCOMPARE(sidebar.findChild<QLineEdit*>("remotePathEdit")->text(), QString("/tree"));
+        uploadedData.clear();
+        QMimeData folderDrop;
+        folderDrop.setUrls({QUrl::fromLocalFile(transferDir.filePath("upload-folder"))});
+        QDragEnterEvent enter(QPointF(5, 5), Qt::CopyAction, &folderDrop, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(tree->viewport(), &enter);
+        QVERIFY(enter.isAccepted());
+        QDropEvent drop(QPointF(5, 5), Qt::CopyAction, &folderDrop, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(tree->viewport(), &drop);
+        QVERIFY(drop.isAccepted());
+        QTRY_VERIFY_WITH_TIMEOUT(!sidebar.hasActiveTransfers(), 3000);
+        QCOMPARE(sidebar.findChild<QProgressBar*>("sftpTransferProgress")->text(), QString("1 of 1 file transferred"));
+        QCOMPARE(uploadedData, QByteArrayLiteral("upload payload"));
         sidebar.stopSession();
         QTest::qWait(50);
     }
 
     void testFtpReconnectsAfterControlLoss() {
         QTcpServer controlServer;
-        if (!controlServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
+        if (!controlServer.listen(QHostAddress(QStringLiteral("127.0.0.1")))) {
             QSKIP(qPrintable(QStringLiteral("Local TCP sockets are unavailable: %1").arg(controlServer.errorString())));
+        }
 
         QTcpSocket* controlSocket = nullptr;
         QByteArray controlBuffer;
         int acceptedConnections = 0;
 
-        connect(&controlServer, &QTcpServer::newConnection, this, [&]() {
+        connect(&controlServer, &QTcpServer::newConnection, this, [&] {
             controlSocket = controlServer.nextPendingConnection();
             ++acceptedConnections;
             controlBuffer.clear();
-            connect(controlSocket, &QTcpSocket::readyRead, this, [&]() {
+            connect(controlSocket, &QTcpSocket::readyRead, this, [&] {
                 controlBuffer += controlSocket->readAll();
                 while (true) {
                     const qsizetype end = controlBuffer.indexOf("\r\n");
-                    if (end < 0)
+                    if (end < 0) {
                         return;
+                    }
                     const QByteArray command = controlBuffer.left(end).toUpper();
                     controlBuffer.remove(0, end + 2);
-                    if (command.startsWith("USER"))
+                    if (command.startsWith("USER")) {
                         controlSocket->write("331 Password required\r\n");
-                    else if (command.startsWith("PASS"))
+                    } else if (command.startsWith("PASS")) {
                         controlSocket->write("230 Logged in\r\n");
-                    else if (command.startsWith("TYPE"))
+                    } else if (command.startsWith("TYPE")) {
                         controlSocket->write("200 Type set\r\n");
+                    }
                 }
             });
             connect(controlSocket, &QTcpSocket::disconnected, controlSocket, &QObject::deleteLater);
@@ -1948,9 +2090,10 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(connectedSpy.count(), 1, 2000);
         QCOMPARE(acceptedConnections, 1);
 
-        QTimer::singleShot(50, this, [&]() {
-            if (controlSocket)
+        QTimer::singleShot(50, this, [&] {
+            if (controlSocket) {
                 controlSocket->disconnectFromHost();
+            }
         });
 
         QTRY_COMPARE_WITH_TIMEOUT(connectedSpy.count(), 2, 7000);
@@ -1988,36 +2131,40 @@ private slots:
         ExplicitTlsTestServer controlServer;
         ExplicitTlsTestServer dataServer;
         if (!controlServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))) ||
-            !dataServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
+            !dataServer.listen(QHostAddress(QStringLiteral("127.0.0.1")))) {
             QSKIP(qPrintable(QStringLiteral("Local TCP sockets are unavailable: %1")
                                  .arg(controlServer.errorString().isEmpty() ? dataServer.errorString()
                                                                             : controlServer.errorString())));
+        }
 
         QSslSocket* controlSocket = nullptr;
         QSslSocket* dataSocket = nullptr;
         QByteArray dataAction;
         QByteArray uploadedData;
-        const auto sendData = [&]() {
-            if (!dataSocket || !dataSocket->isEncrypted())
+        const auto sendData = [&] {
+            if (!dataSocket || !dataSocket->isEncrypted()) {
                 return;
-            if (dataAction == "LIST")
+            }
+            if (dataAction == "LIST") {
                 dataSocket->write("-rw-r--r-- 1 user group 5 Jan 01 00:00 test.txt\r\n");
-            else if (dataAction == "RETR")
+            } else if (dataAction == "RETR") {
                 dataSocket->write("hello");
-            else
+            } else {
                 return;
+            }
             dataSocket->disconnectFromHost();
         };
 
-        connect(&dataServer, &QTcpServer::newConnection, this, [&]() {
+        connect(&dataServer, &QTcpServer::newConnection, this, [&] {
             dataSocket = qobject_cast<QSslSocket*>(dataServer.nextPendingConnection());
             QVERIFY(dataSocket != nullptr);
             dataSocket->setSslConfiguration(serverConfiguration);
             connect(dataSocket, &QSslSocket::encrypted, this, sendData);
-            connect(dataSocket, &QTcpSocket::readyRead, this, [&]() { uploadedData += dataSocket->readAll(); });
-            connect(dataSocket, &QTcpSocket::disconnected, this, [&]() {
-                if (controlSocket)
+            connect(dataSocket, &QTcpSocket::readyRead, this, [&] { uploadedData += dataSocket->readAll(); });
+            connect(dataSocket, &QTcpSocket::disconnected, this, [&] {
+                if (controlSocket) {
                     controlSocket->write("226 Transfer complete\r\n");
+                }
                 dataSocket->deleteLater();
                 dataSocket = nullptr;
                 dataAction.clear();
@@ -2025,7 +2172,7 @@ private slots:
             dataSocket->startServerEncryption();
         });
 
-        connect(&controlServer, &QTcpServer::newConnection, this, [&]() {
+        connect(&controlServer, &QTcpServer::newConnection, this, [&] {
             controlSocket = qobject_cast<QSslSocket*>(controlServer.nextPendingConnection());
             QVERIFY(controlSocket != nullptr);
             const auto commandBuffer = std::make_shared<QByteArray>();
@@ -2033,8 +2180,9 @@ private slots:
                 *commandBuffer += controlSocket->readAll();
                 while (true) {
                     const qsizetype end = commandBuffer->indexOf("\r\n");
-                    if (end < 0)
+                    if (end < 0) {
                         return;
+                    }
                     const QByteArray command = commandBuffer->left(end).toUpper();
                     commandBuffer->remove(0, end + 2);
                     if (command == "AUTH TLS") {
@@ -2125,12 +2273,13 @@ private slots:
         const QString sshdConfig = serverDir.filePath(QStringLiteral("sshd_config"));
 
         QTcpServer echoServer;
-        if (!echoServer.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
+        if (!echoServer.listen(QHostAddress(QStringLiteral("127.0.0.1")))) {
             QSKIP(qPrintable(QStringLiteral("Local TCP sockets are unavailable: %1").arg(echoServer.errorString())));
-        connect(&echoServer, &QTcpServer::newConnection, this, [&]() {
+        }
+        connect(&echoServer, &QTcpServer::newConnection, this, [&] {
             while (echoServer.hasPendingConnections()) {
                 QTcpSocket* socket = echoServer.nextPendingConnection();
-                connect(socket, &QTcpSocket::readyRead, socket, [socket]() {
+                connect(socket, &QTcpSocket::readyRead, socket, [socket] {
                     socket->write(socket->readAll());
                     socket->flush();
                 });
@@ -2139,10 +2288,11 @@ private slots:
         });
 
         std::vector<std::unique_ptr<QTcpServer>> portReservations;
-        auto reservePort = [&]() {
+        auto reservePort = [&] {
             auto probe = std::make_unique<QTcpServer>();
-            if (!probe->listen(QHostAddress(QStringLiteral("127.0.0.1"))))
-                return quint16(0);
+            if (!probe->listen(QHostAddress(QStringLiteral("127.0.0.1")))) {
+                return static_cast<quint16>(0);
+            }
             const quint16 reserved = probe->serverPort();
             // Keep earlier ports bound while selecting the other tunnel ports.
             portReservations.push_back(std::move(probe));
@@ -2152,10 +2302,12 @@ private slots:
         auto generateKey = [](const QString& path, const QString& type, const QString& bits) {
             QProcess process;
             QStringList arguments = {QStringLiteral("-q"), QStringLiteral("-t"), type};
-            if (!bits.isEmpty())
+            if (!bits.isEmpty()) {
                 arguments << QStringLiteral("-b") << bits;
-            if (type != QStringLiteral("ed25519"))
+            }
+            if (type != QStringLiteral("ed25519")) {
                 arguments << QStringLiteral("-m") << QStringLiteral("PEM");
+            }
             arguments << QStringLiteral("-N") << QString() << QStringLiteral("-f") << path;
             process.start(QStringLiteral("ssh-keygen"), arguments);
             return process.waitForFinished(5000) && process.exitCode() == 0;
@@ -2187,8 +2339,9 @@ private slots:
         QVERIFY(QFile::setPermissions(sshdConfig, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
 
         QTcpServer portProbe;
-        if (!portProbe.listen(QHostAddress(QStringLiteral("127.0.0.1"))))
+        if (!portProbe.listen(QHostAddress(QStringLiteral("127.0.0.1")))) {
             QSKIP(qPrintable(QStringLiteral("Local TCP sockets are unavailable: %1").arg(portProbe.errorString())));
+        }
         const quint16 port = portProbe.serverPort();
         portProbe.close();
 
@@ -2200,15 +2353,26 @@ private slots:
             }
         });
         sshd.setProcessChannelMode(QProcess::MergedChannels);
-        sshd.start(QStringLiteral("sshd"), {QStringLiteral("-D"), QStringLiteral("-e"), QStringLiteral("-f"),
-                                            sshdConfig, QStringLiteral("-p"), QString::number(port)});
+        sshd.start(QStringLiteral("sshd"), {
+                                               QStringLiteral("-D"),
+                                               QStringLiteral("-e"),
+                                               QStringLiteral("-f"),
+                                               sshdConfig,
+                                               QStringLiteral("-p"),
+                                               QString::number(port),
+                                           });
         QVERIFY(sshd.waitForStarted(3000));
         QTest::qWait(500);
         QVERIFY2(sshd.state() == QProcess::Running, qPrintable(sshd.readAll()));
 
         QProcess keyscan;
-        keyscan.start(QStringLiteral("ssh-keyscan"), {QStringLiteral("-T"), QStringLiteral("3"), QStringLiteral("-p"),
-                                                      QString::number(port), QStringLiteral("127.0.0.1")});
+        keyscan.start(QStringLiteral("ssh-keyscan"), {
+                                                         QStringLiteral("-T"),
+                                                         QStringLiteral("3"),
+                                                         QStringLiteral("-p"),
+                                                         QString::number(port),
+                                                         QStringLiteral("127.0.0.1"),
+                                                     });
         QVERIFY(keyscan.waitForFinished(5000));
         const QByteArray knownHostData = keyscan.readAllStandardOutput();
         QVERIFY(!knownHostData.isEmpty());
@@ -2220,8 +2384,9 @@ private slots:
         knownHosts.close();
 
         QString user = qEnvironmentVariable("USER");
-        if (user.isEmpty())
+        if (user.isEmpty()) {
             user = qEnvironmentVariable("USERNAME");
+        }
         QVERIFY(!user.isEmpty());
 
         TunnelConfig localTunnel;
@@ -2256,14 +2421,17 @@ private slots:
         const QVariant previousMonitoring = monitoringSettings.value("ssh/monitoringEnabled");
         const QVariant previousInterval = monitoringSettings.value("ssh/monitoringIntervalSeconds");
         const QVariant previousIntegration = monitoringSettings.value("terminal/shellIntegration");
-        const auto restoreMonitoring = qScopeGuard([&]() {
-            for (const auto& entry : {qMakePair(QString("ssh/monitoringEnabled"), previousMonitoring),
-                                      qMakePair(QString("ssh/monitoringIntervalSeconds"), previousInterval),
-                                      qMakePair(QString("terminal/shellIntegration"), previousIntegration)}) {
-                if (entry.second.isValid())
+        const auto restoreMonitoring = qScopeGuard([&] {
+            for (const auto& entry : {
+                     qMakePair(QString("ssh/monitoringEnabled"), previousMonitoring),
+                     qMakePair(QString("ssh/monitoringIntervalSeconds"), previousInterval),
+                     qMakePair(QString("terminal/shellIntegration"), previousIntegration),
+                 }) {
+                if (entry.second.isValid()) {
                     monitoringSettings.setValue(entry.first, entry.second);
-                else
+                } else {
                     monitoringSettings.remove(entry.first);
+                }
             }
         });
         monitoringSettings.setValue("ssh/monitoringEnabled", false);
@@ -2317,10 +2485,11 @@ private slots:
             // A foreground program must not receive the navigation command.
             QSignalSpy foregroundOutput(&connection, &SshConnection::shellDataReceived);
             connection.sendToShell("sh -c 'echo BANCHO_WAITING; read line; echo BANCHO_RELEASED'\r");
-            auto output = [&]() {
+            auto output = [&] {
                 QByteArray text;
-                for (const auto& event : foregroundOutput)
+                for (const auto& event : foregroundOutput) {
                     text += event.first().toByteArray();
+                }
                 return text;
             };
             // The marker occurs once in the echoed command and once in its
@@ -2335,10 +2504,11 @@ private slots:
             QTRY_COMPARE_WITH_TIMEOUT(workingDirectorySpy.last().first().toString(), trackedPath, 5000);
         }
         QSignalSpy shellOutput(&connection, &SshConnection::shellDataReceived);
-        auto shellText = [&]() {
+        auto shellText = [&] {
             QByteArray text;
-            for (const auto& output : shellOutput)
+            for (const auto& output : shellOutput) {
                 text += output.first().toByteArray();
+            }
             return text;
         };
         const QByteArray secondShell = QFile::exists("/bin/dash") ? QByteArray("/bin/dash") : QByteArray("/bin/sh");
@@ -2358,7 +2528,7 @@ private slots:
         monitoringSettings.setValue("ssh/monitoringEnabled", true);
         connection.reloadMonitoringSettings();
         QTRY_VERIFY_WITH_TIMEOUT(statsSpy.count() >= 3, 5000);
-        const auto sample = statsSpy.last();
+        const auto& sample = statsSpy.last();
         for (int i = 0; i < 3; ++i) {
             QVERIFY(sample[i].toDouble() >= 0);
             QVERIFY(sample[i].toDouble() <= 100);
@@ -2399,6 +2569,7 @@ private slots:
         const QByteArray sidebarPayload("recursive sidebar download\n");
         QCOMPARE(sourceFile.write(sidebarPayload), sidebarPayload.size());
         sourceFile.close();
+        QVERIFY(QFile::copy(sourceFile.fileName(), sourceFolder + "/second.txt"));
         QTemporaryDir destination;
         QVERIFY(destination.isValid());
         {
@@ -2431,6 +2602,11 @@ private slots:
             QVERIFY(downloaded.open(QIODevice::ReadOnly));
             QTRY_COMPARE_WITH_TIMEOUT(downloaded.size(), sidebarPayload.size(), 10000);
             QCOMPARE(downloaded.readAll(), sidebarPayload);
+            QFile secondDownload(destination.filePath("sidebar-source/second.txt"));
+            QVERIFY(secondDownload.open(QIODevice::ReadOnly));
+            QCOMPARE(secondDownload.readAll(), sidebarPayload);
+            QCOMPARE(sidebar.findChild<QProgressBar*>("sftpTransferProgress")->text(),
+                     QString("2 of 2 files transferred"));
             QCOMPARE(sidebar.findChild<QLineEdit*>("remotePathEdit")->text(), serverDir.path());
         }
 
@@ -2439,10 +2615,11 @@ private slots:
         connection.sendToShell(
             QByteArrayLiteral("printf '\\nBANCHO_COLOR=%s\\nBANCHO_TERMINAL=%s\\nBANCHO_VERSION=%s\\n' "
                               "\"$COLORTERM\" \"$TERM_PROGRAM\" \"$TERM_PROGRAM_VERSION\"\r"));
-        auto trueColorAnnounced = [&]() {
+        auto trueColorAnnounced = [&] {
             QByteArray received;
-            for (const auto& event : colorEnvironmentSpy)
+            for (const auto& event : colorEnvironmentSpy) {
                 received += event.at(0).toByteArray();
+            }
             return received.contains("BANCHO_COLOR=truecolor") && received.contains("BANCHO_TERMINAL=banchoxterm") &&
                    received.contains(QByteArray("BANCHO_VERSION=") + BANCHO_VERSION);
         };
@@ -2471,9 +2648,11 @@ private slots:
         const QString uploadDestination = serverDir.filePath(QStringLiteral("folder-upload-destination"));
         QVERIFY(QDir().mkpath(uploadDestination));
         QSignalSpy folderUploadSpy(&connection, &SshConnection::operationFinished);
+        QSignalSpy folderFilesTransferred(&connection, &SshConnection::fileTransferred);
         connection.uploadDirectory(uploadSource, uploadDestination);
         QTRY_COMPARE_WITH_TIMEOUT(folderUploadSpy.count(), 1, 10000);
         QVERIFY2(folderUploadSpy.first().at(0).toBool(), qPrintable(folderUploadSpy.first().at(1).toString()));
+        QCOMPARE(folderFilesTransferred.size(), folderFiles.size());
         const QString uploadedRoot = QDir(uploadDestination).filePath(QFileInfo(uploadSource).fileName());
         for (const auto& file : folderFiles) {
             QFile uploaded(QDir(uploadedRoot).filePath(file.first));
@@ -2481,45 +2660,60 @@ private slots:
             QCOMPARE(uploaded.readAll(), file.second);
         }
 
-        auto allTunnelsActive = [&]() {
+        QVERIFY(QFile::link(uploadSource, QDir(uploadedRoot).filePath("nested/outside-link")));
+        folderUploadSpy.clear();
+        connection.deleteFile(uploadedRoot, true);
+        QTRY_COMPARE_WITH_TIMEOUT(folderUploadSpy.count(), 1, 10000);
+        QVERIFY2(folderUploadSpy.first().first().toBool(), qPrintable(folderUploadSpy.first().at(1).toString()));
+        QVERIFY(!QFileInfo::exists(uploadedRoot));
+        QVERIFY(QFileInfo::exists(QDir(uploadSource).filePath("nested/fifth.txt")));
+
+        auto allTunnelsActive = [&] {
             bool active[3] = {false, false, false};
             for (const auto& signal : tunnelStateSpy) {
                 const int index = signal.at(0).toInt();
-                if (index >= 0 && index < 3 && signal.at(1).toBool())
+                if (index >= 0 && index < 3 && signal.at(1).toBool()) {
                     active[index] = true;
+                }
             }
             return active[0] && active[1] && active[2];
         };
         QElapsedTimer tunnelTimer;
         tunnelTimer.start();
-        while (!allTunnelsActive() && tunnelTimer.elapsed() < 5000)
+        while (!allTunnelsActive() && tunnelTimer.elapsed() < 5000) {
             QTest::qWait(50);
+        }
         QVERIFY2(allTunnelsActive(), "All three SSH tunnels must be listening before testing their protocols");
 
         auto waitForBytes = [&](QTcpSocket& socket, qint64 bytes) {
             QElapsedTimer timer;
             timer.start();
-            while (socket.bytesAvailable() < bytes && timer.elapsed() < 3000)
+            while (socket.bytesAvailable() < bytes && timer.elapsed() < 3000) {
                 QTest::qWait(25);
+            }
             return socket.bytesAvailable() >= bytes;
         };
         auto verifyEcho = [&](QTcpSocket& socket, const QByteArray& payload) {
             QElapsedTimer timer;
             timer.start();
-            while (socket.state() != QAbstractSocket::ConnectedState && timer.elapsed() < 3000)
+            while (socket.state() != QAbstractSocket::ConnectedState && timer.elapsed() < 3000) {
                 QTest::qWait(25);
-            if (socket.state() != QAbstractSocket::ConnectedState)
+            }
+            if (socket.state() != QAbstractSocket::ConnectedState) {
                 return false;
-            if (socket.write(payload) != payload.size() || !socket.waitForBytesWritten(1000))
+            }
+            if (socket.write(payload) != payload.size() || !socket.waitForBytesWritten(1000)) {
                 return false;
-            if (!waitForBytes(socket, payload.size()))
+            }
+            if (!waitForBytes(socket, payload.size())) {
                 return false;
+            }
             return socket.read(payload.size()) == payload;
         };
 
         QTcpSocket localSocket;
         localSocket.connectToHost(QStringLiteral("127.0.0.1"), localTunnel.localPort);
-        QVERIFY(verifyEcho(localSocket, QByteArrayLiteral("local-tunnel")));
+        QVERIFY(verifyEcho(localSocket, QByteArray(768 * 1024, 't')));
 
         QTcpSocket remoteSocket;
         remoteSocket.connectToHost(QStringLiteral("127.0.0.1"), remoteTunnel.remotePort);
@@ -2529,8 +2723,9 @@ private slots:
         socksSocket.connectToHost(QStringLiteral("127.0.0.1"), socksTunnel.localPort);
         QElapsedTimer socksTimer;
         socksTimer.start();
-        while (socksSocket.state() != QAbstractSocket::ConnectedState && socksTimer.elapsed() < 3000)
+        while (socksSocket.state() != QAbstractSocket::ConnectedState && socksTimer.elapsed() < 3000) {
             QTest::qWait(25);
+        }
         QVERIFY(socksSocket.state() == QAbstractSocket::ConnectedState);
         socksSocket.write(QByteArray::fromHex("050102"));
         QVERIFY(socksSocket.waitForBytesWritten(1000));
@@ -2538,10 +2733,10 @@ private slots:
         QCOMPARE(socksSocket.read(2), QByteArray::fromHex("0502"));
 
         QByteArray socksAuth;
-        socksAuth.append(char(0x01));
-        socksAuth.append(char(socksTunnel.socksUsername.toUtf8().size()));
+        socksAuth.append(static_cast<char>(0x01));
+        socksAuth.append(static_cast<char>(socksTunnel.socksUsername.toUtf8().size()));
         socksAuth.append(socksTunnel.socksUsername.toUtf8());
-        socksAuth.append(char(socksTunnel.socksPassword.toUtf8().size()));
+        socksAuth.append(static_cast<char>(socksTunnel.socksPassword.toUtf8().size()));
         socksAuth.append(socksTunnel.socksPassword.toUtf8());
         socksSocket.write(socksAuth);
         QVERIFY(socksSocket.waitForBytesWritten(1000));
@@ -2549,12 +2744,12 @@ private slots:
         QCOMPARE(socksSocket.read(2), QByteArray::fromHex("0100"));
 
         QByteArray socksRequest = QByteArray::fromHex("05010001");
-        socksRequest.append(char(127));
-        socksRequest.append(char(0));
-        socksRequest.append(char(0));
-        socksRequest.append(char(1));
-        socksRequest.append(char(echoServer.serverPort() >> 8));
-        socksRequest.append(char(echoServer.serverPort() & 0xff));
+        socksRequest.append(static_cast<char>(127));
+        socksRequest.append(static_cast<char>(0));
+        socksRequest.append(static_cast<char>(0));
+        socksRequest.append(static_cast<char>(1));
+        socksRequest.append(static_cast<char>(echoServer.serverPort() >> 8));
+        socksRequest.append(static_cast<char>(echoServer.serverPort() & 0xff));
         socksSocket.write(socksRequest);
         QVERIFY(socksSocket.waitForBytesWritten(1000));
         QVERIFY(waitForBytes(socksSocket, 10));
@@ -2584,7 +2779,7 @@ private slots:
         QList<SftpTransferWorker*> workers;
         QList<QThread*> workerThreads;
         std::atomic_bool uploadPaused{false};
-        const auto cleanupWorkers = qScopeGuard([&]() {
+        const auto cleanupWorkers = qScopeGuard([&] {
             for (int i = 0; i < workerThreads.size(); ++i) {
                 workers.at(i)->cancel();
                 workerThreads.at(i)->quit();
@@ -2611,8 +2806,9 @@ private slots:
                 connect(
                     worker, &SftpTransferWorker::progress, worker,
                     [worker, &uploadPaused](const QString&, const QString&, qint64 done, qint64) {
-                        if (done > 0 && !uploadPaused.exchange(true))
+                        if (done > 0 && !uploadPaused.exchange(true)) {
                             worker->pause();
+                        }
                     },
                     Qt::DirectConnection);
             }
@@ -2630,10 +2826,11 @@ private slots:
         }
         QTRY_VERIFY_WITH_TIMEOUT(uploadPaused.load(), 10000);
         connection.sendToShell(QByteArrayLiteral("printf '%s%s\\n' '__SFTP_' 'INTERACTIVE__'\n"));
-        auto receivedShellMarker = [&]() {
+        auto receivedShellMarker = [&] {
             QByteArray output;
-            for (const auto& event : shellDuringTransfer)
+            for (const auto& event : shellDuringTransfer) {
                 output += event.first().toByteArray();
+            }
             return output.contains("__SFTP_INTERACTIVE__");
         };
         QTRY_VERIFY_WITH_TIMEOUT(receivedShellMarker(), 5000);
@@ -2686,7 +2883,7 @@ private slots:
         connection.disconnectFromHost();
 
         const QList<Session> previousProfiles = SessionManager::loadSessions();
-        const auto restoreProfiles = qScopeGuard([&]() { SessionManager::saveSessions(previousProfiles); });
+        const auto restoreProfiles = qScopeGuard([&] { SessionManager::saveSessions(previousProfiles); });
         Session bastionProfile;
         bastionProfile.id = "integration-bastion";
         bastionProfile.type = SessionType::SSH;
@@ -2772,7 +2969,7 @@ private slots:
         QMimeData files;
         files.setUrls({QUrl::fromLocalFile(path), QUrl::fromLocalFile(prefix + QStringLiteral("otro.mp4"))});
         const auto drop = [&](QMimeData* mime) {
-            QDragEnterEvent enter(QPoint(10, 10), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
+            QDragEnterEvent enter(QPointF(10, 10), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
             QApplication::sendEvent(display, &enter);
             QVERIFY(enter.isAccepted());
             QDropEvent event(QPointF(10, 10), Qt::CopyAction, mime, Qt::LeftButton, Qt::NoModifier);
@@ -2836,7 +3033,7 @@ private slots:
             QVERIFY(!assigned.contains(sequence));
             assigned.insert(sequence);
         }
-        const auto restore = qScopeGuard([&]() { KeyboardShortcuts::save(original); });
+        const auto restore = qScopeGuard([&] { KeyboardShortcuts::save(original); });
         KeyboardShortcuts::save(defaults);
         MainWindow window;
         window.resize(1000, 650);
@@ -2860,20 +3057,28 @@ private slots:
                 [&sent](const char* bytes, int size) { sent.append(bytes, size); });
         QTest::keyClick(display, Qt::Key_Escape);
         QCOMPARE(sent, QByteArrayLiteral("\x1b"));
-        for (const auto& pair :
-             {qMakePair(Qt::Key_W, char(0x17)), qMakePair(Qt::Key_F, char(0x06)), qMakePair(Qt::Key_Q, char(0x11)),
-              qMakePair(Qt::Key_K, char(0x0b)), qMakePair(Qt::Key_C, char(0x03)), qMakePair(Qt::Key_D, char(0x04)),
-              qMakePair(Qt::Key_Z, char(0x1a)), qMakePair(Qt::Key_V, char(0x16))}) {
+        for (const auto& pair : {
+                 qMakePair(Qt::Key_W, static_cast<char>(0x17)),
+                 qMakePair(Qt::Key_F, static_cast<char>(0x06)),
+                 qMakePair(Qt::Key_Q, static_cast<char>(0x11)),
+                 qMakePair(Qt::Key_K, static_cast<char>(0x0b)),
+                 qMakePair(Qt::Key_C, static_cast<char>(0x03)),
+                 qMakePair(Qt::Key_D, static_cast<char>(0x04)),
+                 qMakePair(Qt::Key_Z, static_cast<char>(0x1a)),
+                 qMakePair(Qt::Key_V, static_cast<char>(0x16)),
+             }) {
             sent.clear();
             QTest::keyClick(display, pair.first, Qt::ControlModifier);
             QCOMPARE(sent, QByteArray(1, pair.second));
             QVERIFY(window.isVisible());
             QVERIFY(tab);
         }
-        for (const auto& pair : {qMakePair(Qt::Key_B, QByteArray("\x1b"
-                                                                 "b")),
-                                 qMakePair(Qt::Key_F, QByteArray("\x1b"
-                                                                 "f"))}) {
+        for (const auto& pair : {
+                 qMakePair(Qt::Key_B, QByteArray("\x1b"
+                                                 "b")),
+                 qMakePair(Qt::Key_F, QByteArray("\x1b"
+                                                 "f")),
+             }) {
             sent.clear();
             QTest::keyClick(display, pair.first, Qt::AltModifier);
             QCOMPARE(sent, pair.second);
@@ -2887,7 +3092,7 @@ private slots:
         QTRY_VERIFY(!search->isVisible());
         display->setFocus();
         const QString oldClipboard = QApplication::clipboard()->text();
-        const auto restoreClipboard = qScopeGuard([&]() { QApplication::clipboard()->setText(oldClipboard); });
+        const auto restoreClipboard = qScopeGuard([&] { QApplication::clipboard()->setText(oldClipboard); });
         QApplication::clipboard()->setText("abcXYZ");
         terminal->feedData("\x1b[?2004h");
         sent.clear();
@@ -2904,7 +3109,7 @@ private slots:
             original.insert(definition.id, KeyboardShortcuts::sequence(definition.id));
             defaults.insert(definition.id, definition.defaultSequence);
         }
-        const auto restore = qScopeGuard([&]() { KeyboardShortcuts::save(original); });
+        const auto restore = qScopeGuard([&] { KeyboardShortcuts::save(original); });
         KeyboardShortcuts::save(defaults);
         MainWindow window;
         window.show();
@@ -2975,7 +3180,7 @@ private slots:
             SettingsDialog dialog(&window);
             dialog.findChild<QKeySequenceEdit*>("shortcutEdit_closeTab")->setKeySequence(QKeySequence("F8"));
             dialog.findChild<QKeySequenceEdit*>("shortcutEdit_findAll")->setKeySequence(QKeySequence("F8"));
-            QTimer::singleShot(0, &dialog, []() {
+            QTimer::singleShot(0, &dialog, [] {
                 auto* warning = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
                 QVERIFY(warning);
                 warning->accept();
@@ -3060,7 +3265,7 @@ private slots:
         QTest::keyClick(display, Qt::Key_F, Qt::ControlModifier);
         QCOMPARE(sent, QByteArray("\x06"));
         const QString oldClipboard = QApplication::clipboard()->text();
-        const auto restoreClipboard = qScopeGuard([&]() { QApplication::clipboard()->setText(oldClipboard); });
+        const auto restoreClipboard = qScopeGuard([&] { QApplication::clipboard()->setText(oldClipboard); });
         QApplication::clipboard()->setText("must-not-be-pasted");
         sent.clear();
         QTest::keyClick(display, Qt::Key_C, Qt::ControlModifier | Qt::ShiftModifier);
@@ -3070,10 +3275,10 @@ private slots:
         QCOMPARE(sent, QByteArray("\x16"));
 
         // The mouse menu can restore shortcuts while keyboard capture is active.
-        QTimer::singleShot(0, &window, [&]() {
+        QTimer::singleShot(0, &window, [&] {
             auto* menu = qobject_cast<QMenu*>(QApplication::activePopupWidget());
             QVERIFY(menu);
-            const auto close = qScopeGuard([&]() { menu->close(); });
+            const auto close = qScopeGuard([&] { menu->close(); });
             auto* toggle = menu->actions().first();
             QVERIFY(toggle->isChecked());
             QTest::mouseClick(menu, Qt::LeftButton, Qt::NoModifier, menu->actionGeometry(toggle).center());
@@ -3108,9 +3313,11 @@ private slots:
         session.name = session.id;
         QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Qt::DirectConnection, Q_ARG(Session, session)));
         QPointer<TerminalTab> second;
-        for (auto* tab : window.findChildren<TerminalTab*>())
-            if (tab != first)
+        for (auto* tab : window.findChildren<TerminalTab*>()) {
+            if (tab != first) {
                 second = tab;
+            }
+        }
         QVERIFY(second);
         QVERIFY(!capture->isChecked());
         QVERIFY(!second->capturesApplicationShortcuts());
@@ -3157,7 +3364,7 @@ private slots:
         QSettings settings;
         const QVariant oldEnabled = settings.value("terminal/loggingEnabled");
         const QVariant oldDirectory = settings.value("terminal/logDirectory");
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             settings.setValue("terminal/loggingEnabled", oldEnabled);
             settings.setValue("terminal/logDirectory", oldDirectory);
         });
@@ -3176,9 +3383,10 @@ private slots:
             tab.sendSensitiveInputText(QString::fromUtf8(secret));
             // Inject output through the real SSH-to-terminal/log signal path.
             for (const QByteArray& chunk :
-                 {QByteArray("before temporary-"), QByteArray("sensitive-"), QByteArray("value after\n")})
+                 {QByteArray("before temporary-"), QByteArray("sensitive-"), QByteArray("value after\n")}) {
                 QVERIFY(QMetaObject::invokeMethod(tab.connection(), "shellDataReceived", Qt::DirectConnection,
                                                   Q_ARG(QByteArray, chunk)));
+            }
         }
         const QStringList logs = QDir(dir.path()).entryList({"*.log"}, QDir::Files);
         QCOMPARE(logs.size(), 1);
@@ -3204,17 +3412,21 @@ private slots:
         const QString outputPath = dir.filePath("sensitive-output.txt");
         const QString secret = QString("  printf x >> '%1'  ").arg(outputPath);
         QSettings settings;
-        const QStringList historyKeys = {"multiinput/history", "commandHistory/global",
-                                         "commandHistory/session/sensitive-first",
-                                         "commandHistory/session/sensitive-second"};
+        const QStringList historyKeys = {
+            "multiinput/history",
+            "commandHistory/global",
+            "commandHistory/session/sensitive-first",
+            "commandHistory/session/sensitive-second",
+        };
         QMap<QString, QVariant> oldValues;
         for (const QString& key : historyKeys) {
             oldValues.insert(key, settings.value(key));
             settings.setValue(key, QStringList{"existing"});
         }
-        const auto restore = qScopeGuard([&]() {
-            for (auto it = oldValues.cbegin(); it != oldValues.cend(); ++it)
+        const auto restore = qScopeGuard([&] {
+            for (auto it = oldValues.cbegin(); it != oldValues.cend(); ++it) {
                 settings.setValue(it.key(), it.value());
+            }
         });
         {
             MainWindow window;
@@ -3230,10 +3442,10 @@ private slots:
             }
             auto* action = window.findChild<QAction*>("sensitiveMultiInputAction");
             QVERIFY(action);
-            QTimer::singleShot(0, &window, [&]() {
+            QTimer::singleShot(0, &window, [&] {
                 auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
-                const auto close = qScopeGuard([&]() { dialog->reject(); });
+                const auto close = qScopeGuard([&] { dialog->reject(); });
                 auto* value = dialog->findChild<QLineEdit*>("sensitiveInputValue");
                 auto* list = dialog->findChild<QListWidget*>("sensitiveInputList");
                 QVERIFY(value);
@@ -3243,44 +3455,48 @@ private slots:
                 dialog->findChild<QPushButton*>("sensitiveInputAddButton")->click();
                 QCOMPARE(list->count(), 1);
                 QCOMPARE(list->item(0)->text(), QString("Proxy credentials"));
-                QTimer::singleShot(0, &window, [&]() {
+                QTimer::singleShot(0, &window, [&] {
                     auto* targets = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                     QVERIFY(targets);
-                    auto cancel = qScopeGuard([&]() { targets->reject(); });
+                    auto cancel = qScopeGuard([&] { targets->reject(); });
                     QCOMPARE(targets->objectName(), QString("multiInputTargetDialog"));
                     auto* targetList = targets->findChild<QListWidget*>();
                     QCOMPARE(targetList->count(), 2); // Read-only session is excluded.
-                    for (int row = 0; row < targetList->count(); ++row)
+                    for (int row = 0; row < targetList->count(); ++row) {
                         targetList->item(row)->setCheckState(
                             targetList->item(row)->text().contains("first") ? Qt::Checked : Qt::Unchecked);
-                    for (auto* label : targets->findChildren<QLabel*>())
+                    }
+                    for (auto* label : targets->findChildren<QLabel*>()) {
                         QVERIFY(!label->text().contains(secret.trimmed()));
+                    }
                     targets->accept();
                     cancel.dismiss();
                 });
                 dialog->findChild<QPushButton*>("sensitiveInputSendButton")->click();
             });
             action->trigger();
-            auto contents = [&]() {
+            auto contents = [&] {
                 QFile file(outputPath);
                 return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
             };
             QTRY_COMPARE_WITH_TIMEOUT(contents(), QByteArray("x"), 3000);
-            for (const QString& key : historyKeys)
+            for (const QString& key : historyKeys) {
                 QCOMPARE(settings.value(key).toStringList(), QStringList{"existing"});
-            for (const QString& key : settings.allKeys())
+            }
+            for (const QString& key : settings.allKeys()) {
                 QVERIFY(!settings.value(key).toStringList().join('\n').contains(secret.trimmed()));
+            }
 
             // Entries survive reopening the dialog, but cancelling a send writes nothing.
-            QTimer::singleShot(0, &window, [&]() {
+            QTimer::singleShot(0, &window, [&] {
                 auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
-                const auto close = qScopeGuard([&]() { dialog->reject(); });
+                const auto close = qScopeGuard([&] { dialog->reject(); });
                 auto* list = dialog->findChild<QListWidget*>("sensitiveInputList");
                 QCOMPARE(list->count(), 1);
                 list->setCurrentRow(0);
                 QCOMPARE(dialog->findChild<QLineEdit*>("sensitiveInputValue")->text(), secret);
-                QTimer::singleShot(0, &window, []() {
+                QTimer::singleShot(0, &window, [] {
                     auto* targets = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                     QVERIFY(targets);
                     targets->reject();
@@ -3290,18 +3506,20 @@ private slots:
             action->trigger();
             QTest::qWait(150);
             QCOMPARE(contents(), QByteArray("x"));
-            for (auto* tab : window.findChildren<TerminalTab*>())
-                if (tab->session().id == "sensitive-first")
+            for (auto* tab : window.findChildren<TerminalTab*>()) {
+                if (tab->session().id == "sensitive-first") {
                     tab->sendInputText("printf normal > /dev/null");
+                }
+            }
             QCOMPARE(settings.value("commandHistory/global").toStringList().first(),
                      QString("printf normal > /dev/null"));
         }
         // A new application window does not recover any sensitive entries from settings.
         MainWindow freshWindow;
-        QTimer::singleShot(0, &freshWindow, []() {
+        QTimer::singleShot(0, &freshWindow, [] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
-            const auto close = qScopeGuard([&]() { dialog->reject(); });
+            const auto close = qScopeGuard([&] { dialog->reject(); });
             QCOMPARE(dialog->findChild<QListWidget*>("sensitiveInputList")->count(), 0);
             QVERIFY(dialog->findChild<QLineEdit*>("sensitiveInputValue")->text().isEmpty());
         });
@@ -3337,7 +3555,7 @@ private slots:
         QSettings settings;
         const QVariant oldNames = settings.value("macros/names");
         const QVariant oldTexts = settings.value("macros/texts");
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             settings.setValue("macros/names", oldNames);
             settings.setValue("macros/texts", oldTexts);
         });
@@ -3358,11 +3576,13 @@ private slots:
         auto* tab = window.findChild<TerminalTab*>();
         QVERIFY(tab);
         QAction* action = nullptr;
-        for (auto* candidate : window.findChildren<QAction*>())
-            if (candidate->text() == name)
+        for (auto* candidate : window.findChildren<QAction*>()) {
+            if (candidate->text() == name) {
                 action = candidate;
+            }
+        }
         QVERIFY(action);
-        auto contents = [&]() {
+        auto contents = [&] {
             QFile file(outputPath);
             return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
         };
@@ -3412,21 +3632,25 @@ private slots:
             settings.remove(key);
         }
         settings.setValue("window/openTabs", QByteArray("[]"));
-        const auto restore = qScopeGuard([&]() {
-            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
-                if (it.value().isValid())
+        const auto restore = qScopeGuard([&] {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it) {
+                if (it.value().isValid()) {
                     settings.setValue(it.key(), it.value());
-                else
+                } else {
                     settings.remove(it.key());
+                }
+            }
         });
         MainWindow window;
         window.resize(1400, 900);
         window.show();
-        auto visible = [&]() {
+        auto visible = [&] {
             QList<QTabWidget*> result;
-            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
-                if (!pane->isHidden())
+            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
+                if (!pane->isHidden()) {
                     result.append(pane);
+                }
+            }
             return result;
         };
         QCOMPARE(visible().size(), 1);
@@ -3455,7 +3679,8 @@ private slots:
         QVERIFY(root);
         auto splits = root->findChildren<QSplitter*>();
         QVERIFY(splits.size() >= 4);
-        bool horizontal = false, vertical = false;
+        bool horizontal = false;
+        bool vertical = false;
         for (auto* split : splits) {
             horizontal |= split->orientation() == Qt::Horizontal;
             vertical |= split->orientation() == Qt::Vertical;
@@ -3466,8 +3691,9 @@ private slots:
         QCoreApplication::processEvents();
         QCOMPARE(visible().size(), 2);
         int visibleTabs = 0;
-        for (auto* pane : visible())
+        for (auto* pane : visible()) {
             visibleTabs += pane->count();
+        }
         QCOMPARE(visibleTabs, 2);
         QVERIFY(QMetaObject::invokeMethod(&window, "splitPaneHorizontally"));
         QCoreApplication::processEvents();
@@ -3511,21 +3737,25 @@ private slots:
             settings.remove(key);
         }
         settings.setValue("window/openTabs", QByteArray("[]"));
-        const auto restore = qScopeGuard([&]() {
-            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
-                if (it.value().isValid())
+        const auto restore = qScopeGuard([&] {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it) {
+                if (it.value().isValid()) {
                     settings.setValue(it.key(), it.value());
-                else
+                } else {
                     settings.remove(it.key());
+                }
+            }
         });
         MainWindow window;
         window.resize(1600, 1000);
         window.show();
-        auto panes = [&]() {
+        auto panes = [&] {
             QList<QTabWidget*> result;
-            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
-                if (!pane->isHidden())
+            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
+                if (!pane->isHidden()) {
                     result.append(pane);
+                }
+            }
             return result;
         };
         Session session;
@@ -3551,8 +3781,9 @@ private slots:
         auto* root = window.findChild<QSplitter*>("terminalPaneRoot");
         QCOMPARE(root->count(), 3);
         QCOMPARE(root->orientation(), Qt::Horizontal);
-        for (auto* pane : panes())
+        for (auto* pane : panes()) {
             QVERIFY(pane->currentWidget());
+        }
         QTest::qWait(50);
         const int before = root->sizes()[0];
         auto* handle = root->handle(1);
@@ -3580,32 +3811,39 @@ private slots:
         lateral->trigger();
         QCoreApplication::processEvents();
         QCOMPARE(panes().size(), 6);
-        for (auto* pane : panes())
+        for (auto* pane : panes()) {
             QCOMPARE(pane->count(), 1);
-        for (auto* terminal : terminals)
+        }
+        for (auto* terminal : terminals) {
             QVERIFY(terminal->isVisible());
+        }
         QCOMPARE(window.findChildren<TerminalTab*>().size(), 6);
         bool vertical = false;
-        for (auto* split : root->findChildren<QSplitter*>())
+        for (auto* split : root->findChildren<QSplitter*>()) {
             vertical |= split->orientation() == Qt::Vertical && split->count() >= 2;
+        }
         QVERIFY(vertical);
     }
 
     void testGridDistributesAllTabsWithTransparency() {
         QSettings settings;
-        const QStringList keys = {"window/paneTree", "window/openTabs", "window/tabLayoutMode",
-                                  "terminal/backgroundOpacity", "terminal/backgroundBlur"};
+        const QStringList keys = {
+            "window/paneTree",         "window/openTabs", "window/tabLayoutMode", "terminal/backgroundOpacity",
+            "terminal/backgroundBlur",
+        };
         QMap<QString, QVariant> previous;
         for (const auto& key : keys) {
             previous[key] = settings.value(key);
             settings.remove(key);
         }
-        const auto restore = qScopeGuard([&]() {
-            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
-                if (it.value().isValid())
+        const auto restore = qScopeGuard([&] {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it) {
+                if (it.value().isValid()) {
                     settings.setValue(it.key(), it.value());
-                else
+                } else {
                     settings.remove(it.key());
+                }
+            }
         });
         settings.setValue("window/openTabs", QByteArray("[]"));
         settings.setValue("terminal/backgroundOpacity", 50);
@@ -3633,18 +3871,21 @@ private slots:
         }
         const auto originalTabs = window.findChildren<TerminalTab*>();
         QCOMPARE(originalTabs.size(), 7);
-        auto verifyAlpha = [&]() {
+        auto verifyAlpha = [&] {
             const auto image = window.grab().toImage();
             for (auto* tab : originalTabs) {
-                if (!tab->isVisible())
+                if (!tab->isVisible()) {
                     continue;
+                }
                 auto* display = tab->getTerminalWidget()->findChild<Konsole::TerminalDisplay*>();
-                if (!display || display->height() < 10)
+                if (!display || display->height() < 10) {
                     return false;
+                }
                 const auto pixel =
                     image.pixelColor(display->mapTo(&window, QPoint(display->width() / 2, display->height() - 5)));
-                if (pixel.alpha() == 0 || pixel.alpha() == 255)
+                if (pixel.alpha() == 0 || pixel.alpha() == 255) {
                     return false;
+                }
             }
             return true;
         };
@@ -3657,14 +3898,16 @@ private slots:
         QTest::qWait(50);
         int panes = 0;
         for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
-            if (pane->isHidden())
+            if (pane->isHidden()) {
                 continue;
+            }
             ++panes;
             QCOMPARE(pane->count(), 1);
         }
         QCOMPARE(panes, 7);
-        for (auto* tab : originalTabs)
+        for (auto* tab : originalTabs) {
             QVERIFY(tab->isVisible());
+        }
         QVERIFY(verifyAlpha());
         // A second click arranges newly opened tabs too, rather than collapsing the grid.
         session.name = "Eighth session";
@@ -3672,20 +3915,22 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
         QTest::qWait(50);
         panes = 0;
-        for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
+        for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
             if (!pane->isHidden()) {
                 ++panes;
                 QCOMPARE(pane->count(), 1);
             }
+        }
         QCOMPARE(panes, 8);
         QCOMPARE(window.findChildren<TerminalTab*>().size(), 8);
         QVERIFY(verifyAlpha());
         QVERIFY(settings.value("terminal/backgroundBlur").toBool());
         settings.setValue("terminal/backgroundOpacity", 100);
         TerminalAppearance::refreshWindow(&window);
-        for (auto* tab : originalTabs)
+        for (auto* tab : originalTabs) {
             QVERIFY(tab->getTerminalWidget()->findChild<Konsole::TerminalDisplay*>()->testAttribute(
                 Qt::WA_OpaquePaintEvent));
+        }
     }
 
     void testPanelGroupsAndRestoration() {
@@ -3696,7 +3941,7 @@ private slots:
         settings.remove("window/panelWorkspaces");
         const auto oldMode = settings.value("window/tabLayoutMode");
         const auto oldTabs = settings.value("window/openTabs");
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             settings.setValue("panels/groups", previous);
             settings.setValue("window/paneTree", oldTree);
             settings.setValue("window/panelWorkspaces", oldWorkspaces);
@@ -3720,7 +3965,7 @@ private slots:
 #endif
             QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
             QVERIFY(QMetaObject::invokeMethod(&window, "splitPaneVertically"));
-            QTimer::singleShot(0, &window, [&]() {
+            QTimer::singleShot(0, &window, [&] {
                 auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
                 dialog->findChild<QLineEdit*>("panelGroupName")->setText("Databases");
@@ -3731,7 +3976,7 @@ private slots:
             QVERIFY(QMetaObject::invokeMethod(&window, "managePanelGroups"));
             const auto groups = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
             QCOMPARE(groups.value("Databases").toObject().value("tabs").toArray().size(), 1);
-            QTimer::singleShot(0, &window, [&]() {
+            QTimer::singleShot(0, &window, [&] {
                 auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
                 dialog->findChild<QListWidget*>("panelGroupsList")->setCurrentRow(0);
@@ -3740,12 +3985,14 @@ private slots:
             QVERIFY(QMetaObject::invokeMethod(&window, "managePanelGroups"));
             QCOMPARE(window.findChildren<TerminalTab*>().size(), 2);
             int leaves = 0;
-            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
-                leaves += pane->isVisible();
+            for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
+                leaves += static_cast<int>(pane->isVisible());
+            }
             QCOMPARE(leaves, 2); // Only the selected group is visible.
-            QTimer::singleShot(0, &window, []() {
-                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+            QTimer::singleShot(0, &window, [] {
+                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
                     box->done(QMessageBox::Yes);
+                }
             });
             QVERIFY(window.close());
             QVERIFY(!settings.value("window/paneTree").toByteArray().isEmpty());
@@ -3754,16 +4001,19 @@ private slots:
         restored.show();
         QCOMPARE(restored.findChildren<TerminalTab*>().size(), 2);
         int leaves = 0;
-        for (auto* pane : restored.findChildren<QTabWidget*>("terminalTabs"))
-            leaves += pane->isVisible();
+        for (auto* pane : restored.findChildren<QTabWidget*>("terminalTabs")) {
+            leaves += static_cast<int>(pane->isVisible());
+        }
         QCOMPARE(leaves, 2);
     }
 
     void testLivePanelGroups() {
         QSettings settings;
-        const QStringList keys = {"panels/groups",   "window/panelWorkspaces", "window/activePanelGroup",
-                                  "window/openTabs", "window/paneTree",        "window/tabLayoutMode",
-                                  "theme/mode"};
+        const QStringList keys = {
+            "panels/groups",   "window/panelWorkspaces", "window/activePanelGroup",
+            "window/openTabs", "window/paneTree",        "window/tabLayoutMode",
+            "theme/mode",
+        };
         QMap<QString, QVariant> previous;
         for (const auto& key : keys) {
             previous[key] = settings.value(key);
@@ -3771,12 +4021,14 @@ private slots:
         }
         settings.setValue("window/openTabs", QByteArray("[]"));
         settings.setValue("theme/mode", "dark");
-        const auto restore = qScopeGuard([&]() {
-            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
-                if (it.value().isValid())
+        const auto restore = qScopeGuard([&] {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it) {
+                if (it.value().isValid()) {
                     settings.setValue(it.key(), it.value());
-                else
+                } else {
                     settings.remove(it.key());
+                }
+            }
         });
         {
             MainWindow window;
@@ -3797,10 +4049,11 @@ private slots:
             }
             const auto original = window.findChildren<TerminalTab*>();
             QList<QPointer<TerminalTab>> tracked;
-            for (auto* tab : original)
+            for (auto* tab : original) {
                 tracked.append(tab);
+            }
             QVERIFY(QMetaObject::invokeMethod(&window, "toggleGridView"));
-            QTimer::singleShot(0, &window, [&]() {
+            QTimer::singleShot(0, &window, [&] {
                 auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
                 QCOMPARE(dialog->objectName(), QString("createPanelGroupDialog"));
@@ -3821,11 +4074,12 @@ private slots:
             QCOMPARE(window.findChildren<TerminalTab*>().size(), 3);
             QVERIFY(original[0]->isVisible() && original[1]->isVisible());
             QVERIFY(!original[2]->isVisible());
-            for (auto* tab : original)
+            for (auto* tab : original) {
                 QCOMPARE(tab->session().group, profile.group);
+            }
             const auto saved = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
             QCOMPARE(saved.value("Databases").toObject().value("tabs").toArray().size(), 2);
-            QTimer::singleShot(0, &window, []() {
+            QTimer::singleShot(0, &window, [] {
                 auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
                 QCOMPARE(dialog->findChild<QListWidget*>()->count(), 2);
@@ -3839,13 +4093,14 @@ private slots:
             QVERIFY(!synchronize->isChecked()); // Hidden groups must not receive synchronized typing.
             QVERIFY(original[2]->isVisible());
             QVERIFY(!original[0]->isVisible() && !original[1]->isVisible());
-            auto openSaved = [&]() {
+            auto openSaved = [&] {
                 auto* menu = window.findChild<QAction*>("openSavedPanelGroup")->menu();
-                for (auto* action : menu->actions())
+                for (auto* action : menu->actions()) {
                     if (action->text() == "Databases") {
                         action->trigger();
                         return true;
                     }
+                }
                 return false;
             };
             QVERIFY(openSaved());
@@ -3864,16 +4119,18 @@ private slots:
                          .size(),
                      3);
             TerminalTab* extra = nullptr;
-            for (auto* tab : window.findChildren<TerminalTab*>())
-                if (tab->session().name == "Database 4")
+            for (auto* tab : window.findChildren<TerminalTab*>()) {
+                if (tab->session().name == "Database 4") {
                     extra = tab;
+                }
+            }
             QVERIFY(extra);
             const QString owner = extra->property("panelGroupId").toString();
             auto moveToGroup = [&](int index) {
                 auto* source = qobject_cast<QTabWidget*>(extra->parentWidget()->parentWidget());
                 PaneTabMimeData payload(source, extra);
                 const QPoint point = groups->tabRect(index).center();
-                QDragEnterEvent enter(point, Qt::MoveAction, &payload, Qt::LeftButton, Qt::NoModifier);
+                QDragEnterEvent enter(QPointF(point), Qt::MoveAction, &payload, Qt::LeftButton, Qt::NoModifier);
                 QApplication::sendEvent(groups, &enter);
                 QDropEvent drop(QPointF(point), Qt::MoveAction, &payload, Qt::LeftButton, Qt::NoModifier);
                 QApplication::sendEvent(groups, &drop);
@@ -3886,12 +4143,14 @@ private slots:
             window.findChild<QTabWidget*>("ribbonTabs")->setCurrentIndex(1);
             QTest::qWait(100);
             const QString screenshot = qEnvironmentVariable("BANCHO_PANEL_GROUP_SCREENSHOT");
-            if (!screenshot.isEmpty())
+            if (!screenshot.isEmpty()) {
                 QVERIFY(window.grab().save(screenshot));
+            }
             groups->setCurrentIndex(0);
-            QTimer::singleShot(0, &window, []() {
-                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+            QTimer::singleShot(0, &window, [] {
+                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
                     box->done(QMessageBox::Yes);
+                }
             });
             QVERIFY(QMetaObject::invokeMethod(&window, "closePanelGroup", Q_ARG(int, 1)));
             QCOMPARE(groups->count(), 1);
@@ -3901,9 +4160,10 @@ private slots:
             QVERIFY(openSaved());
             QCOMPARE(groups->count(), 2);
             QCOMPARE(window.findChildren<TerminalTab*>().size(), 4);
-            QTimer::singleShot(0, &window, []() {
-                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget()))
+            QTimer::singleShot(0, &window, [] {
+                if (auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget())) {
                     box->done(QMessageBox::Yes);
+                }
             });
             QVERIFY(window.close());
         }
@@ -3917,27 +4177,31 @@ private slots:
         groups->setCurrentIndex(0);
         QCoreApplication::processEvents();
         int visible = 0;
-        for (auto* tab : restored.findChildren<TerminalTab*>())
-            visible += tab->isVisible();
+        for (auto* tab : restored.findChildren<TerminalTab*>()) {
+            visible += static_cast<int>(tab->isVisible());
+        }
         QCOMPARE(visible, 1);
     }
 
     void testGroupFromAllOpenTabs() {
         QSettings settings;
-        const QStringList keys = {"panels/groups", "window/panelWorkspaces", "window/openTabs", "window/paneTree",
-                                  "window/tabLayoutMode"};
+        const QStringList keys = {
+            "panels/groups", "window/panelWorkspaces", "window/openTabs", "window/paneTree", "window/tabLayoutMode",
+        };
         QMap<QString, QVariant> previous;
         for (const auto& key : keys) {
             previous[key] = settings.value(key);
             settings.remove(key);
         }
         settings.setValue("window/openTabs", QByteArray("[]"));
-        const auto restore = qScopeGuard([&]() {
-            for (auto it = previous.cbegin(); it != previous.cend(); ++it)
-                if (it.value().isValid())
+        const auto restore = qScopeGuard([&] {
+            for (auto it = previous.cbegin(); it != previous.cend(); ++it) {
+                if (it.value().isValid()) {
                     settings.setValue(it.key(), it.value());
-                else
+                } else {
                     settings.remove(it.key());
+                }
+            }
         });
         MainWindow window;
         window.show();
@@ -3953,7 +4217,7 @@ private slots:
             QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, profile)));
         }
         const auto original = window.findChildren<TerminalTab*>();
-        QTimer::singleShot(0, &window, []() {
+        QTimer::singleShot(0, &window, [] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             dialog->findChild<QLineEdit*>("newPanelGroupName")->setText("Home");
@@ -3966,9 +4230,10 @@ private slots:
         QCOMPARE(groups->tabText(0), QString("Home"));
         QVERIFY(groups->isVisible());
         QCOMPARE(window.findChildren<TerminalTab*>().size(), 2);
-        for (auto* tab : original)
+        for (auto* tab : original) {
             QVERIFY(window.findChildren<TerminalTab*>().contains(tab));
-        QTimer::singleShot(0, &window, []() {
+        }
+        QTimer::singleShot(0, &window, [] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             auto* list = dialog->findChild<QListWidget*>("panelGroupsList");
@@ -3982,7 +4247,7 @@ private slots:
         QCOMPARE(groups->tabText(0), QString("Casa"));
         auto saved = QJsonDocument::fromJson(settings.value("panels/groups").toByteArray()).object();
         QVERIFY(saved.contains("Casa") && !saved.contains("Home"));
-        QTimer::singleShot(0, &window, []() {
+        QTimer::singleShot(0, &window, [] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             dialog->findChild<QListWidget*>("panelGroupsList")->setCurrentRow(0);
@@ -4002,7 +4267,7 @@ private slots:
         settings.setValue("window/openTabs", QByteArray("[]"));
         settings.remove("window/paneTree");
         settings.setValue("window/tabLayoutMode", 0);
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             settings.setValue("window/openTabs", oldTabs);
             settings.setValue("window/paneTree", oldTree);
             settings.setValue("window/tabLayoutMode", oldMode);
@@ -4022,22 +4287,25 @@ private slots:
             QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
         }
         const auto tabs = window.findChildren<TerminalTab*>();
-        for (int i = 0; i < 3; ++i)
+        for (int i = 0; i < 3; ++i) {
             QVERIFY(QMetaObject::invokeMethod(&window, "splitPaneHorizontally"));
+        }
         QCoreApplication::processEvents();
         QTabWidget* empty = nullptr;
         QTabWidget* source = nullptr;
         QTabWidget* occupied = nullptr;
         auto* tab = tabs.first();
         for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
-            if (pane->isHidden())
+            if (pane->isHidden()) {
                 continue;
-            if (pane->count() == 0)
+            }
+            if (pane->count() == 0) {
                 empty = pane;
-            else if (pane->indexOf(tab) >= 0)
+            } else if (pane->indexOf(tab) >= 0) {
                 source = pane;
-            else
+            } else {
                 occupied = pane;
+            }
         }
         QVERIFY(empty && source && occupied);
         const QString tooltip = source->tabToolTip(source->indexOf(tab));
@@ -4047,10 +4315,11 @@ private slots:
             QMimeData transport;
             transport.setData("application/x-banchoxterm-pane-tab", payload.data("application/x-banchoxterm-pane-tab"));
             const QPoint point = target->rect().center();
-            QDragEnterEvent enter(point, Qt::MoveAction, &transport, Qt::LeftButton, Qt::NoModifier);
+            QDragEnterEvent enter(QPointF(point), Qt::MoveAction, &transport, Qt::LeftButton, Qt::NoModifier);
             QApplication::sendEvent(target, &enter);
-            if (!enter.isAccepted())
+            if (!enter.isAccepted()) {
                 return false;
+            }
             QDropEvent event(QPointF(point), Qt::MoveAction, &transport, Qt::LeftButton, Qt::NoModifier);
             QApplication::sendEvent(target, &event);
             return event.isAccepted() && event.dropAction() == Qt::MoveAction;
@@ -4069,7 +4338,7 @@ private slots:
         // A foreign MIME payload cannot impersonate one of our in-process tabs.
         QMimeData foreign;
         foreign.setData("application/x-banchoxterm-pane-tab", "1");
-        QDragEnterEvent invalid(QPoint(10, 10), Qt::MoveAction, &foreign, Qt::LeftButton, Qt::NoModifier);
+        QDragEnterEvent invalid(QPointF(10, 10), Qt::MoveAction, &foreign, Qt::LeftButton, Qt::NoModifier);
         QApplication::sendEvent(empty, &invalid);
         QVERIFY(!invalid.isAccepted());
         QVERIFY(QMetaObject::invokeMethod(&window, "detachCurrentTab"));
@@ -4078,13 +4347,15 @@ private slots:
         single->trigger();
         QCoreApplication::processEvents();
         int visible = 0;
-        for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs"))
+        for (auto* pane : window.findChildren<QTabWidget*>("terminalTabs")) {
             if (!pane->isHidden()) {
                 ++visible;
                 QCOMPARE(pane->count(), 3);
-                for (auto* original : tabs)
+                for (auto* original : tabs) {
                     QVERIFY(pane->indexOf(original) >= 0);
+                }
             }
+        }
         QCOMPARE(visible, 1);
         QCOMPARE(window.findChildren<TerminalTab*>().size(), 3);
     }
@@ -4093,7 +4364,7 @@ private slots:
         QSettings settings;
         const auto oldTabs = settings.value("window/openTabs");
         settings.setValue("window/openTabs", QByteArray("[]"));
-        const auto restore = qScopeGuard([&]() { settings.setValue("window/openTabs", oldTabs); });
+        const auto restore = qScopeGuard([&] { settings.setValue("window/openTabs", oldTabs); });
         MainWindow window;
         window.show();
         QList<TerminalTab*> tabs;
@@ -4108,26 +4379,30 @@ private slots:
             session.shellPath = "/bin/sh";
 #endif
             QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
-            for (auto* tab : window.findChildren<TerminalTab*>())
-                if (!tabs.contains(tab))
+            for (auto* tab : window.findChildren<TerminalTab*>()) {
+                if (!tabs.contains(tab)) {
                     tabs.append(tab);
+                }
+            }
         }
         QTest::qWait(200);
         auto* sync = window.findChild<QAction*>("synchronizePanels");
         auto* choose = window.findChild<QAction*>("chooseSynchronizationTargets");
         QVERIFY(sync && choose);
         auto select = [&](int other, bool accept) {
-            QTimer::singleShot(0, &window, [&, other, accept]() {
+            QTimer::singleShot(0, &window, [&, other, accept] {
                 auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
                 QVERIFY(dialog);
                 auto* list = dialog->findChild<QListWidget*>();
                 QCOMPARE(list->count(), 3); // Read-only sessions are excluded.
-                for (int i = 0; i < list->count(); ++i)
+                for (int i = 0; i < list->count(); ++i) {
                     list->item(i)->setCheckState(i == 0 || i == other ? Qt::Checked : Qt::Unchecked);
-                if (accept)
+                }
+                if (accept) {
                     dialog->accept();
-                else
+                } else {
                     dialog->reject();
+                }
             });
         };
         select(1, true);
@@ -4140,10 +4415,11 @@ private slots:
             connect(session->emulation(), &Konsole::Emulation::sendData, &window,
                     [&, i](const char* data, int size) { writes[i].append(data, size); });
         }
-        const auto disconnectWrites = qScopeGuard([&]() {
-            for (auto* tab : tabs)
+        const auto disconnectWrites = qScopeGuard([&] {
+            for (auto* tab : tabs) {
                 disconnect(tab->getTerminalWidget()->findChild<Konsole::Session*>()->emulation(), nullptr, &window,
                            nullptr);
+            }
         });
         auto hasBadge = [](TerminalTab* tab) {
             auto* pane = qobject_cast<QTabWidget*>(tab->parentWidget()->parentWidget());
@@ -4182,18 +4458,21 @@ private slots:
         QCoreApplication::processEvents();
         QVERIFY(hasBadge(tabs[0]) && hasBadge(tabs[2]));
         QVERIFY(!hasBadge(tabs[1]));
-        for (auto& write : writes)
+        for (auto& write : writes) {
             write.clear();
+        }
         QTest::keyClicks(display, "z");
         QCOMPARE(writes[0], QByteArray("z"));
         QVERIFY(writes[1].isEmpty());
         QCOMPARE(writes[2], QByteArray("z"));
         QVERIFY(writes[3].isEmpty());
         sync->trigger();
-        for (auto* tab : tabs)
+        for (auto* tab : tabs) {
             QVERIFY(!hasBadge(tab));
-        for (auto& write : writes)
+        }
+        for (auto& write : writes) {
             write.clear();
+        }
         QTest::keyClicks(display, "q");
         QCOMPARE(writes[0], QByteArray("q"));
         QVERIFY(writes[1].isEmpty() && writes[2].isEmpty() && writes[3].isEmpty());
@@ -4208,7 +4487,7 @@ private slots:
         QSettings settings;
         const auto oldTabs = settings.value("window/openTabs");
         settings.setValue("window/openTabs", QByteArray("[]"));
-        const auto restore = qScopeGuard([&]() { settings.setValue("window/openTabs", oldTabs); });
+        const auto restore = qScopeGuard([&] { settings.setValue("window/openTabs", oldTabs); });
         MainWindow window;
         window.show();
         QList<TerminalTab*> tabs;
@@ -4218,20 +4497,23 @@ private slots:
             session.name = QString("Sync %1").arg(i);
             session.shellPath = "/bin/sh";
             QVERIFY(QMetaObject::invokeMethod(&window, "onConnectSession", Q_ARG(Session, session)));
-            for (auto* tab : window.findChildren<TerminalTab*>())
-                if (!tabs.contains(tab))
+            for (auto* tab : window.findChildren<TerminalTab*>()) {
+                if (!tabs.contains(tab)) {
                     tabs.append(tab);
+                }
+            }
         }
         QTRY_VERIFY(tabs[0]->isSessionActive() && tabs[1]->isSessionActive() && tabs[2]->isSessionActive());
         auto* sync = window.findChild<QAction*>("synchronizePanels");
         QVERIFY(sync);
-        QTimer::singleShot(0, &window, [&]() {
+        QTimer::singleShot(0, &window, [&] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             auto* list = dialog->findChild<QListWidget*>();
             QCOMPARE(list->count(), 3);
-            for (int i = 0; i < list->count(); ++i)
+            for (int i = 0; i < list->count(); ++i) {
                 list->item(i)->setCheckState(i < 2 ? Qt::Checked : Qt::Unchecked);
+            }
             dialog->accept();
         });
         sync->trigger();
@@ -4245,7 +4527,7 @@ private slots:
         const QString command = QString("printf x >> '%1'").arg(path);
         QTest::keyClicks(display, command);
         QTest::keyClick(display, Qt::Key_Return);
-        auto contents = [&]() {
+        auto contents = [&] {
             QFile file(path);
             return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
         };
@@ -4303,11 +4585,12 @@ private slots:
         QVERIFY(welcome->findChild<QPushButton*>(QStringLiteral("welcomeLinkButton")) != nullptr);
 
         const QString screenshotPath = qEnvironmentVariable("BANCHO_WELCOME_SCREENSHOT");
-        if (!screenshotPath.isEmpty())
+        if (!screenshotPath.isEmpty()) {
             QVERIFY(window.grab().save(screenshotPath));
+        }
 
         auto* local = welcome->findChild<QPushButton*>("welcomeSecondaryButton");
-        auto verifyHitTarget = [&]() {
+        auto verifyHitTarget = [&] {
             QWidget* hit = QApplication::widgetAt(local->mapToGlobal(local->rect().center()));
             return hit == local || (hit && local->isAncestorOf(hit));
         };
@@ -4329,7 +4612,7 @@ private slots:
         const auto originalSessions = SessionManager::loadSessions();
         QSettings settings;
         const QVariant oldRecent = settings.value("sessions/recent");
-        const auto restore = qScopeGuard([&]() {
+        const auto restore = qScopeGuard([&] {
             SessionManager::saveSessions(originalSessions);
             settings.setValue("sessions/recent", oldRecent);
         });
@@ -4356,10 +4639,10 @@ private slots:
         QVERIFY(welcome);
         auto* viewAll = welcome->findChild<QPushButton*>("welcomeLinkButton");
         QVERIFY(viewAll);
-        QTimer::singleShot(0, &window, [&]() {
+        QTimer::singleShot(0, &window, [&] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
-            const auto close = qScopeGuard([&]() { dialog->reject(); });
+            const auto close = qScopeGuard([&] { dialog->reject(); });
             QCOMPARE(dialog->objectName(), QString("allSessionsDialog"));
             auto* manager = dialog->findChild<SessionsSidebar*>();
             QVERIFY(manager);
@@ -4373,10 +4656,10 @@ private slots:
         viewAll->click();
         auto* sidebarTree = sidebar->findChild<QTreeWidget*>("sessionTree");
         QCOMPARE(sidebarTree->findItems(added.name, Qt::MatchExactly | Qt::MatchRecursive).size(), 1);
-        QTimer::singleShot(0, &window, [&]() {
+        QTimer::singleShot(0, &window, [&] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
             QVERIFY(dialog);
-            auto close = qScopeGuard([&]() { dialog->reject(); });
+            auto close = qScopeGuard([&] { dialog->reject(); });
             auto* manager = dialog->findChild<SessionsSidebar*>();
             auto* tree = manager->findChild<QTreeWidget*>("sessionTree");
             const auto matches = tree->findItems(other.name, Qt::MatchExactly);
@@ -4474,11 +4757,14 @@ private slots:
         QTimer credentials;
         connect(&credentials, &QTimer::timeout, this, [] {
             auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
-            if (!dialog || dialog->windowTitle() != QStringLiteral("RDP credentials"))
+            if (!dialog || dialog->windowTitle() != QStringLiteral("RDP credentials")) {
                 return;
-            for (auto* edit : dialog->findChildren<QLineEdit*>())
-                if (edit->echoMode() == QLineEdit::Password)
+            }
+            for (auto* edit : dialog->findChildren<QLineEdit*>()) {
+                if (edit->echoMode() == QLineEdit::Password) {
                     edit->setText(QStringLiteral("test-password"));
+                }
+            }
             dialog->accept();
         });
         credentials.start(10);
@@ -4560,10 +4846,10 @@ private slots:
         QString utf8Text = QString::fromUtf8(data);
         utf8Text.remove(QChar(0xfeff));
         for (const QChar c : utf8Text) {
-            utf16.append(char(c.unicode() & 0xff));
-            utf16.append(char(c.unicode() >> 8));
+            utf16.append(static_cast<char>(c.unicode() & 0xff));
+            utf16.append(static_cast<char>(c.unicode() >> 8));
         }
-        for (const auto& exportBytes : {data, utf16})
+        for (const auto& exportBytes : {data, utf16}) {
             for (const QString& suffix : {QString("mxtsessions"), QString("ini")}) {
                 const auto path = dir.filePath("MobaXterm." + suffix);
                 QFile file(path);
@@ -4594,20 +4880,23 @@ private slots:
                     ids.insert(session.id);
                 }
             }
+        }
     }
 
     void testHighlightRulesAndRenderedOutput() {
         const auto oldEnabled = QSettings().value("terminal/highlightingEnabled");
         const auto oldRules = QSettings().value("terminal/highlightRules");
         const auto restore = qScopeGuard([&] {
-            if (oldEnabled.isValid())
+            if (oldEnabled.isValid()) {
                 QSettings().setValue("terminal/highlightingEnabled", oldEnabled);
-            else
+            } else {
                 QSettings().remove("terminal/highlightingEnabled");
-            if (oldRules.isValid())
+            }
+            if (oldRules.isValid()) {
                 QSettings().setValue("terminal/highlightRules", oldRules);
-            else
+            } else {
                 QSettings().remove("terminal/highlightRules");
+            }
         });
         QJsonArray rules{QJsonObject{{"pattern", "error"}, {"color", "#ff0000"}}};
         QVERIFY(TerminalHighlighting::validate(rules).isEmpty());
@@ -4656,10 +4945,11 @@ private slots:
     void testPasteReviewCancelEditAndBracketedPaste() {
         const auto old = QSettings().value("terminal/reviewMultilinePaste");
         const auto restore = qScopeGuard([&] {
-            if (old.isValid())
+            if (old.isValid()) {
                 QSettings().setValue("terminal/reviewMultilinePaste", old);
-            else
+            } else {
                 QSettings().remove("terminal/reviewMultilinePaste");
+            }
         });
         QSettings().setValue("terminal/reviewMultilinePaste", true);
         Session profile;
@@ -4675,8 +4965,9 @@ private slots:
         QByteArray writes;
         QStringList pastes;
         connect(&tab, &TerminalTab::userKeyInput, &tab, [&](QKeyEvent* event, bool fromPaste) {
-            if (fromPaste)
+            if (fromPaste) {
                 pastes.append(event->text());
+            }
         });
         connect(emulation, &Konsole::Emulation::sendData, &tab,
                 [&](const char* data, int size) { writes.append(data, size); });
@@ -4734,14 +5025,16 @@ private slots:
         const auto oldEnabled = QSettings().value("terminal/highlightingEnabled");
         const auto oldRules = QSettings().value("terminal/highlightRules");
         const auto restore = qScopeGuard([&] {
-            if (oldEnabled.isValid())
+            if (oldEnabled.isValid()) {
                 QSettings().setValue("terminal/highlightingEnabled", oldEnabled);
-            else
+            } else {
                 QSettings().remove("terminal/highlightingEnabled");
-            if (oldRules.isValid())
+            }
+            if (oldRules.isValid()) {
                 QSettings().setValue("terminal/highlightRules", oldRules);
-            else
+            } else {
                 QSettings().remove("terminal/highlightRules");
+            }
         });
         QSettings().setValue("terminal/highlightingEnabled", false);
         QSettings().setValue("terminal/highlightRules", QJsonDocument(TerminalHighlighting::defaults()).toJson());
@@ -4757,9 +5050,11 @@ private slots:
         QVERIFY(table);
         table->item(0, 1)->setText("CUSTOM_ERROR");
         auto* tabs = dialog.findChild<QTabWidget*>();
-        for (int i = 0; i < tabs->count(); ++i)
-            if (tabs->widget(i)->isAncestorOf(table))
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (tabs->widget(i)->isAncestorOf(table)) {
                 tabs->setCurrentIndex(i);
+            }
+        }
         dialog.show();
         QTest::qWait(20);
         dialog.grab().save("/tmp/banchoxterm-highlight-settings-test.png");
@@ -4886,8 +5181,9 @@ private slots:
 
     void testKeyringRoundtrip() {
 #ifndef Q_OS_WIN
-        if (QStandardPaths::findExecutable(QStringLiteral("secret-tool")).isEmpty())
+        if (QStandardPaths::findExecutable(QStringLiteral("secret-tool")).isEmpty()) {
             QSKIP("secret-tool is not available in this environment");
+        }
 #endif
         const QString id = QStringLiteral("test-keyring-%1").arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
         const QString password = QStringLiteral("p ässword with spaces");
@@ -5046,10 +5342,11 @@ private slots:
         const bool hadVersion = qEnvironmentVariableIsSet("TERM_PROGRAM_VERSION");
         const QByteArray previousVersion = qgetenv("TERM_PROGRAM_VERSION");
         const auto restore = qScopeGuard([&] {
-            if (hadVersion)
+            if (hadVersion) {
                 qputenv("TERM_PROGRAM_VERSION", previousVersion);
-            else
+            } else {
                 qunsetenv("TERM_PROGRAM_VERSION");
+            }
         });
         qputenv("TERM_PROGRAM_VERSION", "51.0");
         Session profile;
@@ -5158,13 +5455,16 @@ private slots:
         QSettings settings;
         const QVariant oldOpacity = settings.value("terminal/backgroundOpacity");
         const QVariant oldBlur = settings.value("terminal/backgroundBlur");
-        const auto restore = qScopeGuard([&]() {
-            for (const auto& pair : {qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
-                                     qMakePair(QString("terminal/backgroundBlur"), oldBlur)}) {
-                if (pair.second.isValid())
+        const auto restore = qScopeGuard([&] {
+            for (const auto& pair : {
+                     qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
+                     qMakePair(QString("terminal/backgroundBlur"), oldBlur),
+                 }) {
+                if (pair.second.isValid()) {
                     settings.setValue(pair.first, pair.second);
-                else
+                } else {
                     settings.remove(pair.first);
+                }
             }
         });
         settings.setValue("terminal/backgroundOpacity", 100);
@@ -5196,13 +5496,16 @@ private slots:
         QSettings settings;
         const QVariant oldEnabled = settings.value("ssh/monitoringEnabled");
         const QVariant oldInterval = settings.value("ssh/monitoringIntervalSeconds");
-        const auto restore = qScopeGuard([&]() {
-            for (const auto& entry : {qMakePair(QString("ssh/monitoringEnabled"), oldEnabled),
-                                      qMakePair(QString("ssh/monitoringIntervalSeconds"), oldInterval)}) {
-                if (entry.second.isValid())
+        const auto restore = qScopeGuard([&] {
+            for (const auto& entry : {
+                     qMakePair(QString("ssh/monitoringEnabled"), oldEnabled),
+                     qMakePair(QString("ssh/monitoringIntervalSeconds"), oldInterval),
+                 }) {
+                if (entry.second.isValid()) {
                     settings.setValue(entry.first, entry.second);
-                else
+                } else {
                     settings.remove(entry.first);
+                }
             }
         });
         settings.remove("ssh/monitoringEnabled");
@@ -5250,24 +5553,30 @@ private slots:
     }
 
     void testLinuxTerminalBlurToggle() {
-        if (QApplication::platformName() != "wayland" && QApplication::platformName() != "xcb")
+        if (QApplication::platformName() != "wayland" && QApplication::platformName() != "xcb") {
             QSKIP("Requires a Linux compositor with blur support.");
+        }
         QElapsedTimer timer;
         timer.start();
-        while (!TerminalAppearance::blurSupported() && timer.elapsed() < 1000)
+        while (!TerminalAppearance::blurSupported() && timer.elapsed() < 1000) {
             QTest::qWait(10);
-        if (!TerminalAppearance::blurSupported())
+        }
+        if (!TerminalAppearance::blurSupported()) {
             QSKIP("Requires a Linux compositor with blur support.");
+        }
         QSettings settings;
         const QVariant oldOpacity = settings.value("terminal/backgroundOpacity");
         const QVariant oldBlur = settings.value("terminal/backgroundBlur");
-        const auto restore = qScopeGuard([&]() {
-            for (const auto& pair : {qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
-                                     qMakePair(QString("terminal/backgroundBlur"), oldBlur)}) {
-                if (pair.second.isValid())
+        const auto restore = qScopeGuard([&] {
+            for (const auto& pair : {
+                     qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
+                     qMakePair(QString("terminal/backgroundBlur"), oldBlur),
+                 }) {
+                if (pair.second.isValid()) {
                     settings.setValue(pair.first, pair.second);
-                else
+                } else {
                     settings.remove(pair.first);
+                }
             }
         });
         settings.setValue("terminal/backgroundOpacity", 50);
@@ -5410,18 +5719,22 @@ private slots:
     }
 
     void testNativeTerminalBlur() {
-        if (QApplication::platformName() != "windows" || !TerminalAppearance::blurSupported())
+        if (QApplication::platformName() != "windows" || !TerminalAppearance::blurSupported()) {
             QSKIP("Requires a visible Windows 11 desktop compositor.");
+        }
         QSettings settings;
         const QVariant oldOpacity = settings.value("terminal/backgroundOpacity");
         const QVariant oldBlur = settings.value("terminal/backgroundBlur");
-        const auto restore = qScopeGuard([&]() {
-            for (const auto& pair : {qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
-                                     qMakePair(QString("terminal/backgroundBlur"), oldBlur)}) {
-                if (pair.second.isValid())
+        const auto restore = qScopeGuard([&] {
+            for (const auto& pair : {
+                     qMakePair(QString("terminal/backgroundOpacity"), oldOpacity),
+                     qMakePair(QString("terminal/backgroundBlur"), oldBlur),
+                 }) {
+                if (pair.second.isValid()) {
                     settings.setValue(pair.first, pair.second);
-                else
+                } else {
                     settings.remove(pair.first);
+                }
             }
         });
         settings.setValue("terminal/backgroundOpacity", 50);
@@ -5463,7 +5776,7 @@ private slots:
         QVERIFY(outer.bottom - outer.top > client.bottom - client.top);
 #endif
         foreground.resize(700, 500);
-        auto capture = [&]() {
+        auto capture = [&] {
             QTest::qWait(600);
             const QPoint position = terminal->mapToGlobal(QPoint(100, 100));
             return foreground.screen()->grabWindow(0, position.x(), position.y(), 120, 120).toImage();
@@ -5477,7 +5790,7 @@ private slots:
         blurred.save("build/terminal-blur.png");
         QVERIFY(!clear.isNull() && !blurred.isNull());
         QVERIFY(clear != blurred);
-        auto caption = [&]() {
+        auto caption = [&] {
             QTest::qWait(300);
             const QPoint position = foreground.mapToGlobal(QPoint(150, -16));
             return foreground.screen()->grabWindow(0, position.x(), position.y(), 120, 6).toImage();
@@ -5487,15 +5800,18 @@ private slots:
             auto linear = [](double value) {
                 return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
             };
-            return 0.2126 * linear(color.redF()) + 0.7152 * linear(color.greenF()) + 0.0722 * linear(color.blueF());
+            return (0.2126 * linear(color.redF())) + (0.7152 * linear(color.greenF())) +
+                   (0.0722 * linear(color.blueF()));
         };
-        double darkest = 1.0, lightest = 0.0;
-        for (int y = 0; y < titleBefore.height(); ++y)
+        double darkest = 1.0;
+        double lightest = 0.0;
+        for (int y = 0; y < titleBefore.height(); ++y) {
             for (int x = 0; x < titleBefore.width(); ++x) {
                 const double value = luminance(titleBefore.pixelColor(x, y));
                 darkest = qMin(darkest, value);
                 lightest = qMax(lightest, value);
             }
+        }
         QVERIFY2((lightest + 0.05) / (darkest + 0.05) >= 4.5,
                  "Native title text must contrast with its opaque caption background.");
 
@@ -5518,11 +5834,12 @@ private slots:
     void testDetachedWindowKeepsItsOwnOpacity() {
         QSettings settings;
         const auto oldOpacity = settings.value("terminal/backgroundOpacity");
-        const auto restore = qScopeGuard([&]() {
-            if (oldOpacity.isValid())
+        const auto restore = qScopeGuard([&] {
+            if (oldOpacity.isValid()) {
                 settings.setValue("terminal/backgroundOpacity", oldOpacity);
-            else
+            } else {
                 settings.remove("terminal/backgroundOpacity");
+            }
         });
         settings.setValue("terminal/backgroundOpacity", 100);
         QMainWindow owner;
@@ -5567,11 +5884,12 @@ private slots:
     void testTerminalTransparency() {
         QSettings settings;
         const QVariant previous = settings.value("terminal/backgroundOpacity");
-        const auto restore = qScopeGuard([&]() {
-            if (previous.isValid())
+        const auto restore = qScopeGuard([&] {
+            if (previous.isValid()) {
                 settings.setValue("terminal/backgroundOpacity", previous);
-            else
+            } else {
                 settings.remove("terminal/backgroundOpacity");
+            }
         });
         settings.setValue("terminal/backgroundOpacity", 50);
         QMainWindow window;
@@ -5598,15 +5916,19 @@ private slots:
         QTest::qWait(50);
         const QImage image = window.grab().toImage();
         const QPoint origin = terminal->mapTo(&window, QPoint());
-        int translucentBackground = 0, opaqueText = 0;
-        for (int y = origin.y(); y < origin.y() + 40; ++y)
+        int translucentBackground = 0;
+        int opaqueText = 0;
+        for (int y = origin.y(); y < origin.y() + 40; ++y) {
             for (int x = origin.x(); x < origin.x() + 180; ++x) {
                 const QColor pixel = image.pixelColor(x, y);
-                if (pixel.alpha() > 0 && pixel.alpha() < 255)
+                if (pixel.alpha() > 0 && pixel.alpha() < 255) {
                     ++translucentBackground;
-                if (pixel.alpha() == 255 && pixel.red() > 200)
+                }
+                if (pixel.alpha() == 255 && pixel.red() > 200) {
                     ++opaqueText;
+                }
             }
+        }
         QVERIFY(translucentBackground > 100);
         QVERIFY(opaqueText > 0);
         // Full redraws from ConPTY and terminal programs use explicit cell
@@ -5639,11 +5961,12 @@ private slots:
             const QImage reset = render(QByteArrayLiteral("\x1b[2;22m"));
             auto brightness = [](const QImage& image) {
                 qint64 sum = 0;
-                for (int y = 0; y < image.height(); ++y)
+                for (int y = 0; y < image.height(); ++y) {
                     for (int x = 0; x < image.width(); ++x) {
                         const QColor pixel = image.pixelColor(x, y);
                         sum += pixel.red() + pixel.green() + pixel.blue();
                     }
+                }
                 return sum;
             };
             QVERIFY(brightness(dim) < brightness(normal));
@@ -5669,10 +5992,13 @@ private slots:
             QTest::qWait(50);
             const QImage image = terminal.grab().toImage();
             int matchingPixels = 0;
-            for (int y = 0; y < image.height(); ++y)
-                for (int x = 0; x < image.width(); ++x)
-                    if (image.pixelColor(x, y) == QColor(12, 34, 56))
+            for (int y = 0; y < image.height(); ++y) {
+                for (int x = 0; x < image.width(); ++x) {
+                    if (image.pixelColor(x, y) == QColor(12, 34, 56)) {
                         ++matchingPixels;
+                    }
+                }
+            }
             QVERIFY2(matchingPixels > 100, parameters.constData());
         }
     }
@@ -5808,8 +6134,10 @@ private slots:
                 QCOMPARE(data.takeFirst(), QByteArray("\x1b[1;2") + suffix);
             }
             for (int key : {Qt::Key_Return, Qt::Key_Enter}) {
-                for (auto modifiers : {Qt::KeyboardModifiers(Qt::ShiftModifier),
-                                       Qt::KeyboardModifiers(Qt::ShiftModifier | Qt::KeypadModifier)}) {
+                for (auto modifiers : {
+                         Qt::KeyboardModifiers(Qt::ShiftModifier),
+                         Qt::KeyboardModifiers(Qt::ShiftModifier | Qt::KeypadModifier),
+                     }) {
                     QKeyEvent shifted(QEvent::KeyPress, key, modifiers, QStringLiteral("\r"));
                     terminal.sendKeyEvent(&shifted);
                     QCOMPARE(data.takeFirst(), shiftedEnter);

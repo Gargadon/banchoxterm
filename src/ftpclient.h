@@ -1,4 +1,5 @@
 #pragma once
+#include "uploadfolderentries.h"
 #include "transferconflict.h"
 #include <QObject>
 #include <QList>
@@ -30,6 +31,7 @@ signals:
     void connectionFailed(const QString& error);
     void directoryListed(const QString& path, const QList<SftpFile>& files);
     void operationFinished(bool success, const QString& message);
+    void fileTransferred(const QString& localPath);
     void transferProgress(const QString& fileName, qint64 bytesDone, qint64 totalBytes);
 
 public slots:
@@ -41,6 +43,8 @@ public slots:
     void downloadFile(const QString& remotePath, const QString& localPath);
     void uploadFile(const QString& localPath, const QString& remotePath);
     void uploadDirectory(const QString& localPath, const QString& remoteBasePath);
+    void uploadPreparedDirectory(const QString& localPath, const QString& remoteBasePath,
+                                 const std::shared_ptr<const UploadFolderPlan>& plan);
     void cancelTransfer();
     void pauseTransfer();
     void resumeTransfer();
@@ -58,14 +62,26 @@ private:
     void sendCommand(const QString& cmd, std::function<void(const Reply&)> handler);
     void expectReply(std::function<void(const Reply&)> handler);
     void expectTransferReply(std::function<void(const Reply&)> handler);
-    void openDataConnection(std::function<void(QTcpSocket*)> onConnected);
+    void openDataConnection(std::function<void(QTcpSocket*)> onConnected,
+                            std::function<void(const QString&)> onError = {});
+    void readDirectory(const QString& path, bool strict,
+                       std::function<void(const QList<SftpFile>&, const QString&)> done);
+    void processDeletion();
+    void finishDeletion(bool success, const QString& message);
     void processDirectoryUpload();
     void reportUploadResult(bool success, const QString& message);
     void pumpDownload();
     void pumpUpload();
     void scheduleReconnect();
     bool configureTlsSocket(QSslSocket* socket, QString* error = nullptr) const;
-    static QList<SftpFile> parseListing(const QByteArray& data);
+    static QList<SftpFile> parseListing(const QByteArray& data, bool* recognized = nullptr);
+
+    struct DeleteEntry {
+        QString path;
+        bool directory;
+        bool visited = false;
+    };
+    QList<DeleteEntry> m_deleteEntries;
 
     QTcpSocket* m_control = nullptr;
     QByteArray m_replyBuffer;
@@ -94,6 +110,7 @@ private:
     QString m_activeDownloadName;
     QString m_activeUploadName;
     qint64 m_activeDownloadReceived = 0;
+    bool m_downloadWriteFailed = false;
     QStringList m_directoryUploadDirs;
     QList<QPair<QString, QString>> m_directoryUploadFiles;
 };
